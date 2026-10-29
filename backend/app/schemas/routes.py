@@ -60,9 +60,13 @@ class RouteSummary(BaseModel):
     average_slope_deg: float = Field(..., description="Mean slope across all traversed cells")
     average_roughness: float = Field(..., description="Mean normalized roughness across route")
     data_coverage_fraction: float = Field(..., description="Proportion of route passing through valid numeric data [0-1]")
-    estimated_duration_hours: float = Field(..., description="Estimated traversal time assuming 0.15 m/s rover speed")
+    estimated_duration_hours: float = Field(..., description="Estimated traversal time assuming rover motion profile")
+    motion_profile: str = Field(
+        default="rover_slope_derated_0.15mps",
+        description="Physical velocity profile: nominal 0.15 m/s with slope-dependent speed derating",
+    )
     energy_index: float = Field(..., description="Relative energy consumption score factoring distance and slopes")
-    science_score: float = Field(..., description="Science acquisition score based on proximity to high-value targets")
+    science_score: float = Field(..., description="Science acquisition score based on visited targets and proximity")
 
 
 class GeoJSONGeometry(BaseModel):
@@ -85,11 +89,19 @@ class RouteAlternative(BaseModel):
     total_cost: float
     cost_breakdown: Dict[str, float] = Field(
         ...,
-        description="Breakdown of cost components: distance_base, slope_penalty, roughness_penalty, hazard_penalty",
+        description="Breakdown of cost components: base_distance_cost, slope_penalty, roughness_penalty, hazard_penalty, extra_penalty",
     )
     summary: RouteSummary
     geometry: GeoJSONGeometry
     waypoints_visited: List[MarsCoordinate] = Field(default_factory=list)
+    science_targets_visited: List[str] = Field(
+        default_factory=list,
+        description="IDs of science targets directly visited by the route path",
+    )
+    science_targets_nearby: List[str] = Field(
+        default_factory=list,
+        description="IDs of science targets within sensor observation range (<500m)",
+    )
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -97,8 +109,8 @@ class ComputationStats(BaseModel):
     """Performance telemetry from graph-search execution."""
 
     algorithm_used: str = Field(..., description="A* or Dijkstra")
-    search_duration_seconds: float = Field(..., description="Wall-clock time spent in route computation")
-    nodes_expanded: int = Field(..., description="Count of grid states popped from priority queue")
+    search_duration_seconds: float = Field(..., description="Actual wall-clock time spent in route computation")
+    nodes_expanded: int = Field(..., description="Real count of grid states popped from priority queue during search")
     grid_rows: int = Field(..., description="Row count of cropped local terrain window")
     grid_cols: int = Field(..., description="Column count of cropped local terrain window")
     cell_size_meters: float = Field(..., description="Physical cell width/height in meters")
