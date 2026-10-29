@@ -397,6 +397,10 @@ class RouteService:
                 limitations.append(
                     "Operating on deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not loaded."
                 )
+        elif provenance.get("real_data_validation_status") == "valid_numeric_raster_unverified_source":
+            limitations.append(
+                "Operating on local numeric terrain raster. Official NASA/ESA/USGS provenance is unverified."
+            )
 
         mission_id = f"mission_{uuid.uuid4().hex[:12]}"
 

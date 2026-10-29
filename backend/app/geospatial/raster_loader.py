@@ -1,6 +1,6 @@
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -50,6 +50,7 @@ class RasterMetadata:
     affine_transform: tuple[float, float, float, float, float, float]
     nodata_value: float | None
     vertical_datum: str = "Unknown / Unspecified"
+    metadata_tags: dict[str, str] = field(default_factory=dict)
     is_synthetic: bool = False
 
 
@@ -136,6 +137,7 @@ def load_raster_file(file_path: str) -> RasterData:
         max_lat = float(loaded["max_lat"])
         nodata_val = float(loaded.get("nodata", -9999.0))
         vert_datum = str(loaded.get("vertical_datum", "Unknown / Unspecified"))
+        tags = {str(k): str(v) for k, v in loaded.items() if k not in ("elevation", "data")}
 
         d_lon = (max_lon - min_lon) / data.shape[1]
         d_lat = (max_lat - min_lat) / data.shape[0]
@@ -160,6 +162,7 @@ def load_raster_file(file_path: str) -> RasterData:
             affine_transform=(d_lon, 0.0, min_lon, 0.0, -d_lat, max_lat),
             nodata_value=nodata_val,
             vertical_datum=vert_datum,
+            metadata_tags=tags,
             is_synthetic=False,
         )
         return RasterData(data, meta)
@@ -256,6 +259,7 @@ def load_raster_file(file_path: str) -> RasterData:
                         ),
                         nodata_value=src.nodata,
                         vertical_datum=vert_datum,
+                        metadata_tags=dict(tags),
                         is_synthetic=False,
                     )
                     return RasterData(data, meta)
@@ -299,6 +303,7 @@ def load_raster_file(file_path: str) -> RasterData:
                         ),
                         nodata_value=src.nodata,
                         vertical_datum=vert_datum,
+                        metadata_tags=dict(tags),
                         is_synthetic=False,
                     )
                     return RasterData(data, meta)

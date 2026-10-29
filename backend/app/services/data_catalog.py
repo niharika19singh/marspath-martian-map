@@ -134,6 +134,7 @@ class DataCatalogService:
 
         provenance = self.provider.get_provenance()
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
+        val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 
         limitations = [
             "Regional DEM does not detect sub-meter boulders or fine wheel-entrapment sand ripples.",
@@ -148,10 +149,13 @@ class DataCatalogService:
                 limitations.append(
                     "Operating in development mode with deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not loaded."
                 )
+        elif val_status == "valid_numeric_raster_unverified_source":
+            limitations.extend(provenance.get("provenance_limitations", []))
 
         return DataStatusResponse(
             status="healthy",
             data_mode=active_mode,
+            real_data_validation_status=val_status,
             is_synthetic=is_syn,
             active_pilot_region="Jezero Crater, Mars",
             pilot_bounds=bounds,

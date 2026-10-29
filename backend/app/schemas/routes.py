@@ -162,6 +162,10 @@ class DataStatusResponse(BaseModel):
 
     status: str
     data_mode: str
+    real_data_validation_status: str = Field(
+        default="synthetic_test_fixture",
+        description="synthetic_test_fixture, valid_numeric_raster_unverified_source, verified_source, or incomplete_missing_genuine_dem",
+    )
     is_synthetic: bool
     active_pilot_region: str
     pilot_bounds: BoundingBox

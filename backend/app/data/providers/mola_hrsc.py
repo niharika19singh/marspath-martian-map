@@ -1,9 +1,13 @@
+import hashlib
 import logging
 import os
 from typing import Any
 
+import numpy as np
+
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import TerrainDataUnavailableError
+from backend.app.data.manifest import verify_manifest_provenance
 from backend.app.data.providers.base import BaseRasterProvider
 from backend.app.data.providers.synthetic import SyntheticTerrainProvider
 from backend.app.geospatial.crs import get_mars_crs_info
@@ -134,34 +138,132 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
     def get_provenance(self) -> dict[str, Any]:
         raster = self.get_dem_raster()
         if self.use_real_dem and not self._fallback_occurred and not raster.metadata.is_synthetic:
+            # 1. Compute file SHA-256
+            sha256_hash = hashlib.sha256()
+            try:
+                with open(self.dem_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        sha256_hash.update(chunk)
+                file_sha256 = sha256_hash.hexdigest()
+            except Exception as err:
+                logger.warning("Could not compute SHA-256 for '%s': %s", self.dem_path, err)
+                file_sha256 = "unavailable_read_error"
+
+            # 2. File format
+            ext = os.path.splitext(self.dem_path)[1].lower()
+            file_format = {
+                ".tif": "GeoTIFF",
+                ".tiff": "GeoTIFF",
+                ".npz": "NumPy Array Archive (.npz)",
+                ".npy": "NumPy Array (.npy)",
+                ".img": "PDS3 IMG Raster",
+                ".cub": "USGS ISIS3 Cube",
+            }.get(ext, f"Binary Raster ({ext})")
+
+            # 3. Raster no-data statistics
+            total_cells = int(raster.data.size)
+            nodata_cells = int(raster.nodata_mask.sum())
+            valid_cells = total_cells - nodata_cells
+            valid_vals = raster.data[~raster.nodata_mask]
+            min_elev = float(np.min(valid_vals)) if valid_cells > 0 else float("nan")
+            max_elev = float(np.max(valid_vals)) if valid_cells > 0 else float("nan")
+            mean_elev = float(np.mean(valid_vals)) if valid_cells > 0 else float("nan")
+
+            # 4. Authoritative source verification
+            is_verified, method, matched_prod = verify_manifest_provenance(
+                file_sha256=file_sha256,
+                metadata_tags=raster.metadata.metadata_tags,
+            )
+
+            if is_verified and matched_prod:
+                validation_status = "verified_source"
+                data_mode = "real"
+                dataset_name = matched_prod["product_name"]
+                official_product_id = matched_prod["id"]
+                official_source_url = matched_prod["landing_page"]
+                pds_doi = matched_prod.get("pds_doi")
+                mission_instruments = matched_prod.get("mission_instruments")
+                data_publisher = matched_prod.get("publisher")
+                limitations = [matched_prod.get("limitations", "Official product limitations.")]
+            else:
+                validation_status = "valid_numeric_raster_unverified_source"
+                data_mode = "real_unverified_source"
+                dataset_name = "Local Numerical Elevation Model (Unverified Source)"
+                official_product_id = None
+                official_source_url = None
+                pds_doi = None
+                mission_instruments = ["Unverified / Unknown"]
+                data_publisher = "Unknown / Local Origin"
+                limitations = [
+                    "Raster passed 2D numerical and Jezero spatial-integrity checks (valid float array, plausible Mars elevations, valid planetary CRS).",
+                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified: file SHA-256 and metadata tags do not match official planetary catalog records.",
+                    "Treated as an unverified local numeric terrain raster; cannot be reported as certified flight-grade planetary data.",
+                ]
+
             return {
-                "dataset_name": "HRSC and MOLA Blended Digital Elevation Model (Jezero Pilot)",
-                "mission_instruments": ["ESA Mars Express HRSC", "NASA Mars Global Surveyor MOLA"],
-                "data_publisher": "USGS Astrogeology Science Center / PDS Geosciences Node",
-                "landing_url": "https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
-                "spatial_coverage": f"Jezero Crater ({raster.metadata.min_lat:.2f}°N - {raster.metadata.max_lat:.2f}°N, {raster.metadata.min_lon:.2f}°E - {raster.metadata.max_lon:.2f}°E)",
-                "pixel_resolution_meters": round(raster.metadata.meters_per_px_y, 1),
-                "vertical_datum": raster.metadata.vertical_datum,
-                "horizontal_crs": raster.metadata.crs_str,
-                "data_mode": "real",
-                "real_data_validation_status": "verified",
-                "is_synthetic": False,
+                "dataset_name": dataset_name,
+                "official_product_id": official_product_id,
+                "official_source_url": official_source_url,
+                "pds_doi": pds_doi,
+                "mission_instruments": mission_instruments,
+                "data_publisher": data_publisher,
                 "file_path": self.dem_path,
+                "file_format": file_format,
+                "file_sha256": file_sha256,
+                "data_mode": data_mode,
+                "real_data_validation_status": validation_status,
+                "provenance_verification_method": method,
+                "is_synthetic": False,
+                "horizontal_crs": raster.metadata.crs_str,
+                "coordinate_type": raster.metadata.coordinate_type,
+                "projection_units": raster.metadata.units,
+                "pixel_resolution_meters": {
+                    "x": round(raster.metadata.meters_per_px_x, 2),
+                    "y": round(raster.metadata.meters_per_px_y, 2),
+                },
+                "spatial_coverage": {
+                    "min_lon": round(raster.metadata.min_lon, 4),
+                    "max_lon": round(raster.metadata.max_lon, 4),
+                    "min_lat": round(raster.metadata.min_lat, 4),
+                    "max_lat": round(raster.metadata.max_lat, 4),
+                },
+                "raster_statistics": {
+                    "total_cells": total_cells,
+                    "valid_cells": valid_cells,
+                    "nodata_cells": nodata_cells,
+                    "valid_data_fraction": round(valid_cells / max(total_cells, 1), 4),
+                    "min_elevation_meters": round(min_elev, 2),
+                    "max_elevation_meters": round(max_elev, 2),
+                    "mean_elevation_meters": round(mean_elev, 2),
+                },
+                "vertical_datum": raster.metadata.vertical_datum,
+                "provenance_limitations": limitations,
             }
 
         # Operating on synthetic
         provenance = self._get_fallback().get_provenance()
         if self._fallback_occurred:
             provenance["data_mode"] = "synthetic_fallback"
+            provenance["real_data_validation_status"] = "incomplete_missing_genuine_dem"
             provenance["fallback_reason"] = self._fallback_reason
             provenance["real_dem_requested"] = True
             provenance["real_dem_loaded"] = False
-            provenance["real_data_validation_status"] = "incomplete_missing_genuine_dem"
+            provenance["file_path"] = self.dem_path
+            provenance["provenance_verification_method"] = "none_file_missing_or_invalid"
+            provenance["provenance_limitations"] = [
+                f"Real DEM was requested at '{self.dem_path}', but file was not found or failed validation: {self._fallback_reason}.",
+                "Real-data validation remains incomplete. Fallback synthetic model active.",
+            ]
         else:
             provenance["data_mode"] = "synthetic_test_fixture"
+            provenance["real_data_validation_status"] = "synthetic_test_fixture"
             provenance["real_dem_requested"] = False
             provenance["real_dem_loaded"] = False
-            provenance["real_data_validation_status"] = "not_requested_synthetic_mode"
+            provenance["provenance_verification_method"] = "deterministic_synthetic_procedural_generator"
+            provenance["provenance_limitations"] = [
+                "Operating on deterministic synthetic/procedural test fixture for Jezero Crater. Real NASA DEM is not loaded.",
+                "Elevation and terrain gradients are mathematically synthesized; not suitable for flight-grade navigation.",
+            ]
         return provenance
 
     def is_synthetic(self) -> bool:

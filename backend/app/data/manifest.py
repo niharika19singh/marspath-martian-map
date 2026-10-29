@@ -22,6 +22,13 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
         "is_numerical_elevation": True,
         "contains_imagery_only": False,
         "format": "GeoTIFF / ISIS3 .cub",
+        "sha256": None,
+        "authoritative_product_ids": [
+            "JEZERO_HRSC_MOLA_blended_DEM",
+            "dem_hrsc_mola_blended_50m",
+            "HRSC_MOLA_JEZERO_50M",
+            "10.5066/P9P7W018",
+        ],
         "acquisition_date": "2004 - 2020 compiled",
         "license_and_reuse": "Public Domain (NASA / USGS / ESA open planetary science data policy)",
         "download_method": "USGS Astrogeology Astropedia direct HTTP download / PDS Geosciences archive",
@@ -44,6 +51,12 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
         "is_numerical_elevation": True,
         "contains_imagery_only": False,
         "format": "IMG (PDS3) / GeoTIFF",
+        "sha256": None,
+        "authoritative_product_ids": [
+            "ESP_037803_1985",
+            "dem_hirise_jezero_delta_1m",
+            "10.17189/1519501",
+        ],
         "acquisition_date": "2014 - 2020",
         "license_and_reuse": "Public Domain (NASA PDS open data)",
         "download_method": "HiRISE website DTM product archive",
@@ -140,3 +153,47 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
         "limitations": "Rendered RGB image tiles; zero elevation data. Strictly visualization-only.",
     },
 ]
+
+
+def verify_manifest_provenance(
+    file_sha256: str,
+    metadata_tags: dict[str, str],
+) -> tuple[bool, str, dict[str, Any] | None]:
+    """
+    Evaluates whether a loaded raster matches an official NASA/ESA/USGS planetary product
+    through authoritative evidence:
+    1. Matching SHA-256 checksum recorded in manifest.
+    2. Authoritative PDS/USGS metadata tags embedded in file header (PRODUCT_ID, PDS_DOI, etc.).
+    """
+    # 1. Check SHA-256 match
+    if file_sha256:
+        for item in DATA_CATALOG_MANIFEST:
+            manifest_sha = item.get("sha256")
+            if manifest_sha and manifest_sha.lower() == file_sha256.lower():
+                return True, "authoritative_manifest_sha256_match", item
+
+    # 2. Check metadata tags
+    norm_tags = {str(k).upper(): str(v).strip() for k, v in metadata_tags.items()}
+    tag_candidates = [
+        norm_tags.get("PRODUCT_ID", ""),
+        norm_tags.get("DATASET_ID", ""),
+        norm_tags.get("PDS_DOI", ""),
+        norm_tags.get("OFFICIAL_PRODUCT_ID", ""),
+        norm_tags.get("SOURCE_PRODUCT_ID", ""),
+    ]
+
+    for item in DATA_CATALOG_MANIFEST:
+        auth_ids = [str(x).upper() for x in item.get("authoritative_product_ids", [])]
+        item_id = item.get("id", "").upper()
+        item_doi = item.get("pds_doi", "").upper()
+        targets = set(auth_ids + [item_id, item_doi])
+
+        for cand in tag_candidates:
+            if not cand:
+                continue
+            cand_upper = cand.upper()
+            if cand_upper in targets or any(t and t in cand_upper for t in targets):
+                return True, "authoritative_pds_metadata_tags", item
+
+    return False, "unverified_source_no_authoritative_credentials", None
+
