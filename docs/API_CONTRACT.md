@@ -8,15 +8,16 @@ This document specifies the complete REST API contract between Niharika's backen
 
 Mars geodesy differs fundamentally from Earth mapping:
 
-1. **Coordinate Reference System (CRS):** `IAU2000:49900` (Mars 2000 Sphere, volumetric mean radius $R = 3,396,190\text{ m}$).
-2. **Longitude Convention:** **Positive East**, in range `[0°, 360°)` or `[-180°, +180°)`.
+1. **Geographic Coordinate Reference System (CRS):** `IAU2000:49900` (Mars 2000 Sphere, volumetric mean radius $R = 3,396,190\text{ m}$).
+2. **Analysis Projection:** Local Equirectangular Metric Projection centered on Jezero Crater ($R = 3,396,190\text{ m}$).
+3. **Longitude Convention:** **Positive East**, in range `[0°, 360°)` or `[-180°, +180°)`.
    - The backend accepts both and auto-normalizes to `[0°, 360°)`.
-3. **Latitude Convention:** **Planetocentric latitude**, in range `[-90.0°, +90.0°]`.
-4. **Active Pilot Region (Jezero Crater):**
+4. **Latitude Convention:** **Planetocentric latitude**, in range `[-90.0°, +90.0°]`.
+5. **Active Pilot Region (Jezero Crater):**
    - Center: `~77.58° E, ~18.38° N`
    - East Longitude Bounds: `77.20° E` to `77.95° E`
    - Latitude Bounds: `18.15° N` to `18.65° N`
-5. **Earth CRS Rejection:** Sending Earth CRS identifiers (such as `EPSG:4326` or `EPSG:3857`) will be rejected with HTTP `422 Unprocessable Entity`.
+6. **Earth CRS Rejection:** Sending Earth CRS identifiers (such as `EPSG:4326` or `EPSG:3857`) is rejected with HTTP `422 Unprocessable Entity`.
 
 ---
 
@@ -52,7 +53,7 @@ Mars geodesy differs fundamentally from Earth mapping:
 
 - **Method:** `GET`
 - **Path:** `/api/v1/layers`
-- **Description:** Lists all available numerical raster layers (elevation, slope, roughness, traversability) and visual basemaps for map rendering.
+- **Description:** Lists all available layers. Clearly differentiates between directly renderable tile services and analysis-only matrices.
 
 #### Response Example (200 OK)
 ```json
@@ -64,7 +65,8 @@ Mars geodesy differs fundamentally from Earth mapping:
       "id": "mars_elevation_jezero",
       "name": "Martian Digital Elevation Model (Topography)",
       "category": "elevation",
-      "description": "Numerical surface elevation relative to the Mars areoid datum.",
+      "layer_type": "analysis_derived",
+      "description": "Numerical surface elevation relative to the Mars areoid datum. Internal analysis layer queried via /api/v1/routes/plan.",
       "units": "meters",
       "resolution_meters": 112.5,
       "bounds": {
@@ -79,19 +81,22 @@ Mars geodesy differs fundamentally from Earth mapping:
         "ellipsoid_radius_meters": 3396190.0,
         "latitude_type": "planetocentric",
         "longitude_direction": "positive_east",
-        "projection": "Equirectangular Metric (Plate Carree centered at reference)"
+        "projection": "Geographic (Planetocentric Degrees)"
       },
       "source_name": "Synthetic Jezero Pilot Model",
       "source_url": "https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
       "is_numerical": true,
       "is_available": true,
+      "is_renderable": false,
+      "render_url": null,
       "is_synthetic": true
     },
     {
       "id": "mars_trek_imagery_basemap",
       "name": "NASA Mars Trek Visible Basemap",
       "category": "imagery",
-      "description": "Global orthorectified multi-mission visible mosaic for frontend display.",
+      "layer_type": "tile_service",
+      "description": "Global orthorectified multi-mission visible mosaic for direct frontend display via XYZ/WMTS tile services.",
       "units": "reflectance RGB",
       "resolution_meters": 6.0,
       "bounds": {
@@ -106,12 +111,14 @@ Mars geodesy differs fundamentally from Earth mapping:
         "ellipsoid_radius_meters": 3396190.0,
         "latitude_type": "planetocentric",
         "longitude_direction": "positive_east",
-        "projection": "Equirectangular Metric (Plate Carree centered at reference)"
+        "projection": "Geographic (Planetocentric Degrees)"
       },
       "source_name": "NASA Solar System Treks (JPL)",
       "source_url": "https://trek.nasa.gov/mars/",
       "is_numerical": false,
       "is_available": true,
+      "is_renderable": true,
+      "render_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
       "is_synthetic": false
     }
   ]
@@ -132,7 +139,7 @@ Mars geodesy differs fundamentally from Earth mapping:
 
 - **Method:** `POST`
 - **Path:** `/api/v1/routes/plan`
-- **Description:** Optimizes traversable routes between two planetary coordinates with explainable scores, terrain breakdowns, and GeoJSON coordinates.
+- **Description:** Optimizes traversable routes between two planetary coordinates, evaluating local slope, roughness, and scientific waypoints with fully reconciled cost breakdowns.
 
 #### Request Schema
 ```json
@@ -152,7 +159,12 @@ Mars geodesy differs fundamentally from Earth mapping:
     "max_roughness": 0.85,
     "avoid_unobserved_terrain": true
   },
-  "science_waypoints": [],
+  "science_waypoints": [
+    {
+      "lon": 77.42,
+      "lat": 18.405
+    }
+  ],
   "num_alternatives": 2
 }
 ```
@@ -160,7 +172,7 @@ Mars geodesy differs fundamentally from Earth mapping:
 #### Optimization Modes:
 - `safety_first`: Strict 14° slope limit, heavy roughness aversion, prioritizes minimum mechanical risk.
 - `balanced`: 20° slope limit, balanced tradeoff between ground distance and slope penalty.
-- `science_first`: 22° slope limit, routes through or near key geological POIs (delta front, Belva crater, Séítah formation).
+- `science_first`: 22° slope limit; if no intermediate waypoints are given, autonomously evaluates candidate detours to sample high-priority science POIs (delta front, Belva crater, Séítah formation).
 
 #### Response Example (200 OK)
 ```json
@@ -173,7 +185,7 @@ Mars geodesy differs fundamentally from Earth mapping:
     "ellipsoid_radius_meters": 3396190.0,
     "latitude_type": "planetocentric",
     "longitude_direction": "positive_east",
-    "projection": "Equirectangular Metric (Plate Carree centered at reference)"
+    "projection": "Geographic (Planetocentric Degrees)"
   },
   "pilot_region": "Jezero Crater, Mars",
   "data_mode": "synthetic_test_fixture",
@@ -184,16 +196,17 @@ Mars geodesy differs fundamentally from Earth mapping:
   },
   "routes": [
     {
-      "route_id": "route_primary_opt",
-      "name": "Primary Route (Balanced)",
+      "route_id": "route_primary_waypoint_guided",
+      "name": "Primary Route via 1 Science Waypoint(s)",
       "mode": "balanced",
       "score_rank": 1,
       "total_cost": 3208.15,
       "cost_breakdown": {
         "base_distance_cost": 3014.0,
-        "slope_penalty": 128.4,
+        "slope_penalty": 128.45,
         "roughness_penalty": 65.7,
-        "hazard_penalty": 0.0
+        "hazard_penalty": 0.0,
+        "extra_penalty": 0.0
       },
       "summary": {
         "total_distance_meters": 3014.0,
@@ -206,18 +219,23 @@ Mars geodesy differs fundamentally from Earth mapping:
         "average_roughness": 0.022,
         "data_coverage_fraction": 1.0,
         "estimated_duration_hours": 5.58,
+        "motion_profile": "rover_slope_derated_0.15mps",
         "energy_index": 3.58,
-        "science_score": 30.0
+        "science_score": 45.0
       },
       "geometry": {
         "type": "LineString",
         "coordinates": [
           [77.4000, 18.3900, -2558.1],
-          [77.4080, 18.3960, -2552.0],
+          [77.4200, 18.4050, -2542.0],
           [77.4400, 18.4200, -2529.6]
         ]
       },
-      "waypoints_visited": [],
+      "waypoints_visited": [
+        { "lon": 77.42, "lat": 18.405 }
+      ],
+      "science_targets_visited": ["poi_delta_front"],
+      "science_targets_nearby": ["poi_kodiak_butte"],
       "warnings": []
     }
   ],
@@ -245,12 +263,3 @@ Mars geodesy differs fundamentally from Earth mapping:
 | `422 Unprocessable Entity` | Unsupported CRS (e.g. Earth EPSG:4326) | `{"error": "Coordinate Reference System 'EPSG:4326' is not supported. Mars requires planetary CRS."}` |
 | `404 Not Found` | Unreachable destination (cliff/obstacle) | `{"error": "Unreachable destination: No traversable Martian corridor exists..."}` |
 | `413 Payload Too Large` | Mission corridor exceeds cell budget | `{"error": "Computational bounds exceeded: corridor window requires 320,000 cells..."}` |
-
----
-
-## 🚀 Frontend Quickstart with Mock Fixture
-
-If Kunal starts frontend work before running the backend locally:
-- A complete mock response matching this schema is available at:  
-  `backend/app/data/fixtures/sample_route_response.json`
-- In React, Kunal can import this JSON directly into map state to test OpenLayers / Leaflet rendering.

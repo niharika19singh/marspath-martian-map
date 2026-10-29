@@ -7,7 +7,7 @@
     "ellipsoid_radius_meters": 3396190.0,
     "latitude_type": "planetocentric",
     "longitude_direction": "positive_east",
-    "projection": "Equirectangular Metric (Plate Carree centered at reference)"
+    "projection": "Geographic (Planetocentric Degrees)"
   },
   "pilot_region": "Jezero Crater, Mars",
   "data_mode": "synthetic_test_fixture",
@@ -32,7 +32,8 @@
         "base_distance_cost": 3820.5,
         "slope_penalty": 345.1,
         "roughness_penalty": 186.8,
-        "hazard_penalty": 0.0
+        "hazard_penalty": 0.0,
+        "extra_penalty": 0.0
       },
       "summary": {
         "total_distance_meters": 3820.5,
@@ -45,6 +46,7 @@
         "average_roughness": 0.124,
         "data_coverage_fraction": 1.0,
         "estimated_duration_hours": 7.07,
+        "motion_profile": "rover_slope_derated_0.15mps",
         "energy_index": 4.5,
         "science_score": 30.0
       },
@@ -60,11 +62,13 @@
         ]
       },
       "waypoints_visited": [],
+      "science_targets_visited": ["poi_delta_front"],
+      "science_targets_nearby": ["poi_kodiak_butte"],
       "warnings": []
     }
   ],
   "stats": {
-    "algorithm_used": "A*",
+    "algorithm_used": "A* (with admissible Euclidean heuristic)",
     "search_duration_seconds": 0.042,
     "nodes_expanded": 348,
     "grid_rows": 82,

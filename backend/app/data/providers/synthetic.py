@@ -138,17 +138,25 @@ class SyntheticTerrainProvider(BaseRasterProvider):
             elev = self._generate_terrain()
             deg_per_px_lon = (self.max_lon - self.min_lon) / self.cols
             deg_per_px_lat = (self.max_lat - self.min_lat) / self.rows
+            m_x = deg_per_px_lon * 56250.0
+            m_y = deg_per_px_lat * 59274.69
             meta = RasterMetadata(
                 width=self.cols,
                 height=self.rows,
+                coordinate_type="geographic",
+                crs_str="IAU2000:49900",
+                units="degrees",
                 min_lon=self.min_lon,
                 min_lat=self.min_lat,
                 max_lon=self.max_lon,
                 max_lat=self.max_lat,
                 deg_per_px_lon=deg_per_px_lon,
                 deg_per_px_lat=deg_per_px_lat,
+                meters_per_px_x=m_x,
+                meters_per_px_y=m_y,
+                affine_transform=(deg_per_px_lon, 0.0, self.min_lon, 0.0, -deg_per_px_lat, self.max_lat),
                 nodata_value=-9999.0,
-                crs_str="IAU2000:49900",
+                vertical_datum="Mars MOLA Areoid",
                 is_synthetic=True,
             )
             self._raster_data = RasterData(elev, meta)

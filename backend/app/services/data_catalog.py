@@ -24,7 +24,8 @@ class DataCatalogService:
                 id="mars_elevation_jezero",
                 name="Martian Digital Elevation Model (Topography)",
                 category=LayerCategory.ELEVATION,
-                description="Numerical surface elevation relative to the Mars areoid datum.",
+                layer_type="analysis_derived",
+                description="Numerical surface elevation relative to the Mars areoid datum. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="meters",
                 resolution_meters=50.0 if not is_syn else 112.5,
                 bounds=bounds,
@@ -33,13 +34,16 @@ class DataCatalogService:
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
                 is_numerical=True,
                 is_available=True,
+                is_renderable=False,
+                render_url=None,
                 is_synthetic=is_syn,
             ),
             LayerInfo(
                 id="mars_slope_degrees",
                 name="Terrain Slope Gradient",
                 category=LayerCategory.SLOPE,
-                description="Physical ground inclination derived from numerical elevation gradients.",
+                layer_type="analysis_derived",
+                description="Physical ground inclination derived from numerical elevation gradients. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="degrees",
                 resolution_meters=50.0 if not is_syn else 112.5,
                 bounds=bounds,
@@ -48,13 +52,16 @@ class DataCatalogService:
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
                 is_numerical=True,
                 is_available=True,
+                is_renderable=False,
+                render_url=None,
                 is_synthetic=is_syn,
             ),
             LayerInfo(
                 id="mars_roughness_tri",
                 name="Terrain Ruggedness Index (TRI)",
                 category=LayerCategory.ROUGHNESS,
-                description="Localized standard deviation of detrended elevation differences.",
+                layer_type="analysis_derived",
+                description="Localized standard deviation of detrended elevation differences. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="dimensionless [0.0 - 1.0]",
                 resolution_meters=50.0 if not is_syn else 112.5,
                 bounds=bounds,
@@ -63,13 +70,16 @@ class DataCatalogService:
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
                 is_numerical=True,
                 is_available=True,
+                is_renderable=False,
+                render_url=None,
                 is_synthetic=is_syn,
             ),
             LayerInfo(
                 id="mars_traversability_mask",
                 name="Traversability & Hazard Ceiling Mask",
                 category=LayerCategory.HAZARD,
-                description="Binary traversability envelope enforcing slope limits and nodata masking.",
+                layer_type="analysis_derived",
+                description="Binary traversability envelope enforcing slope limits and nodata masking. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="boolean",
                 resolution_meters=50.0 if not is_syn else 112.5,
                 bounds=bounds,
@@ -78,13 +88,16 @@ class DataCatalogService:
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
                 is_numerical=False,
                 is_available=True,
+                is_renderable=False,
+                render_url=None,
                 is_synthetic=is_syn,
             ),
             LayerInfo(
                 id="mars_trek_imagery_basemap",
                 name="NASA Mars Trek Visible Basemap",
                 category=LayerCategory.IMAGERY,
-                description="Global orthorectified multi-mission visible mosaic for frontend display.",
+                layer_type="tile_service",
+                description="Global orthorectified multi-mission visible mosaic for direct frontend display via XYZ/WMTS tile services.",
                 units="reflectance RGB",
                 resolution_meters=6.0,
                 bounds=BoundingBox(min_lon=0.0, min_lat=-90.0, max_lon=360.0, max_lat=90.0),
@@ -93,6 +106,8 @@ class DataCatalogService:
                 source_url="https://trek.nasa.gov/mars/",
                 is_numerical=False,
                 is_available=True,
+                is_renderable=True,
+                render_url="https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
                 is_synthetic=False,
             ),
         ]
@@ -114,20 +129,28 @@ class DataCatalogService:
         nodata_count = int(raster.nodata_mask.sum())
         valid_frac = float((total_pixels - nodata_count) / max(total_pixels, 1))
 
-        res_meters = round(raster.metadata.deg_per_px_lat * 59274.0, 1)
+        res_meters = round(raster.metadata.meters_per_px_y, 1)
+
+        provenance = self.provider.get_provenance()
+        active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
 
         limitations = [
             "Regional DEM does not detect sub-meter boulders or fine wheel-entrapment sand ripples.",
             "Visual imagery layers must not be used for physical slope or energy calculations.",
         ]
         if is_syn:
-            limitations.append(
-                "Currently running on deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not yet placed in rasters directory."
-            )
+            if active_mode == "synthetic_fallback":
+                limitations.append(
+                    f"Fallback to synthetic test fixture occurred: {provenance.get('fallback_reason', 'Real DEM missing or invalid')}."
+                )
+            else:
+                limitations.append(
+                    "Operating in development mode with deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not loaded."
+                )
 
         return DataStatusResponse(
             status="healthy",
-            data_mode="synthetic_test_fixture" if is_syn else "real",
+            data_mode=active_mode,
             is_synthetic=is_syn,
             active_pilot_region="Jezero Crater, Mars",
             pilot_bounds=bounds,
