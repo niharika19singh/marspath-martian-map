@@ -1,6 +1,5 @@
-import math
-from typing import Tuple
 import numpy as np
+
 from backend.app.core.exceptions import ComputationalBoundExceededError
 from backend.app.geospatial.crs import (
     METERS_PER_DEGREE_LATITUDE,
@@ -18,7 +17,7 @@ def crop_mission_corridor(
     dest: MarsCoordinate,
     padding_meters: float = 3000.0,
     max_cells: int = 250000,
-) -> Tuple[np.ndarray, RasterMetadata, Tuple[int, int], Tuple[int, int]]:
+) -> tuple[np.ndarray, RasterMetadata, tuple[int, int], tuple[int, int]]:
     """
     Crops a subgrid from the master raster surrounding the start and destination points
     with a buffer/padding margin in physical meters.
@@ -41,8 +40,12 @@ def crop_mission_corridor(
     max_lat = min(max(start.lat, dest.lat) + pad_lat_deg, meta.max_lat)
 
     # Convert to master raster pixel indices
-    c_min, r_min = geo_to_pixel(min_lon, max_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
-    c_max, r_max = geo_to_pixel(max_lon, min_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
+    c_min, r_min = geo_to_pixel(
+        min_lon, max_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
+    )
+    c_max, r_max = geo_to_pixel(
+        max_lon, min_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
+    )
 
     # Clamp indices to valid raster bounds
     c_min = max(0, min(c_min, meta.width - 1))
@@ -65,8 +68,12 @@ def crop_mission_corridor(
     cropped_elev = raster.data[r_min:r_max, c_min:c_max].copy()
 
     # Compute updated subgrid geographic bounding box
-    sub_min_lon, sub_max_lat = pixel_to_geo(c_min, r_min, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
-    sub_max_lon, sub_min_lat = pixel_to_geo(c_max, r_max, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
+    sub_min_lon, sub_max_lat = pixel_to_geo(
+        c_min, r_min, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
+    )
+    sub_max_lon, sub_min_lat = pixel_to_geo(
+        c_max, r_max, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
+    )
 
     cropped_meta = RasterMetadata(
         width=crop_w,
@@ -82,15 +89,26 @@ def crop_mission_corridor(
         deg_per_px_lat=meta.deg_per_px_lat,
         meters_per_px_x=meta.meters_per_px_x,
         meters_per_px_y=meta.meters_per_px_y,
-        affine_transform=(meta.deg_per_px_lon, 0.0, sub_min_lon, 0.0, -meta.deg_per_px_lat, sub_max_lat),
+        affine_transform=(
+            meta.deg_per_px_lon,
+            0.0,
+            sub_min_lon,
+            0.0,
+            -meta.deg_per_px_lat,
+            sub_max_lat,
+        ),
         nodata_value=meta.nodata_value,
         vertical_datum=meta.vertical_datum,
         is_synthetic=meta.is_synthetic,
     )
 
     # Start and Dest local pixel indices
-    s_col, s_row = geo_to_pixel(start.lon, start.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
-    d_col, d_row = geo_to_pixel(dest.lon, dest.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
+    s_col, s_row = geo_to_pixel(
+        start.lon, start.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
+    )
+    d_col, d_row = geo_to_pixel(
+        dest.lon, dest.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
+    )
 
     # Clamp within subgrid
     s_col = max(0, min(s_col, crop_w - 1))

@@ -1,11 +1,11 @@
 import pytest
+
 from backend.app.core.exceptions import UnsupportedCRSError
 from backend.app.geospatial.crs import (
     MARS_VOLUMETRIC_RADIUS_METERS,
     geo_to_pixel,
     get_mars_crs_info,
     haversine_distance_mars,
-    meters_per_degree_lon,
     pixel_to_geo,
     project_to_mars_metric,
     unproject_from_mars_metric,

@@ -1,6 +1,7 @@
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any
+
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import TerrainDataUnavailableError
 from backend.app.data.providers.base import BaseRasterProvider
@@ -58,18 +59,65 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             return self._raster_data
 
         try:
-            self._raster_data = load_raster_file(self.dem_path)
-            logger.info("Successfully loaded real DEM from %s", self.dem_path)
+            loaded_raster = load_raster_file(self.dem_path)
+            self._validate_dem_integrity(loaded_raster)
+            self._raster_data = loaded_raster
+            logger.info("Successfully loaded and validated real DEM from %s", self.dem_path)
             return self._raster_data
         except Exception as e:
             msg = f"Failed to load or validate real DEM at '{self.dem_path}': {e}"
             if not self.allow_fallback:
-                raise TerrainDataUnavailableError(msg)
+                raise TerrainDataUnavailableError(msg) from e
             logger.warning("%s. Falling back to synthetic test model.", msg)
             self._fallback_occurred = True
             self._fallback_reason = msg
             self._raster_data = self._get_fallback().get_dem_raster()
             return self._raster_data
+
+    def _validate_dem_integrity(self, raster: RasterData) -> None:
+        """
+        Validates that loaded file is genuine numerical elevation data, not an arbitrary
+        image or malformed array, and is situated over the Jezero target domain.
+        """
+        import numpy as np
+
+        if raster.data.dtype.kind not in ("f", "i", "u"):
+            raise TerrainDataUnavailableError(
+                f"Raster '{self.dem_path}' does not contain numerical elevation values (dtype={raster.data.dtype})."
+            )
+
+        if raster.data.ndim != 2 or raster.data.shape[0] < 10 or raster.data.shape[1] < 10:
+            raise TerrainDataUnavailableError(
+                f"Raster '{self.dem_path}' has invalid dimensions {raster.data.shape} for a 2D DEM."
+            )
+
+        # Inspect elevation values excluding nodata
+        valid = raster.data[~raster.nodata_mask] if hasattr(raster, "nodata_mask") else raster.data
+        if valid.size == 0 or np.isnan(valid).all():
+            raise TerrainDataUnavailableError(f"Raster '{self.dem_path}' contains only nodata or NaN values.")
+
+        min_val = float(np.min(valid))
+        max_val = float(np.max(valid))
+        if min_val < -9000.0 or max_val > 25000.0:
+            raise TerrainDataUnavailableError(
+                f"Raster '{self.dem_path}' contains out-of-range Martian elevations ({min_val:.1f}m to {max_val:.1f}m)."
+            )
+
+        # Inspect resolution (50m nominal HRSC/MOLA, HiRISE 1m, MOLA 500m)
+        res_x = raster.metadata.meters_per_px_x
+        res_y = raster.metadata.meters_per_px_y
+        if not (0.2 <= res_x <= 2000.0 and 0.2 <= res_y <= 2000.0):
+            raise TerrainDataUnavailableError(
+                f"Raster '{self.dem_path}' has non-geospatial resolution ({res_x:.1f}m x {res_y:.1f}m)."
+            )
+
+        # Inspect coverage overlap with Jezero region
+        meta = raster.metadata
+        if meta.max_lon < 75.0 or meta.min_lon > 80.0 or meta.max_lat < 16.0 or meta.min_lat > 21.0:
+            raise TerrainDataUnavailableError(
+                f"Raster '{self.dem_path}' bounds ({meta.min_lon:.2f}°E to {meta.max_lon:.2f}°E, "
+                f"{meta.min_lat:.2f}°N to {meta.max_lat:.2f}°N) do not intersect Jezero Crater."
+            )
 
     def get_bounds(self) -> BoundingBox:
         raster = self.get_dem_raster()
@@ -83,7 +131,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
     def get_crs_info(self) -> CRSInfo:
         return get_mars_crs_info()
 
-    def get_provenance(self) -> Dict[str, Any]:
+    def get_provenance(self) -> dict[str, Any]:
         raster = self.get_dem_raster()
         if self.use_real_dem and not self._fallback_occurred and not raster.metadata.is_synthetic:
             return {
@@ -96,6 +144,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 "vertical_datum": raster.metadata.vertical_datum,
                 "horizontal_crs": raster.metadata.crs_str,
                 "data_mode": "real",
+                "real_data_validation_status": "verified",
                 "is_synthetic": False,
                 "file_path": self.dem_path,
             }
@@ -107,15 +156,17 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             provenance["fallback_reason"] = self._fallback_reason
             provenance["real_dem_requested"] = True
             provenance["real_dem_loaded"] = False
+            provenance["real_data_validation_status"] = "incomplete_missing_genuine_dem"
         else:
             provenance["data_mode"] = "synthetic_test_fixture"
             provenance["real_dem_requested"] = False
             provenance["real_dem_loaded"] = False
+            provenance["real_data_validation_status"] = "not_requested_synthetic_mode"
         return provenance
 
     def is_synthetic(self) -> bool:
         raster = self.get_dem_raster()
         return raster.metadata.is_synthetic
 
-    def get_science_targets(self) -> List[ScienceTarget]:
+    def get_science_targets(self) -> list[ScienceTarget]:
         return self._get_fallback().get_science_targets()

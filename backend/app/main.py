@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
 from backend.app.api.v1.data_status import router as data_status_router
 from backend.app.api.v1.health import router as health_router
 from backend.app.api.v1.layers import router as layers_router
@@ -29,6 +30,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Custom exception handler
 @app.exception_handler(MarsPathError)

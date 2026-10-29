@@ -1,5 +1,5 @@
-from typing import Tuple
 import numpy as np
+
 from backend.app.geospatial.terrain_metrics import (
     build_traversability_mask,
     compute_roughness_index,
@@ -16,7 +16,7 @@ class RiskService:
         dy_meters: float,
         constraints: RouteConstraints,
         mode: OptimizationMode,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Computes slope, roughness, and the traversability mask for the cropped mission grid.
         Adjusts slope thresholds according to optimization mode.

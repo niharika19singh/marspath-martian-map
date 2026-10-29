@@ -1,16 +1,18 @@
 import os
 from functools import lru_cache
-from typing import List
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
+
     HAS_SETTINGS = True
 except ImportError:
     HAS_SETTINGS = False
 
 
 if HAS_SETTINGS:
+
     class Settings(BaseSettings):
         """MARSPath application configuration using pydantic-settings."""
 
@@ -53,10 +55,11 @@ if HAS_SETTINGS:
         STRICT_MAX_SLOPE_DEG: float = 14.0
 
         @property
-        def cors_origin_list(self) -> List[str]:
+        def cors_origin_list(self) -> list[str]:
             return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
 else:
+
     class Settings(BaseModel):
         """Fallback configuration class when pydantic-settings is not present."""
 
@@ -74,8 +77,12 @@ else:
 
         DATA_DIR: str = os.getenv("MARSPATH_DATA_DIR", "backend/app/data")
         USE_REAL_DEM: bool = os.getenv("MARSPATH_USE_REAL_DEM", "false").lower() in ("true", "1")
-        DEM_PATH: str = os.getenv("MARSPATH_DEM_PATH", "backend/app/data/rasters/jezero_mola_hrsc_blended.tif")
-        ALLOW_SYNTHETIC_FALLBACK: bool = os.getenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true").lower() in ("true", "1")
+        DEM_PATH: str = os.getenv(
+            "MARSPATH_DEM_PATH", "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
+        )
+        ALLOW_SYNTHETIC_FALLBACK: bool = os.getenv(
+            "MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true"
+        ).lower() in ("true", "1")
 
         MARS_RADIUS_METERS: float = 3396190.0
         MARS_EQUATORIAL_RADIUS: float = 3396190.0
@@ -89,16 +96,20 @@ else:
         JEZERO_MAX_LAT: float = 18.65
 
         MAX_GRID_CELLS: int = int(os.getenv("MARSPATH_MAX_GRID_CELLS", "250000"))
-        MAX_SEARCH_RADIUS_METERS: float = float(os.getenv("MARSPATH_MAX_SEARCH_RADIUS_METERS", "50000.0"))
-        ROUTING_TIMEOUT_SECONDS: float = float(os.getenv("MARSPATH_ROUTING_TIMEOUT_SECONDS", "10.0"))
+        MAX_SEARCH_RADIUS_METERS: float = float(
+            os.getenv("MARSPATH_MAX_SEARCH_RADIUS_METERS", "50000.0")
+        )
+        ROUTING_TIMEOUT_SECONDS: float = float(
+            os.getenv("MARSPATH_ROUTING_TIMEOUT_SECONDS", "10.0")
+        )
         DEFAULT_MAX_SLOPE_DEG: float = 20.0
         STRICT_MAX_SLOPE_DEG: float = 14.0
 
         @property
-        def cors_origin_list(self) -> List[str]:
+        def cors_origin_list(self) -> list[str]:
             return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     return Settings()

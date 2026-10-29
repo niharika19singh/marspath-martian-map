@@ -1,7 +1,6 @@
-import math
-from typing import Tuple
 import numpy as np
 from scipy import ndimage
+
 from backend.app.geospatial.crs import METERS_PER_DEGREE_LATITUDE, meters_per_degree_lon
 
 
@@ -9,7 +8,7 @@ def compute_physical_pixel_sizes(
     center_lat_deg: float,
     deg_per_px_lon: float,
     deg_per_px_lat: float,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Calculates physical metric pixel widths and heights (dx, dy) on Mars surface in meters.
     Crucial: Longitude degrees compress with cos(latitude).
@@ -79,11 +78,20 @@ def compute_roughness_index(
 
     # Number of valid cells in local window
     window_cells = float(kernel_size * kernel_size)
-    valid_count = ndimage.uniform_filter(valid_mask.astype(np.float64), size=kernel_size, mode="constant", cval=0.0) * window_cells
+    valid_count = (
+        ndimage.uniform_filter(
+            valid_mask.astype(np.float64), size=kernel_size, mode="constant", cval=0.0
+        )
+        * window_cells
+    )
 
     # Sum of elevation and sum of squared elevation in window
-    elev_sum = ndimage.uniform_filter(elev, size=kernel_size, mode="constant", cval=0.0) * window_cells
-    elev_sq_sum = ndimage.uniform_filter(elev**2, size=kernel_size, mode="constant", cval=0.0) * window_cells
+    elev_sum = (
+        ndimage.uniform_filter(elev, size=kernel_size, mode="constant", cval=0.0) * window_cells
+    )
+    elev_sq_sum = (
+        ndimage.uniform_filter(elev**2, size=kernel_size, mode="constant", cval=0.0) * window_cells
+    )
 
     # Safe division avoiding division by zero
     safe_valid = valid_count >= 3.0  # Require at least 3 valid samples in window
@@ -130,10 +138,7 @@ def build_traversability_mask(
     valid_rough = ~np.isnan(roughness)
 
     traversable = (
-        (slope_deg <= max_slope_deg)
-        & (roughness <= max_roughness)
-        & valid_slope
-        & valid_rough
+        (slope_deg <= max_slope_deg) & (roughness <= max_roughness) & valid_slope & valid_rough
     )
 
     if nodata_mask is not None:

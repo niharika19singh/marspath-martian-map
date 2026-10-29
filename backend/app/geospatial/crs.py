@@ -1,7 +1,7 @@
 import math
-from typing import Optional, Tuple
-from backend.app.core.exceptions import CoordinatesOutOfBoundsError, UnsupportedCRSError
-from backend.app.schemas.coordinates import BoundingBox, CRSInfo, MarsCoordinate
+
+from backend.app.core.exceptions import UnsupportedCRSError
+from backend.app.schemas.coordinates import CRSInfo, MarsCoordinate
 
 # Mars Geodetic Constants (IAU 2000 Working Group on Cartographic Coordinates and Rotational Elements)
 MARS_VOLUMETRIC_RADIUS_METERS = 3396190.0  # R_Mars in meters
@@ -66,7 +66,10 @@ def get_mars_metric_analysis_crs_info() -> CRSInfo:
 def validate_crs(crs_identifier: str) -> None:
     """Validates that the requested CRS is a recognized Mars planetary CRS."""
     norm = crs_identifier.strip().upper()
-    if norm not in SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS and norm not in SUPPORTED_PROJECTED_CRS_IDENTIFIERS:
+    if (
+        norm not in SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS
+        and norm not in SUPPORTED_PROJECTED_CRS_IDENTIFIERS
+    ):
         raise UnsupportedCRSError(
             crs_identifier,
             list(SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS.union(SUPPORTED_PROJECTED_CRS_IDENTIFIERS)),
@@ -100,7 +103,7 @@ def project_to_mars_metric(
     lat_deg: float,
     ref_lon_deg: float,
     ref_lat_deg: float,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Forward projection: Projects (lon_deg, lat_deg) into local Martian metric space (x_meters, y_meters)
     relative to a reference origin (ref_lon_deg, ref_lat_deg) using Mars Equirectangular projection.
@@ -121,7 +124,7 @@ def unproject_from_mars_metric(
     y_meters: float,
     ref_lon_deg: float,
     ref_lat_deg: float,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Inverse projection: Converts local Martian metric coordinates (x, y) back into (lon_deg, lat_deg).
     """
@@ -146,7 +149,7 @@ def geo_to_pixel(
     deg_per_px_lon: float,
     deg_per_px_lat: float,
     pixel_center: bool = False,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """
     Maps geographic coordinates (lon, lat) to raster grid indices (col, row).
     Standard North-up raster where row 0 is max_lat and col 0 is min_lon.
@@ -171,7 +174,7 @@ def pixel_to_geo(
     deg_per_px_lon: float,
     deg_per_px_lat: float,
     pixel_center: bool = True,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Maps raster grid indices (col, row) to geographic coordinates (lon, lat).
     If pixel_center=True, returns the center coordinate of the pixel cell.
@@ -190,10 +193,15 @@ def projected_metric_bounds_to_geographic(
     max_y: float,
     center_lon: float = 0.0,
     center_lat: float = 0.0,
-) -> Tuple[float, float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Converts bounding box in projected meters (Equirectangular) to geographic degrees.
     """
     lon_min, lat_min = unproject_from_mars_metric(min_x, min_y, center_lon, center_lat)
     lon_max, lat_max = unproject_from_mars_metric(max_x, max_y, center_lon, center_lat)
-    return min(lon_min, lon_max), min(lat_min, lat_max), max(lon_min, lon_max), max(lat_min, lat_max)
+    return (
+        min(lon_min, lon_max),
+        min(lat_min, lat_max),
+        max(lon_min, lon_max),
+        max(lat_min, lat_max),
+    )

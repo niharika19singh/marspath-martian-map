@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from backend.app.core.exceptions import ComputationalBoundExceededError, UnreachableDestinationError
 from backend.app.routing.astar import astar_search
 from backend.app.routing.dijkstra import dijkstra_search

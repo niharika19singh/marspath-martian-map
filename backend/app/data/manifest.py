@@ -4,9 +4,9 @@ Documents verified scientific datasets, official landing pages, spatial resoluti
 coordinate reference systems, formats, and physical terrain suitability.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-DATA_CATALOG_MANIFEST: List[Dict[str, Any]] = [
+DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
     {
         "id": "dem_hrsc_mola_blended_50m",
         "product_name": "HRSC and MOLA Blended Digital Elevation Model (200m & 50m Jezero Mosaic)",

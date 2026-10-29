@@ -1,4 +1,5 @@
 import pytest
+
 from backend.app.data.providers.synthetic import SyntheticTerrainProvider
 from backend.app.schemas.coordinates import MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode
@@ -16,7 +17,11 @@ def test_score_reconciliation(route_service):
     start = MarsCoordinate(lon=77.40, lat=18.39)
     dest = MarsCoordinate(lon=77.44, lat=18.42)
 
-    for mode in [OptimizationMode.SAFETY_FIRST, OptimizationMode.BALANCED, OptimizationMode.SCIENCE_FIRST]:
+    for mode in [
+        OptimizationMode.SAFETY_FIRST,
+        OptimizationMode.BALANCED,
+        OptimizationMode.SCIENCE_FIRST,
+    ]:
         req = RoutePlanRequest(
             start=start,
             destination=dest,
@@ -35,10 +40,53 @@ def test_score_reconciliation(route_service):
             + breakdown["extra_penalty"]
         )
 
-        # Sum of breakdown must match total_cost within float precision
-        assert abs(sum_components - primary.total_cost) < 0.1, (
-            f"Mode {mode}: sum={sum_components} != total_cost={primary.total_cost}"
+        # Sum of breakdown must match total_cost exactly
+        assert round(sum_components, 2) == round(primary.total_cost, 2), (
+            f"Mode {mode}: sum={sum_components:.2f} != total_cost={primary.total_cost:.2f}"
         )
+
+
+def test_waypoint_guided_routing_reconciliation(route_service):
+    start = MarsCoordinate(lon=77.40, lat=18.39)
+    wp1 = MarsCoordinate(lon=77.42, lat=18.40)
+    wp2 = MarsCoordinate(lon=77.43, lat=18.41)
+    dest = MarsCoordinate(lon=77.45, lat=18.42)
+
+    req = RoutePlanRequest(
+        start=start,
+        destination=dest,
+        science_waypoints=[wp1, wp2],
+        mode=OptimizationMode.BALANCED,
+    )
+    res = route_service.plan_route(req)
+    route = res.routes[0]
+
+    assert len(route.waypoints_visited) == 2
+    assert route.waypoints_visited[0] == wp1
+    assert route.waypoints_visited[1] == wp2
+
+    breakdown = route.cost_breakdown
+    sum_components = sum(breakdown.values())
+    assert round(sum_components, 2) == round(route.total_cost, 2)
+
+
+def test_visited_vs_nearby_science_targets(route_service):
+    # Route through Jezero delta front
+    start = MarsCoordinate(lon=77.40, lat=18.39)
+    dest = MarsCoordinate(lon=77.46, lat=18.44)
+
+    req = RoutePlanRequest(
+        start=start,
+        destination=dest,
+        mode=OptimizationMode.SCIENCE_FIRST,
+    )
+    res = route_service.plan_route(req)
+    primary = res.routes[0]
+
+    # Visited targets must be disjoint from nearby targets
+    visited_set = set(primary.science_targets_visited)
+    nearby_set = set(primary.science_targets_nearby)
+    assert visited_set.isdisjoint(nearby_set)
 
 
 def test_actual_search_expansion_stats(route_service):

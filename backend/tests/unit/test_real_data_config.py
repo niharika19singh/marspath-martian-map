@@ -1,7 +1,9 @@
 import os
 import tempfile
+
 import numpy as np
 import pytest
+
 from backend.app.core.exceptions import TerrainDataUnavailableError
 from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
 
@@ -14,6 +16,7 @@ def test_real_data_disabled_uses_synthetic():
     prov = provider.get_provenance()
     assert prov["data_mode"] == "synthetic_test_fixture"
     assert prov["real_dem_requested"] is False
+    assert prov["real_data_validation_status"] == "not_requested_synthetic_mode"
 
 
 def test_real_data_requested_missing_without_fallback_raises():
@@ -37,6 +40,7 @@ def test_real_data_requested_missing_with_fallback_reports_fallback():
     assert prov["data_mode"] == "synthetic_fallback"
     assert prov["real_dem_requested"] is True
     assert prov["real_dem_loaded"] is False
+    assert prov["real_data_validation_status"] == "incomplete_missing_genuine_dem"
     assert "not found" in prov["fallback_reason"]
 
 
@@ -46,7 +50,9 @@ def test_real_data_loads_and_reports_real():
 
     try:
         elev = np.full((30, 30), -2550.0, dtype=np.float32)
-        np.savez(tmp_path, elevation=elev, min_lon=77.2, min_lat=18.15, max_lon=77.95, max_lat=18.65)
+        np.savez(
+            tmp_path, elevation=elev, min_lon=77.2, min_lat=18.15, max_lon=77.95, max_lat=18.65
+        )
 
         provider = MOLAHRSCRasterProvider(dem_path=tmp_path)
         provider.use_real_dem = True
@@ -56,6 +62,7 @@ def test_real_data_loads_and_reports_real():
         assert raster.metadata.is_synthetic is False
         prov = provider.get_provenance()
         assert prov["data_mode"] == "real"
+        assert prov["real_data_validation_status"] == "verified"
         assert prov["is_synthetic"] is False
         assert prov["file_path"] == tmp_path
     finally:

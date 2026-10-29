@@ -1,5 +1,5 @@
 import numpy as np
-import pytest
+
 from backend.app.routing.cost_model import calculate_edge_cost
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode
@@ -7,7 +7,11 @@ from backend.app.schemas.mission import OptimizationMode
 
 def test_edge_cost_non_negative():
     # Test across all modes that cost >= distance_3d > 0
-    for mode in [OptimizationMode.SAFETY_FIRST, OptimizationMode.BALANCED, OptimizationMode.SCIENCE_FIRST]:
+    for mode in [
+        OptimizationMode.SAFETY_FIRST,
+        OptimizationMode.BALANCED,
+        OptimizationMode.SCIENCE_FIRST,
+    ]:
         cost, breakdown = calculate_edge_cost(
             distance_3d=100.0,
             slope_deg=10.0,
@@ -24,10 +28,18 @@ def test_edge_cost_non_negative():
 def test_directional_uphill_penalty():
     # Uphill vs Downhill on same distance and slope
     cost_uphill, _ = calculate_edge_cost(
-        distance_3d=100.0, slope_deg=12.0, roughness=0.2, delta_z=+15.0, mode=OptimizationMode.BALANCED
+        distance_3d=100.0,
+        slope_deg=12.0,
+        roughness=0.2,
+        delta_z=+15.0,
+        mode=OptimizationMode.BALANCED,
     )
     cost_downhill, _ = calculate_edge_cost(
-        distance_3d=100.0, slope_deg=12.0, roughness=0.2, delta_z=-15.0, mode=OptimizationMode.BALANCED
+        distance_3d=100.0,
+        slope_deg=12.0,
+        roughness=0.2,
+        delta_z=-15.0,
+        mode=OptimizationMode.BALANCED,
     )
     assert cost_uphill > cost_downhill
 

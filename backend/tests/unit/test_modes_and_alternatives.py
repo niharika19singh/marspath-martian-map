@@ -1,7 +1,8 @@
 import pytest
+
 from backend.app.data.providers.synthetic import SyntheticTerrainProvider
 from backend.app.schemas.coordinates import MarsCoordinate
-from backend.app.schemas.mission import OptimizationMode, RouteConstraints
+from backend.app.schemas.mission import OptimizationMode
 from backend.app.schemas.routes import RoutePlanRequest
 from backend.app.services.route_service import RouteService
 

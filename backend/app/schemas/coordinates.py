@@ -16,7 +16,9 @@ class MarsCoordinate(BaseModel):
     @classmethod
     def validate_latitude(cls, v: float) -> float:
         if not (-90.0 <= v <= 90.0):
-            raise ValueError(f"Planetocentric latitude must be between -90 and +90 degrees. Got {v}")
+            raise ValueError(
+                f"Planetocentric latitude must be between -90 and +90 degrees. Got {v}"
+            )
         return float(v)
 
     @field_validator("lon")
@@ -46,7 +48,11 @@ class CRSInfo(BaseModel):
 
     identifier: str = Field(..., description="CRS identifier, e.g. IAU2000:49900")
     name: str = Field(..., description="Descriptive name of the datum/ellipsoid")
-    ellipsoid_radius_meters: float = Field(..., description="Mean radius of Mars used in calculations")
+    ellipsoid_radius_meters: float = Field(
+        ..., description="Mean radius of Mars used in calculations"
+    )
     latitude_type: str = Field("planetocentric", description="Planetocentric or planetographic")
     longitude_direction: str = Field("positive_east", description="Positive East or Positive West")
-    projection: str = Field("Equirectangular / Plate Carree (Mars Sphere)", description="Projected coordinate system")
+    projection: str = Field(
+        "Equirectangular / Plate Carree (Mars Sphere)", description="Projected coordinate system"
+    )

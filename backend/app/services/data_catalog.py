@@ -1,4 +1,3 @@
-from typing import List
 from backend.app.core.config import get_settings
 from backend.app.data.manifest import DATA_CATALOG_MANIFEST
 from backend.app.data.providers.base import BaseRasterProvider
@@ -19,7 +18,7 @@ class DataCatalogService:
         bounds = self.provider.get_bounds()
         is_syn = self.provider.is_synthetic()
 
-        layers: List[LayerInfo] = [
+        layers: list[LayerInfo] = [
             LayerInfo(
                 id="mars_elevation_jezero",
                 name="Martian Digital Elevation Model (Topography)",
@@ -30,7 +29,9 @@ class DataCatalogService:
                 resolution_meters=50.0 if not is_syn else 112.5,
                 bounds=bounds,
                 crs=crs_info,
-                source_name="MOLA-HRSC Blended DTM" if not is_syn else "Synthetic Jezero Pilot Model",
+                source_name="MOLA-HRSC Blended DTM"
+                if not is_syn
+                else "Synthetic Jezero Pilot Model",
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
                 is_numerical=True,
                 is_available=True,

@@ -1,6 +1,8 @@
 import math
-from typing import Any, Dict, List
+from typing import Any
+
 import numpy as np
+
 from backend.app.data.providers.base import BaseRasterProvider
 from backend.app.geospatial.crs import get_mars_crs_info
 from backend.app.geospatial.raster_loader import RasterData, RasterMetadata
@@ -31,7 +33,7 @@ class SyntheticTerrainProvider(BaseRasterProvider):
         self._raster_data: RasterData | None = None
         self._science_targets = self._init_science_targets()
 
-    def _init_science_targets(self) -> List[ScienceTarget]:
+    def _init_science_targets(self) -> list[ScienceTarget]:
         return [
             ScienceTarget(
                 id="poi_delta_front",
@@ -118,7 +120,9 @@ class SyntheticTerrainProvider(BaseRasterProvider):
         belva_dy = lat_grid - 18.41
         belva_dist_km = np.sqrt(belva_dx**2 + belva_dy**2) * 59.274
         belva_mask = belva_dist_km < 0.65
-        elev[belva_mask] -= (80.0 * (1.0 - (belva_dist_km[belva_mask] / 0.65)**2)).astype(np.float32)
+        elev[belva_mask] -= (80.0 * (1.0 - (belva_dist_km[belva_mask] / 0.65) ** 2)).astype(
+            np.float32
+        )
 
         # Western Breach: Neretva Vallis gorge cutting through rim
         vallis_mask = (np.abs(lat_grid - 18.43) < 0.015) & (lon_grid >= 77.25) & (lon_grid <= 77.38)
@@ -154,7 +158,14 @@ class SyntheticTerrainProvider(BaseRasterProvider):
                 deg_per_px_lat=deg_per_px_lat,
                 meters_per_px_x=m_x,
                 meters_per_px_y=m_y,
-                affine_transform=(deg_per_px_lon, 0.0, self.min_lon, 0.0, -deg_per_px_lat, self.max_lat),
+                affine_transform=(
+                    deg_per_px_lon,
+                    0.0,
+                    self.min_lon,
+                    0.0,
+                    -deg_per_px_lat,
+                    self.max_lat,
+                ),
                 nodata_value=-9999.0,
                 vertical_datum="Mars MOLA Areoid",
                 is_synthetic=True,
@@ -173,12 +184,14 @@ class SyntheticTerrainProvider(BaseRasterProvider):
     def get_crs_info(self) -> CRSInfo:
         return get_mars_crs_info()
 
-    def get_provenance(self) -> Dict[str, Any]:
+    def get_provenance(self) -> dict[str, Any]:
         return {
             "mode": "synthetic_test_fixture",
             "pilot_region": "Jezero Crater, Mars",
             "model_description": "Deterministic procedural simulation of Jezero Crater morphology (rim, delta, floor, Belva)",
-            "nominal_resolution_meters": round(((self.max_lon - self.min_lon) / self.cols) * 56250.0, 1),
+            "nominal_resolution_meters": round(
+                ((self.max_lon - self.min_lon) / self.cols) * 56250.0, 1
+            ),
             "reference_datum": "Mars IAU2000 Sphere (R=3,396,190m)",
             "official_source_counterpart": "MOLA/HRSC Blended DEM & CTX/HiRISE Jezero Mosaic",
             "intended_use": "Deterministic algorithm verification, test suite execution, frontend integration sandbox",
@@ -188,5 +201,5 @@ class SyntheticTerrainProvider(BaseRasterProvider):
     def is_synthetic(self) -> bool:
         return True
 
-    def get_science_targets(self) -> List[ScienceTarget]:
+    def get_science_targets(self) -> list[ScienceTarget]:
         return self._science_targets

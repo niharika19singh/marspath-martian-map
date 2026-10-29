@@ -16,7 +16,10 @@ class UnsupportedCRSError(MarsPathError):
         super().__init__(
             msg,
             status_code=422,
-            details={"requested_crs": crs_identifier, "supported_crs": supported or ["IAU2000:49900", "Mars2000_Sphere"]},
+            details={
+                "requested_crs": crs_identifier,
+                "supported_crs": supported or ["IAU2000:49900", "Mars2000_Sphere"],
+            },
         )
 
 

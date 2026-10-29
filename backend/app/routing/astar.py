@@ -1,14 +1,12 @@
 import heapq
 import math
 import time
-from typing import Dict, List, Optional, Set, Tuple
+
 from backend.app.core.exceptions import ComputationalBoundExceededError, UnreachableDestinationError
 from backend.app.routing.graph_builder import TerrainGridGraph
 
 
-def euclidean_heuristic(
-    r: int, c: int, dest_r: int, dest_c: int, dx: float, dy: float
-) -> float:
+def euclidean_heuristic(r: int, c: int, dest_r: int, dest_c: int, dx: float, dy: float) -> float:
     """
     Admissible and consistent Euclidean distance heuristic in physical meters.
     h(u, v) <= true_cost(u, v) because true_cost >= dist_3d >= dist_2d.
@@ -20,11 +18,11 @@ def euclidean_heuristic(
 
 def astar_search(
     graph: TerrainGridGraph,
-    start: Tuple[int, int],
-    dest: Tuple[int, int],
+    start: tuple[int, int],
+    dest: tuple[int, int],
     max_expansions: int = 150000,
-    penalized_edges: Optional[Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]] = None,
-) -> Tuple[List[Tuple[int, int]], float, int, float]:
+    penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] | None = None,
+) -> tuple[list[tuple[int, int]], float, int, float]:
     """
     Runs A* graph search from start to destination on the terrain graph.
 
@@ -41,15 +39,15 @@ def astar_search(
 
     # Priority queue storing (f_score, g_score, (r, c))
     h0 = euclidean_heuristic(start_r, start_c, dest_r, dest_c, graph.dx, graph.dy)
-    open_set: List[Tuple[float, float, Tuple[int, int]]] = [(h0, 0.0, start)]
+    open_set: list[tuple[float, float, tuple[int, int]]] = [(h0, 0.0, start)]
 
     # g_score[node] = cheapest known cost from start to node
-    g_score: Dict[Tuple[int, int], float] = {start: 0.0}
+    g_score: dict[tuple[int, int], float] = {start: 0.0}
 
     # parent pointers for path reconstruction
-    came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
+    came_from: dict[tuple[int, int], tuple[int, int]] = {}
 
-    closed_set: Set[Tuple[int, int]] = set()
+    closed_set: set[tuple[int, int]] = set()
     nodes_expanded = 0
 
     while open_set:
@@ -82,7 +80,9 @@ def astar_search(
 
         curr_r, curr_c = current
 
-        for neighbor, edge_cost, _, _, _, _ in graph.get_valid_neighbors(curr_r, curr_c, penalized_edges):
+        for neighbor, edge_cost, _, _, _, _ in graph.get_valid_neighbors(
+            curr_r, curr_c, penalized_edges
+        ):
             if neighbor in closed_set:
                 continue
 

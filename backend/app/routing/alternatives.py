@@ -1,7 +1,8 @@
 import logging
 import math
-from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+
 from backend.app.core.exceptions import ComputationalBoundExceededError, UnreachableDestinationError
 from backend.app.geospatial.crs import (
     METERS_PER_DEGREE_LATITUDE,
@@ -12,7 +13,6 @@ from backend.app.geospatial.raster_loader import RasterMetadata
 from backend.app.routing.astar import astar_search
 from backend.app.routing.cost_model import calculate_edge_cost
 from backend.app.routing.graph_builder import TerrainGridGraph
-from backend.app.schemas.coordinates import MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode, ScienceTarget
 from backend.app.schemas.routes import GeoJSONGeometry, RouteAlternative, RouteSummary
 
@@ -20,13 +20,13 @@ logger = logging.getLogger("marspath.routing.alternatives")
 
 
 def reconstruct_route_summary(
-    path_nodes: List[Tuple[int, int]],
+    path_nodes: list[tuple[int, int]],
     graph: TerrainGridGraph,
     meta: RasterMetadata,
     mode: OptimizationMode,
-    penalized_edges: Optional[Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]] = None,
-    science_targets: Optional[List[ScienceTarget]] = None,
-) -> Tuple[RouteSummary, GeoJSONGeometry, Dict[str, float], List[str], List[str]]:
+    penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] | None = None,
+    science_targets: list[ScienceTarget] | None = None,
+) -> tuple[RouteSummary, GeoJSONGeometry, dict[str, float], list[str], list[str]]:
     """
     Computes detailed summary metrics, GeoJSON geometry, exact cost breakdown,
     and visited/nearby science targets from an ordered sequence of grid nodes.
@@ -38,10 +38,10 @@ def reconstruct_route_summary(
     total_dist = 0.0
     elev_gain = 0.0
     elev_loss = 0.0
-    slopes: List[float] = []
-    roughnesses: List[float] = []
-    elevations: List[float] = []
-    geojson_coords: List[List[float]] = []
+    slopes: list[float] = []
+    roughnesses: list[float] = []
+    elevations: list[float] = []
+    geojson_coords: list[list[float]] = []
 
     cost_base = 0.0
     cost_slope = 0.0
@@ -56,7 +56,13 @@ def reconstruct_route_summary(
     elevations.append(z_prev)
 
     lon_start, lat_start = pixel_to_geo(
-        prev_c, prev_r, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat, pixel_center=True
+        prev_c,
+        prev_r,
+        meta.min_lon,
+        meta.max_lat,
+        meta.deg_per_px_lon,
+        meta.deg_per_px_lat,
+        pixel_center=True,
     )
     geojson_coords.append([round(lon_start, 6), round(lat_start, 6), round(z_prev, 2)])
 
@@ -67,7 +73,11 @@ def reconstruct_route_summary(
         dr = curr_r - prev_r
         dc = curr_c - prev_c
 
-        d2d = graph.dist_diag if (dr != 0 and dc != 0) else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
+        d2d = (
+            graph.dist_diag
+            if (dr != 0 and dc != 0)
+            else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
+        )
         dz = z_curr - z_prev
         d3d = math.sqrt(d2d**2 + dz**2)
         total_dist += d3d
@@ -109,7 +119,13 @@ def reconstruct_route_summary(
         total_duration_seconds += step_time_sec
 
         lon, lat = pixel_to_geo(
-            curr_c, curr_r, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat, pixel_center=True
+            curr_c,
+            curr_r,
+            meta.min_lon,
+            meta.max_lat,
+            meta.deg_per_px_lon,
+            meta.deg_per_px_lat,
+            pixel_center=True,
         )
         geojson_coords.append([round(lon, 6), round(lat, 6), round(z_curr, 2)])
 
@@ -124,8 +140,8 @@ def reconstruct_route_summary(
     energy_idx = (total_dist * 0.001) + (elev_gain * 0.02)
 
     # Distinguish science targets visited vs in proximity using Mars metric distance
-    visited_target_ids: List[str] = []
-    nearby_target_ids: List[str] = []
+    visited_target_ids: list[str] = []
+    nearby_target_ids: list[str] = []
     science_score = 0.0
 
     if science_targets:
@@ -182,12 +198,12 @@ def reconstruct_route_summary(
 def generate_route_alternatives(
     graph: TerrainGridGraph,
     meta: RasterMetadata,
-    start_px: Tuple[int, int],
-    dest_px: Tuple[int, int],
+    start_px: tuple[int, int],
+    dest_px: tuple[int, int],
     requested_mode: OptimizationMode,
     num_alternatives: int = 1,
-    science_targets: Optional[List[ScienceTarget]] = None,
-) -> Tuple[List[RouteAlternative], int]:
+    science_targets: list[ScienceTarget] | None = None,
+) -> tuple[list[RouteAlternative], int]:
     """
     Computes 1 to 3 distinct candidate routes.
     Route 1: Primary route for the requested mode.
@@ -197,7 +213,7 @@ def generate_route_alternatives(
     Returns:
         (routes_list, total_nodes_expanded)
     """
-    results: List[RouteAlternative] = []
+    results: list[RouteAlternative] = []
     total_nodes_expanded = 0
 
     # 1. Primary route
@@ -214,7 +230,7 @@ def generate_route_alternatives(
             name=f"Primary Route ({requested_mode.value.replace('_', ' ').title()})",
             mode=requested_mode,
             score_rank=1,
-            total_cost=round(primary_cost, 2),
+            total_cost=round(sum(breakdown_1.values()), 2),
             cost_breakdown=breakdown_1,
             summary=summary_1,
             geometry=geom_1,
@@ -228,14 +244,16 @@ def generate_route_alternatives(
         return results, total_nodes_expanded
 
     # 2. Alternative route: Penalize edges of primary path to find alternative corridor
-    penalized_edges: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = {}
+    penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] = {}
     for i in range(len(primary_nodes) - 1):
         u, v = primary_nodes[i], primary_nodes[i + 1]
         penalized_edges[(u, v)] = 1500.0  # +1500m cost penalty to divert
         penalized_edges[(v, u)] = 1500.0
 
     try:
-        alt_nodes, alt_cost, nodes_2, _ = astar_search(graph, start_px, dest_px, penalized_edges=penalized_edges)
+        alt_nodes, alt_cost, nodes_2, _ = astar_search(
+            graph, start_px, dest_px, penalized_edges=penalized_edges
+        )
         total_nodes_expanded += nodes_2
 
         # Check if alternative is genuinely distinct
@@ -244,7 +262,12 @@ def generate_route_alternatives(
 
         if overlap_pct < 0.85:
             summary_2, geom_2, breakdown_2, visited_2, nearby_2 = reconstruct_route_summary(
-                alt_nodes, graph, meta, requested_mode, penalized_edges=penalized_edges, science_targets=science_targets
+                alt_nodes,
+                graph,
+                meta,
+                requested_mode,
+                penalized_edges=penalized_edges,
+                science_targets=science_targets,
             )
             results.append(
                 RouteAlternative(
@@ -252,26 +275,33 @@ def generate_route_alternatives(
                     name="Alternative Diverse Corridor",
                     mode=requested_mode,
                     score_rank=2,
-                    total_cost=round(alt_cost, 2),
+                    total_cost=round(sum(breakdown_2.values()), 2),
                     cost_breakdown=breakdown_2,
                     summary=summary_2,
                     geometry=geom_2,
                     science_targets_visited=visited_2,
                     science_targets_nearby=nearby_2,
-                    warnings=["Alternative corridor avoids high-traffic bottlenecks of primary route."],
+                    warnings=[
+                        "Alternative corridor avoids high-traffic bottlenecks of primary route."
+                    ],
                 )
             )
         else:
-            logger.info("Secondary alternative discarded: overlap (%.1f%%) exceeds 85%% threshold.", overlap_pct * 100.0)
+            logger.info(
+                "Secondary alternative discarded: overlap (%.1f%%) exceeds 85%% threshold.",
+                overlap_pct * 100.0,
+            )
             results[0].warnings.append(
-                f"Secondary corridor search suppressed: generated path overlapped {int(overlap_pct*100)}% with primary route."
+                f"Secondary corridor search suppressed: generated path overlapped {int(overlap_pct * 100)}% with primary route."
             )
     except (UnreachableDestinationError, ComputationalBoundExceededError) as e:
         logger.info("Secondary alternative search failed: %s", e)
         results[0].warnings.append(f"Secondary corridor search unviable: {e.message}")
     except Exception as e:
         logger.warning("Unexpected error during secondary alternative search: %s", e)
-        results[0].warnings.append("Secondary corridor search encountered an unexpected traversal barrier.")
+        results[0].warnings.append(
+            "Secondary corridor search encountered an unexpected traversal barrier."
+        )
 
     # 3. Third alternative if requested and mode was not safety_first
     if num_alternatives >= 3 and len(results) < 3:
@@ -287,7 +317,9 @@ def generate_route_alternatives(
                 mode=alt_mode,
             )
             try:
-                safety_nodes, safety_cost, nodes_3, _ = astar_search(graph_safety, start_px, dest_px)
+                safety_nodes, safety_cost, nodes_3, _ = astar_search(
+                    graph_safety, start_px, dest_px
+                )
                 total_nodes_expanded += nodes_3
 
                 summary_3, geom_3, breakdown_3, visited_3, nearby_3 = reconstruct_route_summary(
@@ -299,13 +331,15 @@ def generate_route_alternatives(
                         name="Conservative Safety-First Corridor",
                         mode=alt_mode,
                         score_rank=len(results) + 1,
-                        total_cost=round(safety_cost, 2),
+                        total_cost=round(sum(breakdown_3.values()), 2),
                         cost_breakdown=breakdown_3,
                         summary=summary_3,
                         geometry=geom_3,
                         science_targets_visited=visited_3,
                         science_targets_nearby=nearby_3,
-                        warnings=["Strict 14° slope constraint enforced; prioritizes minimum roughness."],
+                        warnings=[
+                            "Strict 14° slope constraint enforced; prioritizes minimum roughness."
+                        ],
                     )
                 )
             except (UnreachableDestinationError, ComputationalBoundExceededError) as e:

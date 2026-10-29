@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Tuple
+
 from backend.app.schemas.mission import OptimizationMode
 
 
@@ -12,7 +12,7 @@ class CostModelWeights:
 
 
 # Mode weight definitions
-MODE_WEIGHTS: Dict[OptimizationMode, CostModelWeights] = {
+MODE_WEIGHTS: dict[OptimizationMode, CostModelWeights] = {
     OptimizationMode.SAFETY_FIRST: CostModelWeights(
         weight_slope=3.5,
         weight_roughness=2.5,
@@ -42,7 +42,7 @@ def calculate_edge_cost(
     mode: OptimizationMode,
     is_nodata: bool = False,
     extra_penalty: float = 0.0,
-) -> Tuple[float, Dict[str, float]]:
+) -> tuple[float, dict[str, float]]:
     """
     Computes explainable, strictly non-negative edge traversal cost:
     cost = distance_3d * (1.0 + w_slope * normalized_slope + w_rough * roughness + w_hazard * hazard) + extra_penalty

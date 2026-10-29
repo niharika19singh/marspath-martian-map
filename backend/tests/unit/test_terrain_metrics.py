@@ -1,6 +1,7 @@
 import math
+
 import numpy as np
-import pytest
+
 from backend.app.geospatial.terrain_metrics import (
     build_traversability_mask,
     compute_physical_pixel_sizes,
@@ -10,7 +11,9 @@ from backend.app.geospatial.terrain_metrics import (
 
 
 def test_compute_physical_pixel_sizes():
-    dx, dy = compute_physical_pixel_sizes(center_lat_deg=18.38, deg_per_px_lon=0.001, deg_per_px_lat=0.001)
+    dx, dy = compute_physical_pixel_sizes(
+        center_lat_deg=18.38, deg_per_px_lon=0.001, deg_per_px_lat=0.001
+    )
     # 1 deg lat on Mars is ~59274.69m -> 0.001 deg is ~59.27m
     assert abs(dy - 59.27) < 0.5
     # 1 deg lon at 18.38 deg N is ~59274.69 * cos(18.38°) ~ 56251.6m -> 0.001 deg is ~56.25m
@@ -48,16 +51,14 @@ def test_roughness_on_flat_vs_boulders():
 
 
 def test_traversability_mask():
-    slopes = np.array([
-        [5.0, 10.0, 15.0],
-        [18.0, 22.0, 30.0],
-        [2.0, 8.0, float("nan")]
-    ])
-    roughness = np.array([
-        [0.1, 0.2, 0.3],
-        [0.4, 0.5, 0.6],
-        [0.1, 0.95, 0.2]  # (2, 1) exceeds max_roughness 0.85
-    ])
+    slopes = np.array([[5.0, 10.0, 15.0], [18.0, 22.0, 30.0], [2.0, 8.0, float("nan")]])
+    roughness = np.array(
+        [
+            [0.1, 0.2, 0.3],
+            [0.4, 0.5, 0.6],
+            [0.1, 0.95, 0.2],  # (2, 1) exceeds max_roughness 0.85
+        ]
+    )
 
     mask = build_traversability_mask(
         slope_deg=slopes,

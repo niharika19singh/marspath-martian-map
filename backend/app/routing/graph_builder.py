@@ -1,6 +1,8 @@
 import math
-from typing import Generator, List, Tuple
+from collections.abc import Generator
+
 import numpy as np
+
 from backend.app.routing.cost_model import calculate_edge_cost
 from backend.app.schemas.mission import OptimizationMode
 
@@ -8,13 +10,13 @@ from backend.app.schemas.mission import OptimizationMode
 # First 4 are orthogonal; next 4 are diagonal
 NEIGHBORS_8 = [
     (-1, 0),  # North
-    (1, 0),   # South
+    (1, 0),  # South
     (0, -1),  # West
-    (0, 1),   # East
-    (-1, -1), # North-West
+    (0, 1),  # East
+    (-1, -1),  # North-West
     (-1, 1),  # North-East
     (1, -1),  # South-West
-    (1, 1),   # South-East
+    (1, 1),  # South-East
 ]
 
 
@@ -54,7 +56,7 @@ class TerrainGridGraph:
 
     def get_valid_neighbors(
         self, r: int, c: int, penalized_edges: dict | None = None
-    ) -> Generator[Tuple[Tuple[int, int], float, float, float, float, float], None, None]:
+    ) -> Generator[tuple[tuple[int, int], float, float, float, float, float], None, None]:
         """
         Yields traversable neighbors:
         ((nr, nc), edge_cost, step_dist_3d, step_slope, step_rough, delta_z)

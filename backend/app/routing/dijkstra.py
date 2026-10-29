@@ -1,17 +1,17 @@
 import heapq
 import time
-from typing import Dict, List, Optional, Set, Tuple
+
 from backend.app.core.exceptions import ComputationalBoundExceededError, UnreachableDestinationError
 from backend.app.routing.graph_builder import TerrainGridGraph
 
 
 def dijkstra_search(
     graph: TerrainGridGraph,
-    start: Tuple[int, int],
-    dest: Tuple[int, int],
+    start: tuple[int, int],
+    dest: tuple[int, int],
     max_expansions: int = 150000,
-    penalized_edges: Optional[Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]] = None,
-) -> Tuple[List[Tuple[int, int]], float, int, float]:
+    penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] | None = None,
+) -> tuple[list[tuple[int, int]], float, int, float]:
     """
     Reference Dijkstra shortest path algorithm on the terrain graph.
     Used as an analytical baseline to verify A* optimality.
@@ -25,10 +25,10 @@ def dijkstra_search(
         return [start], 0.0, 0, 0.0
 
     # Priority queue storing (cost, (r, c))
-    open_set: List[Tuple[float, Tuple[int, int]]] = [(0.0, start)]
-    distances: Dict[Tuple[int, int], float] = {start: 0.0}
-    came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
-    visited: Set[Tuple[int, int]] = set()
+    open_set: list[tuple[float, tuple[int, int]]] = [(0.0, start)]
+    distances: dict[tuple[int, int], float] = {start: 0.0}
+    came_from: dict[tuple[int, int], tuple[int, int]] = {}
+    visited: set[tuple[int, int]] = set()
     nodes_expanded = 0
 
     while open_set:
@@ -59,7 +59,9 @@ def dijkstra_search(
 
         curr_r, curr_c = current
 
-        for neighbor, edge_cost, _, _, _, _ in graph.get_valid_neighbors(curr_r, curr_c, penalized_edges):
+        for neighbor, edge_cost, _, _, _, _ in graph.get_valid_neighbors(
+            curr_r, curr_c, penalized_edges
+        ):
             if neighbor in visited:
                 continue
 

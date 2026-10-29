@@ -1,5 +1,5 @@
 import numpy as np
-import pytest
+
 from backend.app.geospatial.terrain_metrics import (
     build_traversability_mask,
     compute_roughness_index,
@@ -56,7 +56,7 @@ def test_routing_navigates_around_nodata_hole():
     )
 
     # The hole and its perimeter must be strictly impassable
-    assert np.all(traversable[10:15, 10:15] == False)
+    assert not np.any(traversable[10:15, 10:15])
 
     graph = TerrainGridGraph(
         elevation=elevation,

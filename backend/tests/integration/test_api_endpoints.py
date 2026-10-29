@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+
 from backend.app.main import app
 
 client = TestClient(app)
@@ -19,7 +20,7 @@ def test_layers_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["count"] >= 4
-    layer_ids = [l["id"] for l in data["layers"]]
+    layer_ids = [lyr["id"] for lyr in data["layers"]]
     assert "mars_elevation_jezero" in layer_ids
     assert "mars_slope_degrees" in layer_ids
     assert "mars_roughness_tri" in layer_ids
@@ -46,9 +47,9 @@ def test_route_plan_success():
         "constraints": {
             "max_slope_deg": 20.0,
             "max_roughness": 0.85,
-            "avoid_unobserved_terrain": True
+            "avoid_unobserved_terrain": True,
         },
-        "num_alternatives": 2
+        "num_alternatives": 2,
     }
     response = client.post("/api/v1/routes/plan", json=payload)
     assert response.status_code == 200
@@ -94,7 +95,7 @@ def test_route_plan_invalid_constraints():
         "destination": {"lon": 77.44, "lat": 18.42},
         "constraints": {
             "max_slope_deg": 65.0,  # Exceeds 45.0 limit
-        }
+        },
     }
     response = client.post("/api/v1/routes/plan", json=payload)
     assert response.status_code == 422

@@ -8,9 +8,13 @@ from backend.app.schemas.coordinates import MarsCoordinate
 from backend.app.schemas.mission import RouteConstraints
 
 
-def validate_coordinates_in_bounds(coord: MarsCoordinate, meta: RasterMetadata, label: str = "Coordinate") -> None:
+def validate_coordinates_in_bounds(
+    coord: MarsCoordinate, meta: RasterMetadata, label: str = "Coordinate"
+) -> None:
     """Verifies that a geographic coordinate falls inside the loaded raster coverage."""
-    if not (meta.min_lon <= coord.lon <= meta.max_lon and meta.min_lat <= coord.lat <= meta.max_lat):
+    if not (
+        meta.min_lon <= coord.lon <= meta.max_lon and meta.min_lat <= coord.lat <= meta.max_lat
+    ):
         bounds_dict = {
             "min_lon": round(meta.min_lon, 4),
             "max_lon": round(meta.max_lon, 4),

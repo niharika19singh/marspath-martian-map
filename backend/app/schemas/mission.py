@@ -1,6 +1,7 @@
 from enum import Enum
-from typing import List, Optional
+
 from pydantic import BaseModel, Field
+
 from backend.app.schemas.coordinates import MarsCoordinate
 
 
@@ -42,7 +43,11 @@ class ScienceTarget(BaseModel):
 
     id: str = Field(..., description="Target identifier")
     name: str = Field(..., description="Scientific feature name")
-    target_type: str = Field(..., description="E.g. delta_fan, carbonate_strata, olivine_bedrock, impact_ejecta")
+    target_type: str = Field(
+        ..., description="E.g. delta_fan, carbonate_strata, olivine_bedrock, impact_ejecta"
+    )
     coordinate: MarsCoordinate = Field(..., description="Location on Mars")
-    scientific_priority: float = Field(default=1.0, ge=0.0, le=10.0, description="Priority multiplier for science routing")
+    scientific_priority: float = Field(
+        default=1.0, ge=0.0, le=10.0, description="Priority multiplier for science routing"
+    )
     description: str = Field(..., description="Geological rationale and context")

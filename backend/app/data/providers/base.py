@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any
+
 from backend.app.geospatial.raster_loader import RasterData
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo
 from backend.app.schemas.mission import ScienceTarget
@@ -24,7 +25,7 @@ class BaseRasterProvider(ABC):
         pass
 
     @abstractmethod
-    def get_provenance(self) -> Dict[str, Any]:
+    def get_provenance(self) -> dict[str, Any]:
         """Returns dataset provenance, citation, and sensor details."""
         pass
 
@@ -34,6 +35,6 @@ class BaseRasterProvider(ABC):
         pass
 
     @abstractmethod
-    def get_science_targets(self) -> List[ScienceTarget]:
+    def get_science_targets(self) -> list[ScienceTarget]:
         """Returns scientific points of interest within the region."""
         pass
