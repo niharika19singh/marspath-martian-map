@@ -28,20 +28,32 @@ def compute_slope_degrees(
     """
     Computes terrain slope in degrees using 2D finite difference gradients in physical meters.
     Slope = arctan( sqrt( (dz/dx)^2 + (dz/dy)^2 ) ) * (180 / pi).
-    Cells adjacent to or containing nodata values are masked with NaN.
+
+    Rigorous nodata handling:
+    - Nodata cells are isolated before differentiation so placeholder values
+      (e.g. -9999 or -32768) never contaminate valid neighbouring cells.
+    - Cells adjacent to nodata boundaries are conservatively masked with NaN.
     """
-    # 2D gradient: axis 0 is rows (Y, North to South), axis 1 is cols (X, West to East)
-    # np.gradient uses second-order central differences in the interior and first-order at boundaries
-    dz_dy, dz_dx = np.gradient(elevation_grid, dy_meters, dx_meters)
+    # Create clean float array with NaNs at nodata cells
+    elev_clean = elevation_grid.astype(np.float64).copy()
+    if nodata_mask is not None:
+        elev_clean[nodata_mask] = np.nan
+
+    # Compute 2D gradient with physical step sizes in meters
+    # np.gradient naturally propagates NaN to immediate neighbor differences
+    dz_dy, dz_dx = np.gradient(elev_clean, dy_meters, dx_meters)
 
     grad_mag = np.sqrt(dz_dx**2 + dz_dy**2)
     slope_rad = np.arctan(grad_mag)
     slope_deg = np.degrees(slope_rad)
 
+    # Explicitly ensure nodata cells are NaN
     if nodata_mask is not None:
-        slope_deg[nodata_mask] = np.nan
+        # Dilate nodata mask by 1 cell to catch cells contaminated by central difference
+        dilated_mask = ndimage.binary_dilation(nodata_mask, structure=np.ones((3, 3)))
+        slope_deg[dilated_mask] = np.nan
 
-    return slope_deg
+    return slope_deg.astype(np.float32)
 
 
 def compute_roughness_index(
@@ -53,22 +65,47 @@ def compute_roughness_index(
     Computes localized Terrain Ruggedness Index (TRI) representing micro-topographic roughness.
     Defined as the standard deviation of elevation differences within a localized moving window,
     normalized to a bounded index [0.0, 1.0].
+
+    Nodata handling:
+    - Uses masked window convolution so nodata cells cannot corrupt the local mean or variance.
+    - Cells with insufficient valid neighbours or in nodata are masked with NaN.
     """
-    # Moving mean using uniform filter
-    mean_filter = ndimage.uniform_filter(elevation_grid, size=kernel_size, mode="reflect")
-    # Moving square mean
-    sqr_filter = ndimage.uniform_filter(elevation_grid**2, size=kernel_size, mode="reflect")
-
-    # Local variance = E[X^2] - (E[X])^2
-    variance = np.maximum(sqr_filter - mean_filter**2, 0.0)
-    std_dev = np.sqrt(variance)
-
-    # Normalize std_dev: 0m std dev -> 0.0, >= 25m std dev -> 1.0 (extreme boulder/rough field)
-    roughness = np.clip(std_dev / 25.0, 0.0, 1.0)
+    elev = elevation_grid.astype(np.float64).copy()
+    valid_mask = np.ones_like(elev, dtype=bool)
 
     if nodata_mask is not None:
-        roughness[nodata_mask] = np.nan
+        valid_mask = ~nodata_mask
+        elev[~valid_mask] = 0.0
 
+    # Number of valid cells in local window
+    window_cells = float(kernel_size * kernel_size)
+    valid_count = ndimage.uniform_filter(valid_mask.astype(np.float64), size=kernel_size, mode="constant", cval=0.0) * window_cells
+
+    # Sum of elevation and sum of squared elevation in window
+    elev_sum = ndimage.uniform_filter(elev, size=kernel_size, mode="constant", cval=0.0) * window_cells
+    elev_sq_sum = ndimage.uniform_filter(elev**2, size=kernel_size, mode="constant", cval=0.0) * window_cells
+
+    # Safe division avoiding division by zero
+    safe_valid = valid_count >= 3.0  # Require at least 3 valid samples in window
+    mean = np.zeros_like(elev)
+    mean[safe_valid] = elev_sum[safe_valid] / valid_count[safe_valid]
+
+    mean_sq = np.zeros_like(elev)
+    mean_sq[safe_valid] = elev_sq_sum[safe_valid] / valid_count[safe_valid]
+
+    variance = np.maximum(mean_sq - mean**2, 0.0)
+    std_dev = np.sqrt(variance)
+
+    # Normalize std_dev: 0m -> 0.0, >= 25m -> 1.0
+    roughness = np.clip(std_dev / 25.0, 0.0, 1.0).astype(np.float32)
+
+    # Invalidate cells that were nodata or had insufficient valid neighbors
+    invalid = (~safe_valid) | (~valid_mask)
+    if nodata_mask is not None:
+        dilated_mask = ndimage.binary_dilation(nodata_mask, structure=np.ones((3, 3)))
+        invalid = invalid | dilated_mask
+
+    roughness[invalid] = np.nan
     return roughness
 
 
@@ -78,20 +115,33 @@ def build_traversability_mask(
     max_slope_deg: float = 20.0,
     max_roughness: float = 0.85,
     nodata_mask: np.ndarray | None = None,
+    avoid_unobserved_terrain: bool = True,
 ) -> np.ndarray:
     """
     Creates a binary boolean traversability mask:
     True = Traversable cell
     False = Impassable hazard or untraversable terrain
+
+    If avoid_unobserved_terrain is True:
+    Cells with missing elevation data, NaN slopes, or adjacent to nodata holes
+    are strictly untraversable (False).
     """
+    valid_slope = ~np.isnan(slope_deg)
+    valid_rough = ~np.isnan(roughness)
+
     traversable = (
         (slope_deg <= max_slope_deg)
         & (roughness <= max_roughness)
-        & (~np.isnan(slope_deg))
-        & (~np.isnan(roughness))
+        & valid_slope
+        & valid_rough
     )
 
     if nodata_mask is not None:
+        # Nodata cells are always impassable
         traversable[nodata_mask] = False
+        if avoid_unobserved_terrain:
+            # Conservative barrier around unobserved terrain
+            dilated = ndimage.binary_dilation(nodata_mask, structure=np.ones((3, 3)))
+            traversable[dilated] = False
 
     return traversable

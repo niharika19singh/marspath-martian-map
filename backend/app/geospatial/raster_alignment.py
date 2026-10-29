@@ -71,14 +71,20 @@ def crop_mission_corridor(
     cropped_meta = RasterMetadata(
         width=crop_w,
         height=crop_h,
+        coordinate_type=meta.coordinate_type,
+        crs_str=meta.crs_str,
+        units=meta.units,
         min_lon=sub_min_lon,
         min_lat=sub_min_lat,
         max_lon=sub_max_lon,
         max_lat=sub_max_lat,
         deg_per_px_lon=meta.deg_per_px_lon,
         deg_per_px_lat=meta.deg_per_px_lat,
+        meters_per_px_x=meta.meters_per_px_x,
+        meters_per_px_y=meta.meters_per_px_y,
+        affine_transform=(meta.deg_per_px_lon, 0.0, sub_min_lon, 0.0, -meta.deg_per_px_lat, sub_max_lat),
         nodata_value=meta.nodata_value,
-        crs_str=meta.crs_str,
+        vertical_datum=meta.vertical_datum,
         is_synthetic=meta.is_synthetic,
     )
 

@@ -1,5 +1,5 @@
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 from backend.app.core.exceptions import CoordinatesOutOfBoundsError, UnsupportedCRSError
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo, MarsCoordinate
 
@@ -10,7 +10,8 @@ MARS_POLAR_RADIUS_METERS = 3376200.0
 MARS_CIRCUMFERENCE_METERS = 2.0 * math.pi * MARS_VOLUMETRIC_RADIUS_METERS
 METERS_PER_DEGREE_LATITUDE = MARS_CIRCUMFERENCE_METERS / 360.0  # ~59,274.69 meters/degree
 
-SUPPORTED_CRS_IDENTIFIERS = {
+# Valid geographic CRS identifiers for Mars (coordinates in degrees)
+SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS = {
     "IAU2000:49900",
     "IAU_2000:49900",
     "MARS2000_SPHERE",
@@ -18,12 +19,43 @@ SUPPORTED_CRS_IDENTIFIERS = {
     "URN:OGC:DEF:CRS:IAU:2000:49900",
 }
 
+# Valid projected CRS identifiers for Mars (coordinates in meters)
+SUPPORTED_PROJECTED_CRS_IDENTIFIERS = {
+    "MARS_EQUIRECTANGULAR",
+    "MARS_SINUSOIDAL",
+    "IAU2000:49900_PROJECTED",
+    "EQC_MARS",
+}
 
-def get_mars_crs_info() -> CRSInfo:
-    """Returns official Mars IAU2000 CRS metadata."""
+
+def get_mars_geographic_crs_info() -> CRSInfo:
+    """
+    Returns official Mars IAU2000 Geographic CRS metadata.
+    Coordinates are in planetocentric degrees (lon, lat).
+    """
     return CRSInfo(
         identifier="IAU2000:49900",
         name="Mars 2000 Sphere (IAU/IAG Working Group)",
+        ellipsoid_radius_meters=MARS_VOLUMETRIC_RADIUS_METERS,
+        latitude_type="planetocentric",
+        longitude_direction="positive_east",
+        projection="Geographic (Planetocentric Degrees)",
+    )
+
+
+def get_mars_crs_info() -> CRSInfo:
+    """Backward-compatible alias for Mars Geographic CRS."""
+    return get_mars_geographic_crs_info()
+
+
+def get_mars_metric_analysis_crs_info() -> CRSInfo:
+    """
+    Returns metadata for internal local metric analysis grid (Equirectangular).
+    Coordinates are in physical meters (x_meters, y_meters).
+    """
+    return CRSInfo(
+        identifier="MARS_LOCAL_EQUIRECTANGULAR_METRIC",
+        name="Mars Local Equirectangular Metric Analysis Grid",
         ellipsoid_radius_meters=MARS_VOLUMETRIC_RADIUS_METERS,
         latitude_type="planetocentric",
         longitude_direction="positive_east",
@@ -34,8 +66,11 @@ def get_mars_crs_info() -> CRSInfo:
 def validate_crs(crs_identifier: str) -> None:
     """Validates that the requested CRS is a recognized Mars planetary CRS."""
     norm = crs_identifier.strip().upper()
-    if norm not in SUPPORTED_CRS_IDENTIFIERS:
-        raise UnsupportedCRSError(crs_identifier, list(SUPPORTED_CRS_IDENTIFIERS))
+    if norm not in SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS and norm not in SUPPORTED_PROJECTED_CRS_IDENTIFIERS:
+        raise UnsupportedCRSError(
+            crs_identifier,
+            list(SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS.union(SUPPORTED_PROJECTED_CRS_IDENTIFIERS)),
+        )
 
 
 def meters_per_degree_lon(lat_deg: float) -> float:
@@ -110,13 +145,21 @@ def geo_to_pixel(
     max_lat: float,
     deg_per_px_lon: float,
     deg_per_px_lat: float,
+    pixel_center: bool = False,
 ) -> Tuple[int, int]:
     """
     Maps geographic coordinates (lon, lat) to raster grid indices (col, row).
     Standard North-up raster where row 0 is max_lat and col 0 is min_lon.
+    Respects standard GeoTIFF PixelIsArea convention.
     """
-    col = int(round((lon - min_lon) / deg_per_px_lon))
-    row = int(round((max_lat - lat) / deg_per_px_lat))
+    # Normalize longitude delta relative to min_lon
+    dlon = (lon - min_lon) % 360.0
+    if pixel_center:
+        col = int(math.floor(dlon / deg_per_px_lon))
+        row = int(math.floor((max_lat - lat) / deg_per_px_lat))
+    else:
+        col = int(round(dlon / deg_per_px_lon))
+        row = int(round((max_lat - lat) / deg_per_px_lat))
     return col, row
 
 
@@ -127,10 +170,30 @@ def pixel_to_geo(
     max_lat: float,
     deg_per_px_lon: float,
     deg_per_px_lat: float,
+    pixel_center: bool = True,
 ) -> Tuple[float, float]:
     """
     Maps raster grid indices (col, row) to geographic coordinates (lon, lat).
+    If pixel_center=True, returns the center coordinate of the pixel cell.
+    If pixel_center=False, returns the top-left edge coordinate.
     """
-    lon = min_lon + (col * deg_per_px_lon)
-    lat = max_lat - (row * deg_per_px_lat)
+    offset = 0.5 if pixel_center else 0.0
+    lon = min_lon + ((col + offset) * deg_per_px_lon)
+    lat = max_lat - ((row + offset) * deg_per_px_lat)
     return lon % 360.0, lat
+
+
+def projected_metric_bounds_to_geographic(
+    min_x: float,
+    min_y: float,
+    max_x: float,
+    max_y: float,
+    center_lon: float = 0.0,
+    center_lat: float = 0.0,
+) -> Tuple[float, float, float, float]:
+    """
+    Converts bounding box in projected meters (Equirectangular) to geographic degrees.
+    """
+    lon_min, lat_min = unproject_from_mars_metric(min_x, min_y, center_lon, center_lat)
+    lon_max, lat_max = unproject_from_mars_metric(max_x, max_y, center_lon, center_lat)
+    return min(lon_min, lon_max), min(lat_min, lat_max), max(lon_min, lon_max), max(lat_min, lat_max)

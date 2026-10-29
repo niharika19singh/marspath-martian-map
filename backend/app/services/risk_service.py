@@ -41,7 +41,8 @@ class RiskService:
             roughness=roughness,
             max_slope_deg=effective_max_slope,
             max_roughness=constraints.max_roughness,
-            nodata_mask=nodata_mask if constraints.avoid_unobserved_terrain else None,
+            nodata_mask=nodata_mask,
+            avoid_unobserved_terrain=constraints.avoid_unobserved_terrain,
         )
 
         return slope_deg, roughness, traversable
