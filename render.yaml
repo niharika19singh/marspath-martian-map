@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: marspath-backend
+    runtime: python
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: MARSPATH_ENV
+        value: production
+      - key: MARSPATH_LOG_LEVEL
+        value: INFO
+      - key: MARSPATH_CORS_ORIGINS
+        value: "https://marspath.vercel.app,http://localhost:3000"
+      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
+        value: "true"
+      - key: MARSPATH_DATA_DIR
+        value: "backend/app/data"
+    healthCheckPath: /health

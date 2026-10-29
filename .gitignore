@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Large Datasets & NASA Planetary Rasters (Keep OUT of Git)
+backend/app/data/rasters/
+backend/app/data/downloads/
+backend/app/data/cache/
+*.tif
+*.tiff
+*.dem
+*.img
+*.cub
+*.jp2
+*.lbl
+*.tab
+*.grd
+!backend/app/data/fixtures/*.json
+!backend/tests/fixtures/*.json
+
+# Node & Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.next/
+out/
+
+# Environment and Secrets
+.env
+.env.local
+.env.*.local
+*.secret
+*.pem
+*.key
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
