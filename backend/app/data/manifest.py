@@ -4,9 +4,49 @@ Documents verified scientific datasets, official landing pages, spatial resoluti
 coordinate reference systems, formats, and physical terrain suitability.
 """
 
+from __future__ import annotations
+
+import json
+from pathlib import Path
 from typing import Any
 
 DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
+    {
+        "id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+        "product_name": "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2",
+        "mission_instruments": "ESA Mars Express HRSC & NASA Mars Global Surveyor MOLA",
+        "publisher": "USGS Astrogeology Science Center / PDS Geosciences Node / DLR / ESA",
+        "landing_page": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200mp",
+        "upstream_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
+        "upstream_md5": "e98092a06bea74d5ec9a704dcd1fe318",
+        "pds3_label_url": "https://astrogeology.usgs.gov/ckan/dataset/6c177b5f-97af-4d70-adc3-92cf362b9890/resource/99f5a18a-b4fb-4e87-8417-7408d8440651/download/mars_hrsc_mola_blenddem_global_200mp_v2_pds3.lbl",
+        "isis3_label_url": "https://astrogeology.usgs.gov/ckan/dataset/6c177b5f-97af-4d70-adc3-92cf362b9890/resource/9b3025b4-484e-47b1-a782-d88abc387cc1/download/mars_hrsc_mola_blenddem_global_200mp_v2.lbl",
+        "pds_doi": "https://doi.org/10.5066/P9P7W018",
+        "spatial_coverage": "Global Mars (90°N to -90°S, 0°E to 360°E); Jezero Crater sub-window (18.10°N - 18.70°N, 77.15°E - 78.00°E)",
+        "resolution_meters": 200.0,
+        "resolution_units": "meters/pixel (296.3735 px/deg)",
+        "coordinate_system": "Mars 2000 Sphere / IAU2000:49900 (R=3,396,190m)",
+        "projection": "Simple Cylindrical / Equirectangular",
+        "vertical_datum": "Mars Areoid (MOLA 0m reference datum)",
+        "nodata_value": -32768.0,
+        "is_numerical_elevation": True,
+        "contains_imagery_only": False,
+        "format": "GeoTIFF (BigTIFF, Striped, Signed 16-bit Int meters)",
+        "sha256": None,
+        "authoritative_product_ids": [
+            "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+            "JEZERO_HRSC_MOLA_blended_DEM",
+            "dem_hrsc_mola_blended_50m",
+            "HRSC_MOLA_JEZERO_200M",
+            "10.5066/P9P7W018",
+        ],
+        "acquisition_date": "2004 - 2020 compiled",
+        "license_and_reuse": "Public Domain (NASA / USGS / ESA open planetary science data policy)",
+        "download_method": "Direct HTTP range request from USGS AWS S3 archive / PDS Geosciences archive",
+        "file_size_mb": 11380.0,
+        "suitability": "Primary regional numerical elevation source for rover/EVA slope and roughness routing across Jezero Crater.",
+        "limitations": "200m/px resolution cannot resolve sub-50m boulders, wheel-scale traps, or micro-scarps.",
+    },
     {
         "id": "dem_hrsc_mola_blended_50m",
         "product_name": "HRSC and MOLA Blended Digital Elevation Model (200m & 50m Jezero Mosaic)",
@@ -158,21 +198,54 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
 def verify_manifest_provenance(
     file_sha256: str,
     metadata_tags: dict[str, str],
+    file_path: str = "",
 ) -> tuple[bool, str, dict[str, Any] | None]:
     """
     Evaluates whether a loaded raster matches an official NASA/ESA/USGS planetary product
-    through authoritative evidence:
-    1. Matching SHA-256 checksum recorded in manifest.
-    2. Authoritative PDS/USGS metadata tags embedded in file header (PRODUCT_ID, PDS_DOI, etc.).
+    through authoritative cryptographic evidence:
+
+    1. Direct SHA-256 match recorded in official DATA_CATALOG_MANIFEST.
+    2. Authoritative cryptographic ingestion sidecar (.provenance.json) linking the local
+       extract to an authoritative upstream product MD5 checksum and matching the local file SHA-256.
+
+    Crucial: Unauthenticated header metadata tags (e.g. self-asserted PRODUCT_ID) DO NOT
+    grant verified_source status. They only establish metadata consistency and are categorized
+    as valid_numeric_raster_unverified_source.
     """
-    # 1. Check SHA-256 match
+    # 1. Direct manifest SHA-256 match
     if file_sha256:
+        clean_sha = file_sha256.lower().strip()
         for item in DATA_CATALOG_MANIFEST:
             manifest_sha = item.get("sha256")
-            if manifest_sha and manifest_sha.lower() == file_sha256.lower():
+            if manifest_sha and manifest_sha.lower().strip() == clean_sha:
                 return True, "authoritative_manifest_sha256_match", item
 
-    # 2. Check metadata tags
+    # 2. Cryptographic ingestion sidecar verification
+    if file_path:
+        fp = Path(file_path)
+        sidecar_candidates = [
+            fp.with_name(f"{fp.name}.provenance.json"),
+            fp.with_suffix(".provenance.json"),
+        ]
+        for sc_path in sidecar_candidates:
+            if sc_path.exists():
+                try:
+                    with open(sc_path, encoding="utf-8") as f:
+                        sc_data = json.load(f)
+                    sc_local_sha = str(sc_data.get("local_file_sha256", "")).lower().strip()
+                    sc_source_md5 = str(sc_data.get("source_md5", "")).lower().strip()
+
+                    # Cryptographic link check: local file matches sidecar digest
+                    if sc_local_sha and sc_local_sha == file_sha256.lower().strip():
+                        # Upstream catalog check: upstream MD5 matches official catalog
+                        for item in DATA_CATALOG_MANIFEST:
+                            up_md5 = str(item.get("upstream_md5", "")).lower().strip()
+                            if up_md5 and up_md5 == sc_source_md5:
+                                return True, "authoritative_ingestion_sidecar_checksum_chain", item
+                except Exception:
+                    pass
+
+    # 3. Check metadata tags for metadata consistency (NOT authenticating alone)
     norm_tags = {str(k).upper(): str(v).strip() for k, v in metadata_tags.items()}
     tag_candidates = [
         norm_tags.get("PRODUCT_ID", ""),
@@ -193,7 +266,7 @@ def verify_manifest_provenance(
                 continue
             cand_upper = cand.upper()
             if cand_upper in targets or any(t and t in cand_upper for t in targets):
-                return True, "authoritative_pds_metadata_tags", item
+                # Returns False for is_verified, because metadata tags can be self-asserted
+                return False, "unverified_source_unauthenticated_tags", item
 
     return False, "unverified_source_no_authoritative_credentials", None
-

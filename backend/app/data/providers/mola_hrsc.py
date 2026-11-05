@@ -173,6 +173,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             is_verified, method, matched_prod = verify_manifest_provenance(
                 file_sha256=file_sha256,
                 metadata_tags=raster.metadata.metadata_tags,
+                file_path=self.dem_path,
             )
 
             if is_verified and matched_prod:
@@ -180,11 +181,25 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 data_mode = "real"
                 dataset_name = matched_prod["product_name"]
                 official_product_id = matched_prod["id"]
-                official_source_url = matched_prod["landing_page"]
+                official_source_url = matched_prod.get("upstream_url") or matched_prod["landing_page"]
                 pds_doi = matched_prod.get("pds_doi")
                 mission_instruments = matched_prod.get("mission_instruments")
                 data_publisher = matched_prod.get("publisher")
                 limitations = [matched_prod.get("limitations", "Official product limitations.")]
+            elif method == "unverified_source_unauthenticated_tags" and matched_prod:
+                validation_status = "valid_numeric_raster_unverified_source"
+                data_mode = "real_unverified_source"
+                dataset_name = f"{matched_prod['product_name']} (Unverified Source / Unauthenticated Tags)"
+                official_product_id = None
+                official_source_url = None
+                pds_doi = None
+                mission_instruments = [matched_prod.get("mission_instruments", "Unverified")]
+                data_publisher = "Unknown / Local Origin"
+                limitations = [
+                    "Raster passed 2D numerical and Jezero spatial-integrity checks (valid float array, plausible Mars elevations, valid planetary CRS).",
+                    f"Raster header contains tags referencing '{matched_prod['id']}', but authoritative source provenance could NOT be cryptographically authenticated (no verified upstream checksum chain or registered manifest hash).",
+                    "Treated as an unverified local numeric terrain raster; cannot be reported as certified flight-grade planetary data.",
+                ]
             else:
                 validation_status = "valid_numeric_raster_unverified_source"
                 data_mode = "real_unverified_source"
@@ -196,7 +211,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 data_publisher = "Unknown / Local Origin"
                 limitations = [
                     "Raster passed 2D numerical and Jezero spatial-integrity checks (valid float array, plausible Mars elevations, valid planetary CRS).",
-                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified: file SHA-256 and metadata tags do not match official planetary catalog records.",
+                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified: file SHA-256 does not match official planetary catalog records and no cryptographic ingestion sidecar is present.",
                     "Treated as an unverified local numeric terrain raster; cannot be reported as certified flight-grade planetary data.",
                 ]
 

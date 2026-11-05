@@ -169,10 +169,11 @@ def test_synthetic_geotiff_with_mars_crs_cannot_be_reported_as_verified_nasa_dem
             os.remove(tmp_path)
 
 
-def test_authoritative_source_via_metadata_tags_reports_verified_source():
+def test_unauthenticated_metadata_tags_cannot_claim_verified_source():
     """
-    A GeoTIFF carrying authoritative USGS/PDS product metadata tags
-    is recognized and granted verified_source status.
+    A GeoTIFF carrying self-asserted or spoofed PDS product metadata tags
+    must NOT be granted verified_source status without cryptographic proof.
+    It must be reported as valid_numeric_raster_unverified_source.
     """
     with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
         tmp_path = tmp.name
@@ -209,17 +210,128 @@ def test_authoritative_source_via_metadata_tags_reports_verified_source():
 
         prov = provider.get_provenance()
 
-        # Provenance is authenticated!
-        assert prov["real_data_validation_status"] == "verified_source"
-        assert prov["data_mode"] == "real"
-        assert prov["official_product_id"] == "dem_hrsc_mola_blended_50m"
-        assert prov["dataset_name"] == "HRSC and MOLA Blended Digital Elevation Model (200m & 50m Jezero Mosaic)"
-        assert prov["official_source_url"] == "https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM"
-        assert prov["provenance_verification_method"] == "authoritative_pds_metadata_tags"
-        assert prov["vertical_datum"] == "Mars Areoid (MOLA MEGDR IAU2000)"
+        # Crucial: Unauthenticated tags do NOT grant verified_source
+        assert prov["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+        assert prov["real_data_validation_status"] != "verified_source"
+        assert prov["data_mode"] == "real_unverified_source"
+        assert prov["official_product_id"] is None
+        assert prov["provenance_verification_method"] == "unverified_source_unauthenticated_tags"
+        assert any("could NOT be cryptographically authenticated" in lim for lim in prov["provenance_limitations"])
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+def test_authoritative_source_via_cryptographic_sidecar_reports_verified_source():
+    """
+    A local DEM with a verified cryptographic provenance sidecar linking its SHA-256
+    to the authoritative USGS archive MD5 is granted verified_source status.
+    """
+    import json
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        tmp_path = tmp.name
+    sidecar_path = f"{tmp_path}.provenance.json"
+
+    try:
+        data = np.full((30, 30), -2500.0, dtype=np.float32)
+        transform = from_origin(77.3, 18.6, 0.01, 0.01)
+        crs_str = "+proj=longlat +R=3396190 +no_defs"
+
+        with rasterio.open(
+            tmp_path,
+            "w",
+            driver="GTiff",
+            height=30,
+            width=30,
+            count=1,
+            dtype="float32",
+            crs=crs_str,
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+        with open(tmp_path, "rb") as f:
+            actual_sha = hashlib.sha256(f.read()).hexdigest()
+
+        # Write valid cryptographic sidecar matching official USGS catalog MD5
+        sidecar_data = {
+            "source_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+            "source_md5": "e98092a06bea74d5ec9a704dcd1fe318",
+            "local_file_sha256": actual_sha,
+        }
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump(sidecar_data, f)
+
+        provider = MOLAHRSCRasterProvider(dem_path=tmp_path)
+        provider.use_real_dem = True
+        provider.allow_fallback = False
+
+        prov = provider.get_provenance()
+
+        assert prov["real_data_validation_status"] == "verified_source"
+        assert prov["data_mode"] == "real"
+        assert prov["official_product_id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
+        assert prov["provenance_verification_method"] == "authoritative_ingestion_sidecar_checksum_chain"
+        assert prov["dataset_name"] == "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2"
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if os.path.exists(sidecar_path):
+            os.remove(sidecar_path)
+
+
+def test_tampered_sidecar_checksum_mismatch_fails_verification():
+    """
+    If the sidecar's local_file_sha256 does not match the actual file digest,
+    cryptographic verification fails and status remains unverified.
+    """
+    import json
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        tmp_path = tmp.name
+    sidecar_path = f"{tmp_path}.provenance.json"
+
+    try:
+        data = np.full((30, 30), -2500.0, dtype=np.float32)
+        transform = from_origin(77.3, 18.6, 0.01, 0.01)
+        crs_str = "+proj=longlat +R=3396190 +no_defs"
+
+        with rasterio.open(
+            tmp_path,
+            "w",
+            driver="GTiff",
+            height=30,
+            width=30,
+            count=1,
+            dtype="float32",
+            crs=crs_str,
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+        # Write forged sidecar with mismatched hash
+        sidecar_data = {
+            "source_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+            "source_md5": "e98092a06bea74d5ec9a704dcd1fe318",
+            "local_file_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        }
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump(sidecar_data, f)
+
+        provider = MOLAHRSCRasterProvider(dem_path=tmp_path)
+        provider.use_real_dem = True
+        provider.allow_fallback = False
+
+        prov = provider.get_provenance()
+
+        assert prov["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+        assert prov["real_data_validation_status"] != "verified_source"
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if os.path.exists(sidecar_path):
+            os.remove(sidecar_path)
 
 
 def test_authoritative_source_via_manifest_sha256_reports_verified_source():

@@ -50,6 +50,7 @@ def reconstruct_route_summary(
     cost_extra = 0.0
 
     total_duration_seconds = 0.0
+    hazard_exposure_meters = 0.0
 
     prev_r, prev_c = path_nodes[0]
     z_prev = float(graph.elevation[prev_r, prev_c])
@@ -91,6 +92,9 @@ def reconstruct_route_summary(
         slopes.append(slope)
         rough = float(graph.roughness[curr_r, curr_c])
         roughnesses.append(rough)
+
+        if slope > 12.0 or rough > 0.5:
+            hazard_exposure_meters += d3d
 
         extra_pen = 0.0
         if penalized_edges and ((prev_r, prev_c), (curr_r, curr_c)) in penalized_edges:
@@ -166,6 +170,14 @@ def reconstruct_route_summary(
                 nearby_target_ids.append(target.id)
                 science_score += target.scientific_priority * 5.0
 
+    hazard_ratio = hazard_exposure_meters / max(total_dist, 1.0)
+    if hazard_ratio >= 0.20 or max_slope >= 18.0:
+        risk_category = "high"
+    elif hazard_ratio >= 0.05 or max_slope >= 12.0:
+        risk_category = "moderate"
+    else:
+        risk_category = "nominal"
+
     summary = RouteSummary(
         total_distance_meters=round(total_dist, 1),
         elevation_gain_meters=round(elev_gain, 1),
@@ -180,6 +192,8 @@ def reconstruct_route_summary(
         motion_profile="rover_slope_derated_0.15mps",
         energy_index=round(energy_idx, 2),
         science_score=round(science_score, 1),
+        hazard_exposure_meters=round(hazard_exposure_meters, 1),
+        risk_category=risk_category,
     )
 
     geometry = GeoJSONGeometry(type="LineString", coordinates=geojson_coords)

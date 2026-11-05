@@ -15,6 +15,7 @@ def get_health():
     settings = get_settings()
     provider = MOLAHRSCRasterProvider()
     is_syn = provider.is_synthetic()
+    prov = provider.get_provenance()
 
     return {
         "status": "healthy",
@@ -25,8 +26,12 @@ def get_health():
         "pilot_region": "Jezero Crater",
         "data_readiness": {
             "dem_loaded": True,
-            "data_mode": "synthetic_test_fixture" if is_syn else "real",
+            "data_mode": prov.get("data_mode", "synthetic_test_fixture" if is_syn else "real"),
+            "real_data_validation_status": prov.get(
+                "real_data_validation_status", "synthetic_test_fixture"
+            ),
             "is_synthetic": is_syn,
             "crs": "IAU2000:49900",
+            "dataset_name": prov.get("dataset_name"),
         },
     }

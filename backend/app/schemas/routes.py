@@ -83,6 +83,14 @@ class RouteSummary(BaseModel):
     science_score: float = Field(
         ..., description="Science acquisition score based on visited targets and proximity"
     )
+    hazard_exposure_meters: float = Field(
+        default=0.0,
+        description="Physical meters traversed through high-risk terrain (slope > 12° or roughness > 0.5)",
+    )
+    risk_category: str = Field(
+        default="nominal",
+        description="Categorical risk classification for mission planning: nominal, moderate, or high",
+    )
 
 
 class GeoJSONGeometry(BaseModel):

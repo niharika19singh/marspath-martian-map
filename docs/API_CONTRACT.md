@@ -41,8 +41,10 @@ Mars geodesy differs fundamentally from Earth mapping:
   "data_readiness": {
     "dem_loaded": true,
     "data_mode": "synthetic_test_fixture",
+    "real_data_validation_status": "synthetic_test_fixture",
     "is_synthetic": true,
-    "crs": "IAU2000:49900"
+    "crs": "IAU2000:49900",
+    "dataset_name": "Synthetic Jezero Pilot Model"
   }
 }
 ```
@@ -221,7 +223,9 @@ Mars geodesy differs fundamentally from Earth mapping:
         "estimated_duration_hours": 5.58,
         "motion_profile": "rover_slope_derated_0.15mps",
         "energy_index": 3.58,
-        "science_score": 45.0
+        "science_score": 45.0,
+        "hazard_exposure_meters": 0.0,
+        "risk_category": "nominal"
       },
       "geometry": {
         "type": "LineString",

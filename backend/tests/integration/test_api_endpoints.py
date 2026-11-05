@@ -13,6 +13,13 @@ def test_health_endpoint():
     assert data["planetary_target"] == "Mars"
     assert "data_readiness" in data
     assert data["data_readiness"]["crs"] == "IAU2000:49900"
+    assert "real_data_validation_status" in data["data_readiness"]
+    assert data["data_readiness"]["data_mode"] in (
+        "synthetic_test_fixture",
+        "synthetic_fallback",
+        "real",
+        "real_unverified_source",
+    )
 
 
 def test_layers_endpoint():
@@ -61,6 +68,9 @@ def test_route_plan_success():
     primary = data["routes"][0]
     assert primary["summary"]["total_distance_meters"] > 0
     assert primary["summary"]["max_slope_deg"] <= 20.0
+    assert "hazard_exposure_meters" in primary["summary"]
+    assert "risk_category" in primary["summary"]
+    assert primary["summary"]["risk_category"] in ("nominal", "moderate", "high")
     assert primary["geometry"]["type"] == "LineString"
     assert len(primary["geometry"]["coordinates"]) > 2
     # Check that GeoJSON coordinate is [lon, lat, elevation]
