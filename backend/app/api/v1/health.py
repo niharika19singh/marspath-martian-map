@@ -25,7 +25,9 @@ def get_health():
         "planetary_target": "Mars",
         "pilot_region": "Jezero Crater",
         "data_readiness": {
-            "dem_loaded": True,
+            "dem_loaded": not is_syn,
+            "real_dem_requested": bool(prov.get("real_dem_requested", settings.USE_REAL_DEM)),
+            "real_dem_loaded": bool(prov.get("real_dem_loaded", not is_syn)),
             "data_mode": prov.get("data_mode", "synthetic_test_fixture" if is_syn else "real"),
             "real_data_validation_status": prov.get(
                 "real_data_validation_status", "synthetic_test_fixture"

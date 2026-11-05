@@ -222,10 +222,11 @@ def test_unauthenticated_metadata_tags_cannot_claim_verified_source():
             os.remove(tmp_path)
 
 
-def test_authoritative_source_via_cryptographic_sidecar_reports_verified_source():
+def test_manually_forged_sidecar_cannot_authenticate_synthetic_file():
     """
-    A local DEM with a verified cryptographic provenance sidecar linking its SHA-256
-    to the authoritative USGS archive MD5 is granted verified_source status.
+    A synthetic GeoTIFF with a manually forged provenance sidecar claiming the official
+    USGS product ID and catalog MD5 must NOT be granted verified_source status, because
+    the upstream source bytes cannot be independently verified.
     """
     import json
 
@@ -254,10 +255,12 @@ def test_authoritative_source_via_cryptographic_sidecar_reports_verified_source(
         with open(tmp_path, "rb") as f:
             actual_sha = hashlib.sha256(f.read()).hexdigest()
 
-        # Write valid cryptographic sidecar matching official USGS catalog MD5
+        # Write forged sidecar claiming official USGS catalog MD5 and verified_source
         sidecar_data = {
             "source_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
             "source_md5": "e98092a06bea74d5ec9a704dcd1fe318",
+            "source_checksum_verified": True,
+            "validation_status": "verified_source",
             "local_file_sha256": actual_sha,
         }
         with open(sidecar_path, "w", encoding="utf-8") as f:
@@ -269,11 +272,14 @@ def test_authoritative_source_via_cryptographic_sidecar_reports_verified_source(
 
         prov = provider.get_provenance()
 
-        assert prov["real_data_validation_status"] == "verified_source"
-        assert prov["data_mode"] == "real"
-        assert prov["official_product_id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        assert prov["provenance_verification_method"] == "authoritative_ingestion_sidecar_checksum_chain"
-        assert prov["dataset_name"] == "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2"
+        # Local integrity is intact, but source authenticity MUST be rejected
+        assert prov["local_integrity_verified"] is True
+        assert prov["source_checksum_verified"] is False
+        assert prov["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+        assert prov["real_data_validation_status"] != "verified_source"
+        assert prov["data_mode"] == "real_unverified_source"
+        assert prov["official_product_id"] is None
+        assert prov["provenance_verification_method"] == "unverified_sidecar_source_not_authenticated"
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -284,7 +290,7 @@ def test_authoritative_source_via_cryptographic_sidecar_reports_verified_source(
 def test_tampered_sidecar_checksum_mismatch_fails_verification():
     """
     If the sidecar's local_file_sha256 does not match the actual file digest,
-    cryptographic verification fails and status remains unverified.
+    local integrity verification fails and status remains unverified.
     """
     import json
 
@@ -325,8 +331,88 @@ def test_tampered_sidecar_checksum_mismatch_fails_verification():
 
         prov = provider.get_provenance()
 
+        assert prov["local_integrity_verified"] is False
+        assert prov["source_checksum_verified"] is False
+        assert prov["provenance_verification_method"] == "failed_local_sha256_integrity_mismatch"
         assert prov["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
         assert prov["real_data_validation_status"] != "verified_source"
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if os.path.exists(sidecar_path):
+            os.remove(sidecar_path)
+
+
+def test_official_endpoint_range_extract_reports_honest_intermediate_status():
+    """
+    A partial HTTP range extract from the official USGS endpoint must report
+    `official_endpoint_retrieved_checksum_unverified` (and `source_checksum_verified=False`),
+    never claiming `verified_source` without full-archive checksum verification.
+    """
+    import json
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        tmp_path = tmp.name
+    sidecar_path = f"{tmp_path}.provenance.json"
+
+    try:
+        data = np.full((30, 30), -2500.0, dtype=np.float32)
+        transform = from_origin(77.3, 18.6, 0.01, 0.01)
+        crs_str = "+proj=longlat +R=3396190 +no_defs"
+
+        with rasterio.open(
+            tmp_path,
+            "w",
+            driver="GTiff",
+            height=30,
+            width=30,
+            count=1,
+            dtype="float32",
+            crs=crs_str,
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+        with open(tmp_path, "rb") as f:
+            actual_sha = hashlib.sha256(f.read()).hexdigest()
+
+        arr_sha = hashlib.sha256(np.ascontiguousarray(data, dtype=np.float32).tobytes()).hexdigest()
+
+        usgs_entry = next(
+            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
+        )
+        orig_arr_sha = usgs_entry.get("jezero_window_array_sha256")
+        usgs_entry["jezero_window_array_sha256"] = arr_sha
+
+        try:
+            sidecar_data = {
+                "source_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+                "ingestion_method": "official_endpoint_vsicurl_range_extract",
+                "published_upstream_md5": "e98092a06bea74d5ec9a704dcd1fe318",
+                "source_checksum_verified": False,
+                "local_file_sha256": actual_sha,
+                "extracted_array_sha256": arr_sha,
+            }
+            with open(sidecar_path, "w", encoding="utf-8") as f:
+                json.dump(sidecar_data, f)
+
+            provider = MOLAHRSCRasterProvider(dem_path=tmp_path)
+            provider.use_real_dem = True
+            provider.allow_fallback = False
+
+            prov = provider.get_provenance()
+
+            assert (
+                prov["real_data_validation_status"]
+                == "official_endpoint_retrieved_checksum_unverified"
+            )
+            assert prov["real_data_validation_status"] != "verified_source"
+            assert prov["local_integrity_verified"] is True
+            assert prov["source_checksum_verified"] is False
+            assert prov["data_mode"] == "real_official_endpoint_unverified_checksum"
+            assert prov["official_product_id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
+        finally:
+            usgs_entry["jezero_window_array_sha256"] = orig_arr_sha
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

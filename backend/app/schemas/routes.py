@@ -172,7 +172,7 @@ class DataStatusResponse(BaseModel):
     data_mode: str
     real_data_validation_status: str = Field(
         default="synthetic_test_fixture",
-        description="synthetic_test_fixture, valid_numeric_raster_unverified_source, verified_source, or incomplete_missing_genuine_dem",
+        description="synthetic_test_fixture, valid_numeric_raster_unverified_source, official_endpoint_retrieved_checksum_unverified, verified_source, or incomplete_missing_genuine_dem",
     )
     is_synthetic: bool
     active_pilot_region: str

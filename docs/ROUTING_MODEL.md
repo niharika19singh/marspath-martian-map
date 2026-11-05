@@ -1,6 +1,6 @@
 # MARSPath Multi-Objective Routing Intelligence & Cost Model
 
-This document explains the mathematical formulations, graph representation, search algorithms, and mission optimization modes implemented in the MARSPath routing engine.
+This document explains the mathematical formulations, graph representation, search algorithms, mission optimization modes, and scientific limitations implemented in the MARSPath routing engine.
 
 ---
 
@@ -64,3 +64,11 @@ When `num_alternatives > 1` is requested:
 1. **Primary Route:** Optimal path found by A* using the selected mode.
 2. **Alternative Corridor:** Edges along the primary path receive an additive $+1500\text{m}$ diversion penalty. A* re-runs on the penalized graph to discover a geometrically distinct corridor (overlap threshold $< 85\%$).
 3. **Safety Backup Corridor:** Re-runs under strict `safety_first` constraints to provide a conservative baseline route.
+
+---
+
+## 6. Scientific & Operational Limitations
+
+1. **Regional Resolution Scale (200 m/px):** The selected USGS global blended DEM (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`) has a nominal resolution of 200 metres per pixel ($\sim 189.77\text{ m} \times 200.00\text{ m}$ at Jezero Crater). It supports **regional corridor terrain assessment**, not metre-scale boulder/obstacle detection, wheel-scale hazard avoidance, or flight-grade autonomous rover navigation.
+2. **HRSC/MOLA Blending & Thermal-Modelling Caveat:** As documented by USGS Astrogeology (Fergason et al., 2018), this global blended DEM was originally constructed to derive global thermal inertia (for THEMIS) where smooth regional transitions were prioritized over local topographic fidelity. Blending HRSC stereo-photogrammetry with MOLA laser altimetry introduces seam artifacts, vertical registration offsets, and smoothing inconsistencies across coverage boundaries.
+3. **Heuristic Risk Scoring Disclaimer:** Route cost weights, slope/roughness penalties, `hazard_exposure_meters`, and categorical risk classifications (`nominal`, `moderate`, `high`) are **deterministic multi-criteria decision heuristics** for comparative corridor trade-offs. They are **not** empirically calibrated probabilities of mechanical rover failure or mission loss.

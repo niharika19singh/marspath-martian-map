@@ -17,9 +17,9 @@ MARSPath is an interplanetary routing intelligence and terrain assessment platfo
   - `balanced`: Optimal trade-off between physical distance, slope energy expenditure, and traversal time.
   - `science_first`: Maximizes traversal near high-value geological points of interest (delta deposits, carbonates, crater rims) while enforcing safety constraints.
 - **Transparent Data Provenance & Ingestion:**
-  - Automated cloud-native window extraction directly from the USGS S3 archive (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`).
-  - Cryptographic checksum verification against published upstream USGS MD5 (`e98092a06bea74d5ec9a704dcd1fe318`).
-  - Strict rejection of spoofed metadata tags; four explicit validation states (`synthetic_test_fixture`, `valid_numeric_raster_unverified_source`, `verified_source`, `incomplete_missing_genuine_dem`).
+  - Automated cloud-native window extraction (`178 x 252` pixels, 200 m/px nominal resolution) directly from the USGS S3 archive (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`).
+  - Strict separation between local SHA-256 file integrity (`local_integrity_verified`) and upstream source checksum authenticity (`source_checksum_verified`).
+  - Five explicit validation states: `synthetic_test_fixture`, `incomplete_missing_genuine_dem`, `valid_numeric_raster_unverified_source`, `official_endpoint_retrieved_checksum_unverified` (for partial HTTP range extractions where the full 11.38 GB archive MD5 is not computed over all upstream bytes), and `verified_source` (reserved strictly for independently verified full-source checksums).
 
 ---
 

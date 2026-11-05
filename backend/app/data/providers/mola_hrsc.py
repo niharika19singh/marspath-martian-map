@@ -176,19 +176,85 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 file_path=self.dem_path,
             )
 
+            local_integrity_verified: bool | None = None
+            source_checksum_verified: bool = False
+
             if is_verified and matched_prod:
                 validation_status = "verified_source"
                 data_mode = "real"
+                local_integrity_verified = True
+                source_checksum_verified = True
                 dataset_name = matched_prod["product_name"]
                 official_product_id = matched_prod["id"]
-                official_source_url = matched_prod.get("upstream_url") or matched_prod["landing_page"]
+                official_source_url = (
+                    matched_prod.get("landing_page") or matched_prod.get("upstream_url")
+                )
                 pds_doi = matched_prod.get("pds_doi")
                 mission_instruments = matched_prod.get("mission_instruments")
                 data_publisher = matched_prod.get("publisher")
-                limitations = [matched_prod.get("limitations", "Official product limitations.")]
+                limitations = [
+                    matched_prod.get("limitations", "Official product limitations."),
+                    "Route cost weights and categorical risk levels are deterministic multi-criteria decision heuristics, not calibrated probabilities of rover failure.",
+                ]
+            elif method == "official_endpoint_retrieved_checksum_unverified" and matched_prod:
+                validation_status = "official_endpoint_retrieved_checksum_unverified"
+                data_mode = "real_official_endpoint_unverified_checksum"
+                local_integrity_verified = True
+                source_checksum_verified = False
+                dataset_name = matched_prod["product_name"]
+                official_product_id = matched_prod["id"]
+                official_source_url = (
+                    matched_prod.get("landing_page") or matched_prod.get("upstream_url")
+                )
+                pds_doi = matched_prod.get("pds_doi")
+                mission_instruments = matched_prod.get("mission_instruments")
+                data_publisher = matched_prod.get("publisher")
+                limitations = [
+                    "Retrieved from official USGS/PDS HTTPS endpoint via GDAL /vsicurl/ HTTP Range extraction; local GeoTIFF SHA-256 integrity is verified.",
+                    "Full 11.38 GB upstream file MD5 checksum (e98092a06bea74d5ec9a704dcd1fe318) was NOT independently verified over all source bytes because only the Jezero Crater sub-window was streamed.",
+                    matched_prod.get("limitations", "Official product limitations."),
+                    "Route cost weights and categorical risk levels are deterministic multi-criteria decision heuristics, not calibrated probabilities of rover failure.",
+                ]
+            elif method in (
+                "failed_local_sha256_integrity_mismatch",
+                "failed_local_sidecar_corrupted_json",
+            ):
+                validation_status = "valid_numeric_raster_unverified_source"
+                data_mode = "real_unverified_source"
+                local_integrity_verified = False
+                source_checksum_verified = False
+                dataset_name = "Local Numerical Elevation Model (Integrity Check Failed / Unverified)"
+                official_product_id = None
+                official_source_url = None
+                pds_doi = None
+                mission_instruments = ["Unverified / Unknown"]
+                data_publisher = "Unknown / Local Origin"
+                limitations = [
+                    "CRITICAL: Local file SHA-256 digest does NOT match the digest recorded in its provenance sidecar (file may have been tampered with or corrupted).",
+                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified.",
+                    "Treated as an unverified local numeric terrain raster; cannot be reported as certified planetary data.",
+                ]
+            elif method == "unverified_sidecar_source_not_authenticated":
+                validation_status = "valid_numeric_raster_unverified_source"
+                data_mode = "real_unverified_source"
+                local_integrity_verified = True
+                source_checksum_verified = False
+                dataset_name = "Local Numerical Elevation Model (Unverified Source)"
+                official_product_id = None
+                official_source_url = None
+                pds_doi = None
+                mission_instruments = ["Unverified / Unknown"]
+                data_publisher = "Unknown / Local Origin"
+                limitations = [
+                    "Local file SHA-256 matches its sidecar, preserving local file integrity since creation.",
+                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified: sidecar source checksum claims are not backed by independently verified upstream source bytes.",
+                    "Treated as an unverified local numeric terrain raster; cannot be reported as certified planetary data.",
+                ]
             elif method == "unverified_source_unauthenticated_tags" and matched_prod:
                 validation_status = "valid_numeric_raster_unverified_source"
                 data_mode = "real_unverified_source"
+                local_integrity_verified = None
+                source_checksum_verified = False
                 dataset_name = f"{matched_prod['product_name']} (Unverified Source / Unauthenticated Tags)"
                 official_product_id = None
                 official_source_url = None
@@ -203,6 +269,8 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             else:
                 validation_status = "valid_numeric_raster_unverified_source"
                 data_mode = "real_unverified_source"
+                local_integrity_verified = None
+                source_checksum_verified = False
                 dataset_name = "Local Numerical Elevation Model (Unverified Source)"
                 official_product_id = None
                 official_source_url = None
@@ -211,7 +279,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 data_publisher = "Unknown / Local Origin"
                 limitations = [
                     "Raster passed 2D numerical and Jezero spatial-integrity checks (valid float array, plausible Mars elevations, valid planetary CRS).",
-                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified: file SHA-256 does not match official planetary catalog records and no cryptographic ingestion sidecar is present.",
+                    "Authoritative NASA/ESA/USGS source provenance could NOT be verified: file SHA-256 does not match official planetary catalog records and no verified upstream source bytes are present.",
                     "Treated as an unverified local numeric terrain raster; cannot be reported as certified flight-grade planetary data.",
                 ]
 
@@ -225,6 +293,10 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 "file_path": self.dem_path,
                 "file_format": file_format,
                 "file_sha256": file_sha256,
+                "local_integrity_verified": local_integrity_verified,
+                "source_checksum_verified": source_checksum_verified,
+                "real_dem_requested": self.use_real_dem,
+                "real_dem_loaded": True,
                 "data_mode": data_mode,
                 "real_data_validation_status": validation_status,
                 "provenance_verification_method": method,
@@ -257,6 +329,8 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
 
         # Operating on synthetic
         provenance = self._get_fallback().get_provenance()
+        provenance["local_integrity_verified"] = None
+        provenance["source_checksum_verified"] = False
         if self._fallback_occurred:
             provenance["data_mode"] = "synthetic_fallback"
             provenance["real_data_validation_status"] = "incomplete_missing_genuine_dem"
@@ -268,6 +342,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             provenance["provenance_limitations"] = [
                 f"Real DEM was requested at '{self.dem_path}', but file was not found or failed validation: {self._fallback_reason}.",
                 "Real-data validation remains incomplete. Fallback synthetic model active.",
+                "Route cost weights and categorical risk levels are deterministic multi-criteria decision heuristics, not calibrated probabilities of rover failure.",
             ]
         else:
             provenance["data_mode"] = "synthetic_test_fixture"
@@ -278,6 +353,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             provenance["provenance_limitations"] = [
                 "Operating on deterministic synthetic/procedural test fixture for Jezero Crater. Real NASA DEM is not loaded.",
                 "Elevation and terrain gradients are mathematically synthesized; not suitable for flight-grade navigation.",
+                "Route cost weights and categorical risk levels are deterministic multi-criteria decision heuristics, not calibrated probabilities of rover failure.",
             ]
         return provenance
 

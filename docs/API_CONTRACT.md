@@ -39,7 +39,9 @@ Mars geodesy differs fundamentally from Earth mapping:
   "planetary_target": "Mars",
   "pilot_region": "Jezero Crater",
   "data_readiness": {
-    "dem_loaded": true,
+    "dem_loaded": false,
+    "real_dem_requested": false,
+    "real_dem_loaded": false,
     "data_mode": "synthetic_test_fixture",
     "real_data_validation_status": "synthetic_test_fixture",
     "is_synthetic": true,
@@ -86,7 +88,7 @@ Mars geodesy differs fundamentally from Earth mapping:
         "projection": "Geographic (Planetocentric Degrees)"
       },
       "source_name": "Synthetic Jezero Pilot Model",
-      "source_url": "https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
+      "source_url": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
       "is_numerical": true,
       "is_available": true,
       "is_renderable": false,

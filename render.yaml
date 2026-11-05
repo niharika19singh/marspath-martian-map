@@ -2,6 +2,9 @@ services:
   - type: web
     name: marspath-backend
     runtime: python
+    # Default build installs dependencies. To provision the USGS 200m Jezero DEM window (~90 KB)
+    # at build time via HTTP range extraction, append:
+    # && PYTHONPATH=. python -m backend.app.data.ingestion
     buildCommand: "pip install -r backend/requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend"
     envVars:
@@ -13,8 +16,15 @@ services:
         value: INFO
       - key: MARSPATH_CORS_ORIGINS
         value: "https://marspath.vercel.app,http://localhost:3000"
-      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
-        value: "true"
       - key: MARSPATH_DATA_DIR
         value: "backend/app/data"
+      - key: MARSPATH_DEM_PATH
+        value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
+      # Explicitly set to "false" until the DEM raster is provisioned via build-time ingestion
+      # or a mounted Render Persistent Disk. Never assume a git-ignored local raster exists in the
+      # container, and never claim real-data readiness when running on synthetic terrain.
+      - key: MARSPATH_USE_REAL_DEM
+        value: "false"
+      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
+        value: "true"
     healthCheckPath: /health

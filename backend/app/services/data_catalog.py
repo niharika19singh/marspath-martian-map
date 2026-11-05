@@ -7,6 +7,10 @@ from backend.app.schemas.coordinates import BoundingBox
 from backend.app.schemas.layers import LayerCategory, LayerInfo, LayerListResponse
 from backend.app.schemas.routes import DataStatusResponse
 
+DEFAULT_USGS_200M_URL = (
+    "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m"
+)
+
 
 class DataCatalogService:
     def __init__(self, provider: BaseRasterProvider | None = None):
@@ -14,9 +18,20 @@ class DataCatalogService:
         self.provider = provider or MOLAHRSCRasterProvider()
 
     def get_layer_list(self) -> LayerListResponse:
+        raster = self.provider.get_dem_raster()
         crs_info = get_mars_crs_info()
         bounds = self.provider.get_bounds()
         is_syn = self.provider.is_synthetic()
+        provenance = self.provider.get_provenance()
+
+        # Derive actual physical pixel resolution from loaded raster metadata
+        res_meters = round(raster.metadata.meters_per_px_y, 1)
+        dem_source_url = provenance.get("official_source_url") or DEFAULT_USGS_200M_URL
+        dem_source_name = (
+            str(provenance.get("dataset_name") or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2")
+            if not is_syn
+            else "Synthetic Jezero Pilot Model"
+        )
 
         layers: list[LayerInfo] = [
             LayerInfo(
@@ -26,13 +41,11 @@ class DataCatalogService:
                 layer_type="analysis_derived",
                 description="Numerical surface elevation relative to the Mars areoid datum. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="meters",
-                resolution_meters=50.0 if not is_syn else 112.5,
+                resolution_meters=res_meters,
                 bounds=bounds,
                 crs=crs_info,
-                source_name="MOLA-HRSC Blended DTM"
-                if not is_syn
-                else "Synthetic Jezero Pilot Model",
-                source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
+                source_name=dem_source_name,
+                source_url=dem_source_url,
                 is_numerical=True,
                 is_available=True,
                 is_renderable=False,
@@ -46,11 +59,11 @@ class DataCatalogService:
                 layer_type="analysis_derived",
                 description="Physical ground inclination derived from numerical elevation gradients. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="degrees",
-                resolution_meters=50.0 if not is_syn else 112.5,
+                resolution_meters=res_meters,
                 bounds=bounds,
                 crs=crs_info,
                 source_name="MARSPath Geospatial Processing Engine",
-                source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
+                source_url=dem_source_url,
                 is_numerical=True,
                 is_available=True,
                 is_renderable=False,
@@ -64,11 +77,11 @@ class DataCatalogService:
                 layer_type="analysis_derived",
                 description="Localized standard deviation of detrended elevation differences. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="dimensionless [0.0 - 1.0]",
-                resolution_meters=50.0 if not is_syn else 112.5,
+                resolution_meters=res_meters,
                 bounds=bounds,
                 crs=crs_info,
                 source_name="MARSPath Geospatial Processing Engine",
-                source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
+                source_url=dem_source_url,
                 is_numerical=True,
                 is_available=True,
                 is_renderable=False,
@@ -82,11 +95,11 @@ class DataCatalogService:
                 layer_type="analysis_derived",
                 description="Binary traversability envelope enforcing slope limits and nodata masking. Internal analysis layer queried via /api/v1/routes/plan.",
                 units="boolean",
-                resolution_meters=50.0 if not is_syn else 112.5,
+                resolution_meters=res_meters,
                 bounds=bounds,
                 crs=crs_info,
                 source_name="MARSPath Risk Engine",
-                source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZERO_HRSC_MOLA_blended_DEM",
+                source_url=dem_source_url,
                 is_numerical=False,
                 is_available=True,
                 is_renderable=False,
@@ -137,20 +150,31 @@ class DataCatalogService:
         val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 
         limitations = [
-            "Regional DEM does not detect sub-meter boulders or fine wheel-entrapment sand ripples.",
+            "The selected USGS global blended DEM (Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2) has a nominal resolution of 200 m/px, supporting regional terrain assessment rather than metre-scale obstacle detection or flight-grade rover navigation.",
+            "USGS warns of HRSC/MOLA blending seam inconsistencies and notes this dataset was originally constructed for global thermal-modelling (THEMIS thermal inertia) rather than precision local surface navigation.",
+            "Route cost weights, hazard exposure metrics, and risk categories are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of failure.",
             "Visual imagery layers must not be used for physical slope or energy calculations.",
         ]
+        blocking_errors: list[str] = []
+
         if is_syn:
             if active_mode == "synthetic_fallback":
+                fallback_reason = provenance.get("fallback_reason", "Real DEM missing or invalid")
                 limitations.append(
-                    f"Fallback to synthetic test fixture occurred: {provenance.get('fallback_reason', 'Real DEM missing or invalid')}."
+                    f"Fallback to synthetic test fixture occurred: {fallback_reason}."
                 )
+                blocking_errors.append(fallback_reason)
             else:
                 limitations.append(
                     "Operating in development mode with deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not loaded."
                 )
-        elif val_status == "valid_numeric_raster_unverified_source":
-            limitations.extend(provenance.get("provenance_limitations", []))
+        elif val_status in (
+            "valid_numeric_raster_unverified_source",
+            "official_endpoint_retrieved_checksum_unverified",
+        ):
+            for lim in provenance.get("provenance_limitations", []):
+                if lim not in limitations:
+                    limitations.append(lim)
 
         return DataStatusResponse(
             status="healthy",
@@ -166,5 +190,5 @@ class DataCatalogService:
             valid_data_fraction=round(valid_frac, 4),
             configured_products=DATA_CATALOG_MANIFEST,
             limitations=limitations,
-            blocking_errors=[],
+            blocking_errors=blocking_errors,
         )

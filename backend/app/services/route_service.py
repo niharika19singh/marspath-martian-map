@@ -383,10 +383,12 @@ class RouteService:
         is_syn = self.provider.is_synthetic()
         provenance = self.provider.get_provenance()
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
+        val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 
         limitations = [
-            f"Elevation resolution ({round(dy_meters, 1)}m) does not resolve sub-pixel rock or crevasse hazards.",
-            "Traversability represents automated optimization corridors, not certified human EVA safety guarantees.",
+            f"Elevation resolution ({round(dy_meters, 1)}m/px; 200m/px nominal for USGS global blended DEM) supports regional corridor terrain assessment, not metre-scale obstacle detection or flight-grade rover navigation.",
+            "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM was originally generated for thermal-modelling (THEMIS thermal inertia) rather than precision local navigation.",
+            "Route cost weights, hazard penalties, and categorical risk levels are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of failure.",
         ]
         if is_syn:
             if active_mode == "synthetic_fallback":
@@ -397,7 +399,11 @@ class RouteService:
                 limitations.append(
                     "Operating on deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not loaded."
                 )
-        elif provenance.get("real_data_validation_status") == "valid_numeric_raster_unverified_source":
+        elif val_status == "official_endpoint_retrieved_checksum_unverified":
+            limitations.append(
+                "Retrieved via HTTP range extraction from official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but full 11.38 GB upstream file checksum was not computed over all upstream source bytes."
+            )
+        elif val_status == "valid_numeric_raster_unverified_source":
             limitations.append(
                 "Operating on local numeric terrain raster. Official NASA/ESA/USGS provenance is unverified."
             )
