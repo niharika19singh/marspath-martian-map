@@ -3,7 +3,12 @@ services:
     name: marspath-backend
     runtime: python
     buildCommand: "pip install -r backend/requirements.txt"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend"
+    # Runs idempotent runtime DEM provisioning (backend/scripts/start_render.sh) before Uvicorn:
+    # - Validates existing Jezero DEM + provenance sidecar SHA-256 if present.
+    # - If missing or invalid (e.g. fresh ephemeral container startup/restart), extracts the
+    #   178x252 Jezero Crater window (~90 KB) from the official USGS endpoint via /vsicurl/.
+    # - Never downloads the full 11.38 GB global archive.
+    startCommand: "bash backend/scripts/start_render.sh"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8
@@ -13,8 +18,20 @@ services:
         value: INFO
       - key: MARSPATH_CORS_ORIGINS
         value: "https://marspath.vercel.app,http://localhost:3000"
-      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
-        value: "true"
       - key: MARSPATH_DATA_DIR
         value: "backend/app/data"
+      - key: MARSPATH_DEM_PATH
+        value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
+      # Automatic runtime DEM provisioning is enabled:
+      # start_render.sh provisions and verifies the USGS 200m Jezero DEM before starting Uvicorn.
+      - key: MARSPATH_USE_REAL_DEM
+        value: "true"
+      # Demo resilience policy: if the upstream USGS endpoint is temporarily unreachable,
+      # MARSPATH_ALLOW_SYNTHETIC_FALLBACK="true" keeps the API available in `synthetic_fallback`
+      # mode while transparently reporting `real_dem_loaded: false`, `dem_loaded: false`,
+      # `is_synthetic: true`, and `blocking_errors`.
+      # For strict production enforcement (fail startup if real terrain cannot be provisioned),
+      # set MARSPATH_ALLOW_SYNTHETIC_FALLBACK="false".
+      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
+        value: "true"
     healthCheckPath: /health
