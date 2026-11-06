@@ -68,6 +68,26 @@ class SourceEvidence(BaseModel):
     pixel_resolution_y_meters: float = Field(
         ..., description="Actual physical meridional pixel height (dy) in meters"
     )
+    native_resolution_x_meters: float | None = Field(
+        default=None,
+        description="Native physical zonal pixel width in meters prior to any corridor block aggregation",
+    )
+    native_resolution_y_meters: float | None = Field(
+        default=None,
+        description="Native physical meridional pixel height in meters prior to any corridor block aggregation",
+    )
+    aggregation_applied: bool = Field(
+        default=False,
+        description="True when conservative block aggregation was applied to fit the corridor within MAX_GRID_CELLS",
+    )
+    aggregation_factor: int = Field(
+        default=1,
+        description="Integer block reduction factor k (1 when evaluated at native resolution)",
+    )
+    aggregation_method: str = Field(
+        default="none",
+        description="Aggregation method when aggregation_applied is True (e.g. mean_elevation_strict_nodata_max_subgrid_slope_roughness)",
+    )
     nominal_resolution_meters: float | None = Field(
         default=None,
         description="Nominal published dataset resolution in meters per pixel if applicable",
@@ -131,6 +151,30 @@ class ResolutionAssessment(BaseModel):
     )
     effective_resolution_meters: float = Field(
         ..., description="Conservative effective grid resolution max(dx, dy) in meters"
+    )
+    native_x_meters_per_pixel: float | None = Field(
+        default=None,
+        description="Native zonal cell size in meters per pixel before corridor aggregation",
+    )
+    native_y_meters_per_pixel: float | None = Field(
+        default=None,
+        description="Native meridional cell size in meters per pixel before corridor aggregation",
+    )
+    native_effective_resolution_meters: float | None = Field(
+        default=None,
+        description="Native effective resolution max(native_dx, native_dy) in meters before corridor aggregation",
+    )
+    aggregation_applied: bool = Field(
+        default=False,
+        description="True when conservative block aggregation was applied to enforce MAX_GRID_CELLS",
+    )
+    aggregation_factor: int = Field(
+        default=1,
+        description="Integer block reduction factor k (1 for native resolution)",
+    )
+    aggregation_method: str = Field(
+        default="none",
+        description="Conservative hazard-preserving block aggregation method when aggregation_applied is True",
     )
     nominal_dataset_resolution_meters: float | None = Field(
         default=None,
@@ -920,6 +964,88 @@ class RouteRobustnessAssessment(BaseModel):
     )
 
 
+class TerrainSourceSelectionReport(BaseModel):
+    """
+    Deterministic multi-resolution terrain source selection and corridor resolution report.
+    Enforces the single-source invariant: exactly ONE elevation source and ONE analysis grid
+    are used for the entire route request.
+    """
+
+    selected_source_id: str = Field(
+        ...,
+        description="Identifier of the selected elevation source (e.g., dem_hirise_jezero_delta_1m, Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2, or synthetic_jezero_test_fixture)",
+    )
+    selected_source_tier: str = Field(
+        ...,
+        description="Resolution tier of the selected source: localized_high_resolution_dtm, regional_blended_dem, or synthetic_simulation",
+    )
+    selected_dataset_name: str = Field(
+        ..., description="Human-readable dataset name of the selected elevation source"
+    )
+    selection_reason: str = Field(
+        ...,
+        description="Explicit engineering explanation of why this source was selected for the route corridor",
+    )
+    single_source_invariant_enforced: bool = Field(
+        default=True,
+        description="Always True: guarantees that HiRISE and MOLA-HRSC rasters were never mixed, stitched, or blended within a single route grid",
+    )
+    hirise_evaluated: bool = Field(
+        ..., description="True if optional HiRISE DTM source eligibility was evaluated"
+    )
+    hirise_enabled: bool = Field(
+        ..., description="True if MARSPATH_USE_HIRISE_DEM was enabled for this evaluation"
+    )
+    hirise_selected: bool = Field(
+        ..., description="True if the localized HiRISE DTM was selected as the sole corridor source"
+    )
+    hirise_status: str = Field(
+        ...,
+        description=(
+            "HiRISE evaluation outcome code: 'selected', 'disabled', 'missing_file', "
+            "'partial_or_no_corridor_coverage', 'corridor_contains_excessive_nodata', "
+            "'rejected_aggregated_resolution_no_better_than_regional', 'rejected_invalid_crs', "
+            "'rejected_missing_crs', 'rejected_invalid_georeferencing', "
+            "'rejected_insufficient_valid_observations', 'rejected_outside_jezero_delta_bounds', "
+            "'rejected_invalid_resolution', 'rejected_non_elevation_raster', or 'not_configured'"
+        ),
+    )
+    hirise_rejection_reason: str | None = Field(
+        default=None,
+        description="Detailed reason why HiRISE was not selected when hirise_selected is False",
+    )
+    corridor_bounds: BoundingBox = Field(
+        ..., description="Geographic bounding box of the selected analysis corridor"
+    )
+    corridor_padding_meters: float = Field(
+        ..., description="Physical corridor margin applied around mission endpoints and waypoints in meters"
+    )
+    native_resolution_meters: float = Field(
+        ..., description="Native physical resolution (max(dx, dy)) of the selected source in meters per pixel"
+    )
+    effective_resolution_meters: float = Field(
+        ..., description="Effective physical resolution (max(dx, dy)) of the analysis grid in meters per pixel"
+    )
+    aggregation_applied: bool = Field(
+        default=False,
+        description="True when conservative block aggregation was applied to fit the corridor within MAX_GRID_CELLS",
+    )
+    aggregation_factor: int = Field(
+        default=1,
+        description="Integer block aggregation factor k (1 when evaluated at native resolution)",
+    )
+    aggregation_method: str = Field(
+        default="none",
+        description="Aggregation method when aggregation_applied is True",
+    )
+    corridor_native_grid_shape: list[int] = Field(
+        ..., description="[rows, cols] of the cropped corridor at native source resolution"
+    )
+    corridor_analysis_grid_shape: list[int] = Field(
+        ..., description="[rows, cols] of the final analysis corridor grid used for routing"
+    )
+
+
 class RoutePlanResponse(BaseModel):
     """Complete route intelligence response."""
 
@@ -932,6 +1058,10 @@ class RoutePlanResponse(BaseModel):
     )
     provenance: dict[str, Any] = Field(
         ..., description="Data source citations, acquisition IDs, and processing metadata"
+    )
+    source_selection: TerrainSourceSelectionReport | None = Field(
+        default=None,
+        description="Deterministic multi-resolution terrain source selection and corridor resolution report",
     )
     routes: list[RouteAlternative]
     stats: ComputationStats
@@ -986,6 +1116,25 @@ class DataStatusResponse(BaseModel):
     grid_shape: list[int]
     valid_data_fraction: float
     active_dem_provenance: dict[str, Any] = Field(default_factory=dict)
+    hirise_enabled: bool = Field(
+        default=False, description="True when MARSPATH_USE_HIRISE_DEM is enabled"
+    )
+    hirise_loaded: bool = Field(
+        default=False,
+        description="True only when the optional localized HiRISE DTM is enabled, present, and passes all geospatial/numeric validation checks",
+    )
+    hirise_status: str = Field(
+        default="disabled",
+        description="HiRISE DTM validation status code (ready, disabled, missing_file, rejected_*)",
+    )
+    hirise_validation_reason: str | None = Field(
+        default=None,
+        description="Detailed HiRISE validation status or rejection explanation",
+    )
+    hirise_dem_provenance: dict[str, Any] | None = Field(
+        default=None,
+        description="Provenance metadata for the optional localized HiRISE DTM when configured",
+    )
     configured_products: list[dict[str, Any]]
     limitations: list[str]
     blocking_errors: list[str] = Field(default_factory=list)

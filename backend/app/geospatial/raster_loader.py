@@ -78,8 +78,50 @@ class RasterData:
             return val if not self.nodata_mask[row, col] else float("nan")
         return float("nan")
 
+    def geo_to_native_pixel_float(self, lon: float, lat: float) -> tuple[float, float]:
+        """
+        Maps Mars planetocentric (lon, lat) in degrees to continuous pixel coordinates
+        (col_float, row_float) using the raster's actual CRS and affine transform.
+        In PixelIsArea convention, pixel (c, r) spans [c, c+1) x [r, r+1) with center (c+0.5, r+0.5).
+        """
+        meta = self.metadata
+        a, b, c_off, d, e, f_off = meta.affine_transform
+        det = a * e - b * d
+
+        if meta.coordinate_type == "projected" and HAS_PYPROJ and meta.crs_str not in ("", "Unknown / Unspecified"):
+            mars_geo_crs = pyproj.CRS("+proj=longlat +R=3396190 +no_defs")
+            transformer = pyproj.Transformer.from_crs(
+                mars_geo_crs, pyproj.CRS.from_user_input(meta.crs_str), always_xy=True
+            )
+            x_val, y_val = transformer.transform(lon, lat)
+        else:
+            x_val, y_val = lon, lat
+
+        if abs(det) > 1e-18:
+            dx = x_val - c_off
+            dy = y_val - f_off
+            col_f = (e * dx - b * dy) / det
+            row_f = (-d * dx + a * dy) / det
+            return float(col_f), float(row_f)
+
+        col, row = geo_to_pixel(
+            lon,
+            lat,
+            meta.min_lon,
+            meta.max_lat,
+            meta.deg_per_px_lon,
+            meta.deg_per_px_lat,
+            pixel_center=True,
+        )
+        return float(col) + 0.5, float(row) + 0.5
+
     def get_elevation_at_geo(self, lon: float, lat: float) -> float:
         meta = self.metadata
+        if meta.coordinate_type == "projected" and HAS_PYPROJ and meta.crs_str not in ("", "Unknown / Unspecified"):
+            col_f, row_f = self.geo_to_native_pixel_float(lon, lat)
+            col = int(np.floor(col_f))
+            row = int(np.floor(row_f))
+            return self.get_elevation_at_pixel(col, row)
         col, row = geo_to_pixel(
             lon,
             lat,
@@ -93,11 +135,17 @@ class RasterData:
 
 
 def _validate_not_earth_crs(crs_obj, file_path: str) -> None:
-    """Rejects terrestrial Earth datums (e.g. WGS84 with semi-major radius ~6378km)."""
+    """Rejects terrestrial Earth datums or non-Mars planetary radii."""
     if crs_obj is None:
         return
     crs_str = str(crs_obj).upper()
-    if "WGS" in crs_str or "EPSG:4326" in crs_str or "EPSG:3857" in crs_str:
+    if (
+        "WGS" in crs_str
+        or "EPSG:4326" in crs_str
+        or "EPSG:3857" in crs_str
+        or "EARTH" in crs_str
+        or "NAD83" in crs_str
+    ):
         raise UnsupportedCRSError(
             crs_str,
             supported=["IAU2000:49900", "MARS2000_SPHERE", "MARS_EQUIRECTANGULAR"],
@@ -109,6 +157,25 @@ def _validate_not_earth_crs(crs_obj, file_path: str) -> None:
                 f"Earth WGS84 (radius ~{semi_major:.0f}m) in {file_path}",
                 supported=["Mars IAU2000 Sphere (R=3,396,190m)"],
             )
+        if semi_major and not (3370000.0 <= semi_major <= 3405000.0):
+            raise UnsupportedCRSError(
+                f"Non-Mars ellipsoid radius ({semi_major:.1f}m) in {file_path}",
+                supported=["Mars IAU2000 Sphere (R=3,396,190m)"],
+            )
+    if HAS_PYPROJ:
+        try:
+            proj_crs = pyproj.CRS.from_user_input(crs_obj)
+            if proj_crs.ellipsoid and proj_crs.ellipsoid.semi_major_metre:
+                sm = float(proj_crs.ellipsoid.semi_major_metre)
+                if abs(sm - 6378137.0) < 10000.0 or not (3370000.0 <= sm <= 3405000.0):
+                    raise UnsupportedCRSError(
+                        f"Unsupported planetary datum radius ({sm:.1f}m) in {file_path}",
+                        supported=["Mars IAU2000 Sphere (R=3,396,190m)"],
+                    )
+        except UnsupportedCRSError:
+            raise
+        except Exception:
+            pass
 
 
 def load_raster_file(file_path: str) -> RasterData:
@@ -213,8 +280,14 @@ def load_raster_file(file_path: str) -> RasterData:
                             transformer = pyproj.Transformer.from_crs(
                                 pyproj.CRS.from_user_input(crs_obj), mars_geo_crs, always_xy=True
                             )
-                            geo_left, geo_bottom = transformer.transform(bounds.left, bounds.bottom)
-                            geo_right, geo_top = transformer.transform(bounds.right, bounds.top)
+                            corners_x = [bounds.left, bounds.left, bounds.right, bounds.right]
+                            corners_y = [bounds.bottom, bounds.top, bounds.bottom, bounds.top]
+                            geo_lons, geo_lats = transformer.transform(corners_x, corners_y)
+                            norm_lons = [float(lon) % 360.0 for lon in geo_lons]
+                            min_lon = min(norm_lons)
+                            max_lon = max(norm_lons)
+                            min_lat = min(float(lat) for lat in geo_lats)
+                            max_lat = max(float(lat) for lat in geo_lats)
                         except Exception as te:
                             raise UnsupportedCRSError(
                                 f"Failed to transform projected CRS '{crs_obj}' to Mars geographic: {te}"
@@ -223,15 +296,6 @@ def load_raster_file(file_path: str) -> RasterData:
                         raise MarsPathError(
                             "pyproj is required to unproject metric GeoTIFFs to Mars geographic coordinates."
                         )
-
-                    # Normalize lon into [0, 360)
-                    min_lon = min(geo_left, geo_right) % 360.0
-                    max_lon = max(geo_left, geo_right) % 360.0
-                    if max_lon < min_lon:
-                        max_lon = max(geo_left, geo_right)
-
-                    min_lat = min(geo_bottom, geo_top)
-                    max_lat = max(geo_bottom, geo_top)
 
                     d_lon = (max_lon - min_lon) / src.width
                     d_lat = (max_lat - min_lat) / src.height

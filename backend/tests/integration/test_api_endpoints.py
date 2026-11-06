@@ -44,6 +44,9 @@ def test_data_status_endpoint():
     assert data["active_pilot_region"] == "Jezero Crater, Mars"
     assert data["valid_data_fraction"] > 0.95
     assert len(data["configured_products"]) > 0
+    assert "hirise_enabled" in data
+    assert "hirise_loaded" in data
+    assert "hirise_status" in data
 
 
 def test_route_plan_success():
@@ -65,6 +68,9 @@ def test_route_plan_success():
     assert data["status"] == "success"
     assert data["mission_id"].startswith("mission_")
     assert len(data["routes"]) == 2
+    assert data["source_selection"] is not None
+    assert data["source_selection"]["single_source_invariant_enforced"] is True
+    assert data["source_selection"]["hirise_selected"] is False
 
     primary = data["routes"][0]
     assert primary["summary"]["total_distance_meters"] > 0
@@ -113,6 +119,7 @@ def test_openapi_exposes_evidence_passport_schemas():
         "RobustnessScenarioResult",
         "ScenarioBaselineRouteResult",
         "UncertaintyAssumptions",
+        "TerrainSourceSelectionReport",
     ]:
         assert model_name in schemas, f"Missing OpenAPI schema: {model_name}"
 

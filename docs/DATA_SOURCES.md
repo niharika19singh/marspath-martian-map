@@ -26,15 +26,40 @@ This document details the scientific datasets evaluated and supported for **MARS
   - **200 m/px Regional Scale:** Supports regional corridor terrain assessment across Jezero Crater, **not** metre-scale boulder/obstacle detection or flight-grade rover navigation.
   - **Blending & Thermal-Modelling Origin:** USGS notes this dataset was originally constructed to derive global thermal inertia (for THEMIS) where smooth regional transitions were prioritized over local topographic accuracy. Blending HRSC stereo models with MOLA laser altimetry introduces seam artifacts, registration offsets, and smoothing inconsistencies across transition boundaries.
 
-### B. HiRISE Digital Terrain Model (DTM) — Jezero Western Delta (Local High-Res Corridor)
-- **Official Name:** `HiRISE DTM ESP_037803_1985 / ESP_037869_1985`
+### B. HiRISE Digital Terrain Model (DTM) — Jezero Western Delta (Optional Local High-Resolution Source)
+- **Catalog Product ID:** `dem_hirise_jezero_delta_1m`
+- **Reference Stereo Pair:** `HiRISE DTM ESP_037803_1985 / ESP_037869_1985`
 - **Instrument:** NASA Mars Reconnaissance Orbiter (MRO) High Resolution Imaging Science Experiment (HiRISE).
 - **Publisher:** University of Arizona / NASA PDS Geosciences Node.
 - **Official URL:** `https://www.uahirise.org/dtm/dtm.php?ID=ESP_037803_1985`
-- **Spatial Coverage:** 18.35°N - 18.46°N, 77.38°E - 77.47°E (~6 km x 18 km corridor along delta scarp).
-- **Resolution:** 1.0 meter/pixel elevation, 0.25 meter/pixel orthorectified image.
-- **Data Type:** Numerical elevation in physical meters.
-- **Limitations:** Localized spatial coverage; unsuitable as a stand-alone regional map, but ideal for delta scarp ascent corridors.
+- **Spatial Coverage:** `18.35°N` to `18.46°N`, `77.38°E` to `77.47°E` (~6 km × 18 km localized corridor covering the Jezero Western Delta front and scarp).
+- **Resolution:** ~1.0 meter/pixel numerical elevation (`0.15 m/px` to `25.0 m/px` supported local high-resolution range).
+- **Configuration & Provisioning:**
+  - Controlled via `MARSPATH_USE_HIRISE_DEM=true|false` (default `false`) and `MARSPATH_HIRISE_DEM_PATH=backend/app/data/rasters/hirise_jezero_delta_dtm.tif`.
+  - Optional: when `MARSPATH_USE_HIRISE_DEM=false` or when a route extends outside the HiRISE footprint, MARSPath automatically uses the regional MOLA–HRSC 200 m/px DEM without failing startup.
+- **Honest Provenance & Unverified Local Status:**
+  - Unless an authoritative upstream SHA-256 or MD5 checksum is independently verified against `DATA_CATALOG_MANIFEST`, a locally supplied HiRISE GeoTIFF is classified as `valid_numeric_raster_unverified_source` (`data_mode = "real_unverified_source"`, `source_checksum_verified = false`, `official_product_id = null`, `evidence_passport.quality_tier = "unverified"`).
+  - MARSPath **never** fabricates HiRISE checksums, URLs, or `verified_source` status for unauthenticated local HiRISE files.
+- **Vertical Datum & Stereo DTM Caveats:**
+  - HiRISE stereo DTMs are typically controlled to MOLA altimetry profiles or local stereo bundle adjustments; unless an explicit Mars vertical datum is embedded in the GeoTIFF tags and verified, the vertical datum is reported as `"Unspecified / Unverified Local Mars Vertical Reference"` and explicitly disclosed in `source_limitations`.
+  - Stereo correlation can contain local interpolation artifacts over featureless sand, steep shadows, or scarp overhangs, and even ~1 m/px DTMs do **not** resolve sub-meter rocks, sharp wheel-scale hazards, or soil bearing capacity (`obstacle_detection_capable = false`).
+
+---
+
+## 1.5 Multi-Resolution Terrain Source Selection & Single-Source Invariant
+
+MARSPath implements a resolution-aware, **single-source** terrain architecture (`TerrainSourceSelector` in `backend/app/services/terrain_source_service.py`):
+
+1. **Single-Source Invariant (No Cross-DEM Mosaicking or NoData Patching):**
+   - Every route planning request (`POST /api/v1/routes/plan`) executes on **one** consistent analysis grid derived from **one** selected elevation source (`dem_hirise_jezero_delta_1m` **or** `dem_mola_hrsc_jezero_200m`).
+   - MARSPath **never** stitches or mosaics partially overlapping HiRISE and MOLA–HRSC rasters into a composite grid and **never** fills HiRISE `NoData` cells with MOLA–HRSC values, avoiding artificial seam cliffs (~10–50 m vertical registration offsets between local stereo DTMs and regional blended altimetry) and resolution discontinuity artifacts.
+2. **Corridor Containment Rule:**
+   - HiRISE is selected only when `MARSPATH_USE_HIRISE_DEM=true`, the local HiRISE GeoTIFF passes all geospatial/metric validations, and 100% of the padded mission corridor (`start`, `destination`, all `science_waypoints`, and the surrounding padding buffer) falls inside the HiRISE geographic and native pixel bounds with sufficient valid observation coverage ($\ge 50\%$ valid corridor cells and non-NoData endpoints).
+   - If any part of the padded corridor extends outside the HiRISE footprint, MARSPath selects the regional MOLA–HRSC 200 m/px DEM for the entire request and records the structured reason in `source_selection`.
+3. **Adaptive Resolution & Conservative Hazard-Preserving Block Aggregation:**
+   - When a corridor lies entirely within HiRISE and native cells $\le \text{MAX\_GRID\_CELLS}$ ($250,000$), routing runs at native HiRISE resolution (`aggregation_factor = 1`, `resolution_mode = "native"`).
+   - When native cells $> \text{MAX\_GRID\_CELLS}$, MARSPath computes $k = \lceil\sqrt{N_{\text{native}} / \text{MAX\_GRID\_CELLS}}\rceil$. If the aggregated resolution $k \cdot \text{res}_{\text{native}}$ remains strictly finer than MOLA–HRSC ($< 0.95 \cdot \text{res}_{\text{mola}}$), MARSPath applies conservative $k \times k$ block aggregation (`mean_elevation_strict_nodata_max_subgrid_slope_roughness`), propagating any `NoData` pixel as `NaN` (never `0.0`) and preserving the maximum native sub-block slope and roughness as a lower bound during traversability and risk evaluation.
+   - If required aggregation would make effective resolution no better than MOLA–HRSC ($\ge 0.95 \cdot \text{res}_{\text{mola}}$), HiRISE is rejected (`rejected_aggregated_resolution_no_better_than_regional`) and MOLA–HRSC is selected.
 
 ---
 

@@ -8,18 +8,17 @@ from backend.app.core.exceptions import (
     UnreachableDestinationError,
 )
 from backend.app.data.providers.base import BaseRasterProvider
+from backend.app.data.providers.hirise import HiRISERasterProvider
 from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
 from backend.app.geospatial.crs import (
     geo_to_pixel,
     get_mars_crs_info,
     validate_crs,
 )
-from backend.app.geospatial.raster_alignment import crop_mission_corridor
 from backend.app.geospatial.terrain_metrics import compute_physical_pixel_sizes
 from backend.app.geospatial.validation import (
     check_cell_traversability,
     validate_constraints,
-    validate_coordinates_in_bounds,
 )
 from backend.app.routing.alternatives import (
     generate_route_alternatives,
@@ -27,7 +26,6 @@ from backend.app.routing.alternatives import (
 )
 from backend.app.routing.astar import astar_search
 from backend.app.routing.graph_builder import TerrainGridGraph
-from backend.app.schemas.coordinates import MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode
 from backend.app.schemas.routes import (
     ComputationStats,
@@ -38,14 +36,32 @@ from backend.app.schemas.routes import (
 from backend.app.services.evidence_service import EvidenceService
 from backend.app.services.risk_service import RiskService
 from backend.app.services.robustness_service import RobustnessService
+from backend.app.services.terrain_source_service import TerrainSourceSelector
 
 logger = logging.getLogger("marspath.services.route_service")
 
 
 class RouteService:
-    def __init__(self, provider: BaseRasterProvider | None = None):
+    def __init__(
+        self,
+        provider: BaseRasterProvider | None = None,
+        hirise_provider: HiRISERasterProvider | None = None,
+        max_cells: int | None = None,
+        corridor_padding_meters: float | None = None,
+    ):
         self.settings = get_settings()
-        self.provider = provider or MOLAHRSCRasterProvider()
+        if isinstance(provider, HiRISERasterProvider) and hirise_provider is None:
+            self.provider: BaseRasterProvider = MOLAHRSCRasterProvider()
+            self.hirise_provider: HiRISERasterProvider | None = provider
+        else:
+            self.provider = provider or MOLAHRSCRasterProvider()
+            self.hirise_provider = (
+                hirise_provider
+                if hirise_provider is not None
+                else (HiRISERasterProvider() if provider is None else None)
+            )
+        self.max_cells = max_cells
+        self.corridor_padding_meters = corridor_padding_meters
 
     def plan_route(self, request: RoutePlanRequest) -> RoutePlanResponse:
         # 1. Validate CRS
@@ -55,74 +71,45 @@ class RouteService:
         validate_constraints(request.constraints)
         RobustnessService.validate_config(request.robustness_config)
 
-        # 3. Retrieve Raster
-        master_raster = self.provider.get_dem_raster()
+        # 3. Deterministic Multi-Resolution Terrain Source Selection & Corridor Preparation
+        selection_outcome = TerrainSourceSelector.select_and_prepare_corridor(
+            start=request.start,
+            destination=request.destination,
+            waypoints=request.science_waypoints,
+            regional_provider=self.provider,
+            hirise_provider=self.hirise_provider,
+            max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
+            corridor_padding_meters=self.corridor_padding_meters,
+        )
+
+        master_raster = selection_outcome.master_raster
         meta = master_raster.metadata
-
-        # 4. Validate Coordinates in Master Bounds
-        validate_coordinates_in_bounds(request.start, meta, "Start point")
-        validate_coordinates_in_bounds(request.destination, meta, "Destination point")
-        for idx, wp in enumerate(request.science_waypoints):
-            validate_coordinates_in_bounds(wp, meta, f"Science Waypoint #{idx + 1}")
-
-        # 5. Crop corridor around all mission waypoints (start, destination, plus intermediate waypoints)
-        # Determine bounding envelope of all query coordinates
-        all_lons = [request.start.lon, request.destination.lon] + [
-            wp.lon for wp in request.science_waypoints
-        ]
-        all_lats = [request.start.lat, request.destination.lat] + [
-            wp.lat for wp in request.science_waypoints
-        ]
-        envelope_start = MarsCoordinate(lon=min(all_lons), lat=min(all_lats))
-        envelope_dest = MarsCoordinate(lon=max(all_lons), lat=max(all_lats))
-
-        cropped_elev, cropped_meta, _, _ = crop_mission_corridor(
-            raster=master_raster,
-            start=envelope_start,
-            dest=envelope_dest,
-            padding_meters=3500.0,
-            max_cells=self.settings.MAX_GRID_CELLS,
-        )
-
-        # Convert coordinates to cropped subgrid pixel indices
-        s_col, s_row = geo_to_pixel(
-            request.start.lon,
-            request.start.lat,
-            cropped_meta.min_lon,
-            cropped_meta.max_lat,
-            cropped_meta.deg_per_px_lon,
-            cropped_meta.deg_per_px_lat,
-            pixel_center=True,
-        )
-        d_col, d_row = geo_to_pixel(
-            request.destination.lon,
-            request.destination.lat,
-            cropped_meta.min_lon,
-            cropped_meta.max_lat,
-            cropped_meta.deg_per_px_lon,
-            cropped_meta.deg_per_px_lat,
-            pixel_center=True,
-        )
-        s_col = max(0, min(s_col, cropped_meta.width - 1))
-        s_row = max(0, min(s_row, cropped_meta.height - 1))
-        d_col = max(0, min(d_col, cropped_meta.width - 1))
-        d_row = max(0, min(d_row, cropped_meta.height - 1))
+        cropped_elev = selection_outcome.corridor_elevation
+        cropped_meta = selection_outcome.corridor_metadata
+        s_col, s_row = selection_outcome.start_pixel
+        d_col, d_row = selection_outcome.dest_pixel
+        provenance = selection_outcome.provenance
+        selection_report = selection_outcome.selection_report
+        subgrid_max_slope_deg = selection_outcome.subgrid_max_slope_deg
+        subgrid_max_roughness = selection_outcome.subgrid_max_roughness
 
         # 6. Physical pixel sizes in meters
-        center_lat = (envelope_start.lat + envelope_dest.lat) / 2.0
+        center_lat = (cropped_meta.min_lat + cropped_meta.max_lat) / 2.0
         dx_meters, dy_meters = compute_physical_pixel_sizes(
             center_lat_deg=center_lat,
             deg_per_px_lon=cropped_meta.deg_per_px_lon,
             deg_per_px_lat=cropped_meta.deg_per_px_lat,
         )
 
-        # 7. Evaluate risk: Slope, Roughness, Traversability mask
+        # 7. Evaluate risk: Slope, Roughness, Traversability mask (preserving subgrid hazards if aggregated)
         slope_deg, roughness, traversable_mask = RiskService.evaluate_terrain_risk(
             elevation=cropped_elev,
             dx_meters=dx_meters,
             dy_meters=dy_meters,
             constraints=request.constraints,
             mode=request.mode,
+            subgrid_max_slope_deg=subgrid_max_slope_deg,
+            subgrid_max_roughness=subgrid_max_roughness,
         )
 
         # 8. Check start and dest cell traversability
@@ -143,8 +130,7 @@ class RouteService:
         )
 
         science_pois = self.provider.get_science_targets()
-        is_syn = self.provider.is_synthetic()
-        provenance = self.provider.get_provenance()
+        is_syn = bool(cropped_meta.is_synthetic)
         search_start = time.perf_counter()
         total_nodes_expanded = 0
         routes: list[RouteAlternative] = []
@@ -440,15 +426,37 @@ class RouteService:
             waypoint_pixels=waypoint_pixels,
             provenance=provenance,
             is_synthetic=is_syn,
-            max_cells=self.settings.MAX_GRID_CELLS,
+            max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
+            subgrid_max_slope_deg=subgrid_max_slope_deg,
+            subgrid_max_roughness=subgrid_max_roughness,
         )
 
         # 11. Compile provenance & limitations
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
         val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 
+        if selection_report.hirise_selected:
+            if selection_report.aggregation_applied:
+                res_lim = (
+                    f"Localized HiRISE DTM (native {selection_report.native_resolution_meters:.2f}m/px) "
+                    f"was conservatively aggregated by factor k={selection_report.aggregation_factor} to "
+                    f"{round(dy_meters, 1)}m/px to satisfy MAX_GRID_CELLS while preserving sub-block maximum "
+                    "slope and roughness; does NOT provide flight-grade obstacle detection."
+                )
+            else:
+                res_lim = (
+                    f"Localized HiRISE DTM ({round(dy_meters, 2)}m/px post spacing) supports local landform "
+                    "and scarp assessment, but orbital stereo DTMs (~2-4m feature resolution) do NOT provide "
+                    "flight-grade obstacle detection for wheel-scale (<0.5m) rocks or regolith traps."
+                )
+        else:
+            res_lim = (
+                f"Elevation resolution ({round(dy_meters, 1)}m/px) supports regional corridor terrain "
+                "assessment, not metre-scale obstacle detection or flight-grade rover navigation."
+            )
+
         limitations = [
-            f"Elevation resolution ({round(dy_meters, 1)}m/px) supports regional corridor terrain assessment, not metre-scale obstacle detection or flight-grade rover navigation.",
+            res_lim,
             "Route cost weights, hazard penalties, and categorical risk levels are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of failure.",
         ]
         if is_syn:
@@ -464,9 +472,10 @@ class RouteService:
             "verified_source",
             "official_endpoint_retrieved_checksum_unverified",
         ):
-            limitations.append(
-                "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200m/px nominal) was originally generated for thermal-modelling (THEMIS thermal inertia) rather than precision local navigation."
-            )
+            if not selection_report.hirise_selected:
+                limitations.append(
+                    "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200m/px nominal) was originally generated for thermal-modelling (THEMIS thermal inertia) rather than precision local navigation."
+                )
             if val_status == "official_endpoint_retrieved_checksum_unverified":
                 limitations.append(
                     "Retrieved via HTTP range extraction from official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but full 11.38 GB upstream file checksum was not computed over all upstream source bytes."
@@ -476,6 +485,10 @@ class RouteService:
                 "Operating on an unverified local numerical terrain raster. Official NASA/ESA/USGS provenance and product identity are not established."
             )
 
+        for prov_lim in provenance.get("provenance_limitations", []):
+            if prov_lim not in limitations:
+                limitations.append(prov_lim)
+
         mission_id = f"mission_{uuid.uuid4().hex[:12]}"
 
         stats = ComputationStats(
@@ -484,7 +497,7 @@ class RouteService:
             nodes_expanded=total_nodes_expanded,  # Real measured count of expanded states
             grid_rows=cropped_meta.height,
             grid_cols=cropped_meta.width,
-            cell_size_meters=round((dx_meters + dy_meters) / 2.0, 1),
+            cell_size_meters=round((dx_meters + dy_meters) / 2.0, 2),
         )
 
         return RoutePlanResponse(
@@ -494,6 +507,7 @@ class RouteService:
             pilot_region="Jezero Crater, Mars",
             data_mode=active_mode,
             provenance=provenance,
+            source_selection=selection_report,
             routes=routes,
             stats=stats,
             limitations=limitations,

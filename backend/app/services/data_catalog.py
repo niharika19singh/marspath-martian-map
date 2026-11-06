@@ -3,6 +3,7 @@ from typing import Any
 from backend.app.core.config import get_settings
 from backend.app.data.manifest import DATA_CATALOG_MANIFEST
 from backend.app.data.providers.base import BaseRasterProvider
+from backend.app.data.providers.hirise import HiRISERasterProvider
 from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
 from backend.app.geospatial.crs import get_mars_crs_info
 from backend.app.schemas.coordinates import BoundingBox
@@ -15,9 +16,14 @@ DEFAULT_USGS_200M_URL = (
 
 
 class DataCatalogService:
-    def __init__(self, provider: BaseRasterProvider | None = None):
+    def __init__(
+        self,
+        provider: BaseRasterProvider | None = None,
+        hirise_provider: HiRISERasterProvider | None = None,
+    ):
         self.settings = get_settings()
         self.provider = provider or MOLAHRSCRasterProvider()
+        self.hirise_provider = hirise_provider or HiRISERasterProvider()
 
     @staticmethod
     def _resolve_dem_attribution(is_syn: bool, provenance: dict[str, Any]) -> dict[str, Any]:
@@ -223,6 +229,45 @@ class DataCatalogService:
             ),
         ]
 
+        hi_val = self.hirise_provider.validate_hirise_raster()
+        if hi_val.is_valid and hi_val.raster is not None:
+            hi_prov = self.hirise_provider.get_provenance()
+            hi_attr = self._resolve_dem_attribution(is_syn=False, provenance=hi_prov)
+            hi_meta = hi_val.raster.metadata
+            layers.append(
+                LayerInfo(
+                    id="mars_hirise_jezero_delta_dtm",
+                    name="HiRISE Jezero Western Delta High-Resolution DTM",
+                    category=LayerCategory.ELEVATION,
+                    layer_type="localized_high_res_dem",
+                    description=(
+                        "Localized high-resolution (~1 m/px) stereo Digital Terrain Model covering the "
+                        "Jezero Western Delta. Selected automatically only when the entire padded route "
+                        "corridor lies within valid HiRISE coverage."
+                    ),
+                    units="meters",
+                    resolution_meters=round(hi_meta.meters_per_px_y, 2),
+                    bounds=BoundingBox(
+                        min_lon=round(hi_meta.min_lon, 6),
+                        min_lat=round(hi_meta.min_lat, 6),
+                        max_lon=round(hi_meta.max_lon, 6),
+                        max_lat=round(hi_meta.max_lat, 6),
+                    ),
+                    crs=crs_info,
+                    source_name=hi_attr["source_name"],
+                    source_url=hi_attr["source_url"],
+                    product_id=hi_attr["product_id"],
+                    validation_status=hi_attr["validation_status"],
+                    source_checksum_verified=hi_attr["source_checksum_verified"],
+                    provenance_note=hi_attr["provenance_note"],
+                    is_numerical=True,
+                    is_available=True,
+                    is_renderable=False,
+                    render_url=None,
+                    is_synthetic=False,
+                )
+            )
+
         return LayerListResponse(
             count=len(layers),
             pilot_region="Jezero Crater, Mars",
@@ -245,6 +290,13 @@ class DataCatalogService:
         provenance = self.provider.get_provenance()
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
         val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
+
+        hi_val = self.hirise_provider.validate_hirise_raster()
+        hi_prov = (
+            self.hirise_provider.get_provenance()
+            if (self.hirise_provider.enabled or hi_val.is_valid)
+            else None
+        )
 
         limitations: list[str] = [
             f"Active DEM grid resolution ({res_meters} m/px) supports regional corridor terrain assessment rather than metre-scale obstacle detection or flight-grade rover navigation.",
@@ -279,6 +331,20 @@ class DataCatalogService:
                 if lim not in limitations:
                     limitations.append(lim)
 
+        enriched_products: list[dict[str, Any]] = []
+        for entry in DATA_CATALOG_MANIFEST:
+            prod = dict(entry)
+            if prod.get("id") == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2":
+                prod["is_loaded"] = not is_syn
+                prod["runtime_status"] = val_status
+            elif prod.get("id") == "dem_hirise_jezero_delta_1m":
+                prod["is_loaded"] = bool(hi_val.is_valid)
+                prod["runtime_status"] = hi_val.status_code
+            else:
+                prod["is_loaded"] = True
+                prod["runtime_status"] = "external_tile_service"
+            enriched_products.append(prod)
+
         return DataStatusResponse(
             status="healthy",
             data_mode=active_mode,
@@ -305,7 +371,12 @@ class DataCatalogService:
             grid_shape=[raster.metadata.height, raster.metadata.width],
             valid_data_fraction=round(valid_frac, 4),
             active_dem_provenance=provenance,
-            configured_products=DATA_CATALOG_MANIFEST,
+            hirise_enabled=bool(self.hirise_provider.enabled),
+            hirise_loaded=bool(hi_val.is_valid),
+            hirise_status=hi_val.status_code,
+            hirise_validation_reason=hi_val.reason,
+            hirise_dem_provenance=hi_prov,
+            configured_products=enriched_products,
             limitations=limitations,
             blocking_errors=blocking_errors,
         )

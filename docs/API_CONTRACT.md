@@ -147,15 +147,51 @@ Mars geodesy differs fundamentally from Earth mapping:
 
 - **Method:** `GET`
 - **Path:** `/api/v1/data/status`
-- **Description:** Detailed telemetry on active datasets, resolution, spatial coverage fraction, provenance verification status, and reference planetary product catalog.
+- **Description:** Detailed telemetry on active datasets, resolution, spatial coverage fraction, provenance verification status, optional HiRISE local DTM readiness, and the reference planetary product catalog (`products` includes runtime readiness fields `is_loaded` and `runtime_status`).
+- **HiRISE Status Fields (`DataStatusResponse`):**
+  - `hirise_enabled` (`bool`): Whether `MARSPATH_USE_HIRISE_DEM` is enabled.
+  - `hirise_loaded` (`bool`): Whether a validated local HiRISE DTM is loaded and available for localized corridor selection.
+  - `hirise_validation_status` (`str`): One of `"disabled"`, `"incomplete_missing_hirise_dem"`, `"invalid_hirise_dem"`, `"valid_numeric_raster_unverified_source"`, or `"verified_source"`.
+  - `hirise_resolution_meters` (`float | null`): Native effective resolution of the loaded HiRISE DTM in meters/pixel.
+  - `hirise_coverage` (`BoundingBox | null`): Geographic bounds (`min_lon`, `min_lat`, `max_lon`, `max_lat`) of the loaded HiRISE DTM.
+  - `hirise_dataset_name` (`str | null`): Dataset title of the loaded HiRISE DTM when available.
+  - `hirise_fallback_reason` (`str | null`): Diagnostic reason when HiRISE is disabled, missing, or invalid.
 
 ---
 
-### 4. Route Planning & Terrain Evidence Passport
+### 4. Route Planning, Terrain Source Selection & Terrain Evidence Passport
 
 - **Method:** `POST`
 - **Path:** `/api/v1/routes/plan`
-- **Description:** Optimizes traversable routes between two planetary coordinates, evaluating local slope, roughness, and scientific waypoints with fully reconciled cost breakdowns and a structured **Terrain Evidence & Route Confidence Passport** (`evidence_passport`) attached to every route alternative.
+- **Description:** Selects a single consistent elevation source (`source_selection`: HiRISE local ~1 m/px DTM when enabled, valid, and 100% containing the padded corridor; otherwise regional MOLA–HRSC ~200 m/px DEM), optimizes traversable routes between two planetary coordinates, and attaches a structured **Terrain Evidence & Route Confidence Passport** (`evidence_passport`) to every route alternative.
+
+#### Multi-Resolution Source Selection Report (`source_selection`)
+Every `RoutePlanResponse` includes a top-level `source_selection` (`TerrainSourceSelectionReport`) object:
+```json
+{
+  "source_selection": {
+    "selected_source_id": "dem_mola_hrsc_jezero_200m",
+    "selected_dataset_name": "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2",
+    "selection_reason": "Selected regional MOLA-HRSC 200 m/px DEM because optional HiRISE local DTM is disabled (MARSPATH_USE_HIRISE_DEM=false).",
+    "hirise_candidate_evaluated": false,
+    "hirise_enabled": false,
+    "hirise_loaded": false,
+    "hirise_corridor_status": "disabled",
+    "hirise_rejection_reason": "HiRISE local DTM integration is disabled via configuration (MARSPATH_USE_HIRISE_DEM=false).",
+    "single_source_invariant_enforced": true,
+    "native_resolution_meters": 200.0,
+    "effective_resolution_meters": 200.0,
+    "resolution_mode": "native",
+    "aggregation_applied": false,
+    "aggregation_factor": 1,
+    "aggregation_method": null,
+    "native_corridor_dimensions": [41, 55],
+    "effective_corridor_dimensions": [41, 55]
+  }
+}
+```
+- **Single-Source Invariant (`single_source_invariant_enforced: true`):** MARSPath uses one elevation source and one consistent analysis grid per route request, never mosaicking partially overlapping DEMs or patching HiRISE `NoData` cells with MOLA–HRSC values.
+- **Native vs. Effective Resolution & Aggregation Metadata:** Both `source_selection` and each route's `evidence_passport.source` and `evidence_passport.resolution_assessment` report `native_pixel_resolution_x_meters`, `native_pixel_resolution_y_meters`, `native_resolution_meters`, `effective_resolution_meters`, `resolution_mode` (`"native"` or `"aggregated_block"`), `aggregation_applied` (`bool`), `aggregation_factor` (`int >= 1`), and `aggregation_method` (`"mean_elevation_strict_nodata_max_subgrid_slope_roughness"` when aggregated).
 
 #### Request Schema
 ```json
@@ -204,7 +240,7 @@ The backend applies the most conservative applicable tier:
    - *Note:* Partial HTTP Range extractions from the official USGS endpoint can at most receive `moderate` and **never** receive `high`.
 4. **`high`**:
    - Assigned **only** when `validation_status == "verified_source"`, the full upstream source checksum (`source_checksum_verified: true`) AND local file SHA-256 integrity (`local_integrity_verified: true`) are independently verified against the catalog manifest, an established Mars CRS and known vertical datum are present, `route_data_coverage_fraction == 1.0`, `corridor_data_coverage_fraction == 1.0`, `near_nodata_segment_count == 0`, and effective resolution meets the regional assessment contract (`<= 250 m/px`).
-   - *Regional Scope vs. Obstacle Detection:* `high` means authoritative, verified, complete terrain evidence suitable for the declared **regional corridor assessment scope**. It does **not** mean metre-scale resolution and does **not** imply local obstacle detection capability. `obstacle_detection_capable` remains an independent resolution property (`true` only at `<= 1.0 m/px`). A fully verified `200 m/px` dataset with complete regional evidence qualifies as `high` while `obstacle_detection_capable` remains `false`.
+   - *Regional Scope vs. Obstacle Detection:* `high` means authoritative, verified, complete terrain evidence suitable for the declared **regional corridor assessment scope**. It does **not** mean wheel-scale obstacle clearance and does **not** imply flight-grade obstacle detection capability (`obstacle_detection_capable` is always `false`, even on ~1 m/px HiRISE DTMs, because sub-meter rocks, sharp boulders, and soil bearing capacity remain unresolved).
 
 ### Missing / Invalid Elevation & Incomplete Measurement Integrity (No Fabricated Zeros or Optimistic Complete Metrics)
 - **3D vs. 2D GeoJSON `LineString` (`geometry.coordinates`):** When 100% of route vertices have valid elevation observations (`elevation_sample_coverage_fraction == 1.0`), `geometry.coordinates` emits 3D `[lon, lat, elevation_m]` tuples. If any route vertex lacks a valid elevation observation, `geometry.coordinates` emits a standards-compliant 2D RFC 7946 `LineString` (`[[lon, lat], ...]`) rather than fabricating `0.0` Z values.

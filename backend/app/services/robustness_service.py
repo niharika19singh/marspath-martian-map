@@ -692,6 +692,8 @@ class RobustnessService:
         provenance: dict[str, Any] | None = None,
         is_synthetic: bool = False,
         max_cells: int | None = None,
+        subgrid_max_slope_deg: np.ndarray | None = None,
+        subgrid_max_roughness: np.ndarray | None = None,
     ) -> RouteRobustnessAssessment | None:
         """
         Executes the requested deterministic terrain perturbation stress test and returns a
@@ -774,11 +776,26 @@ class RobustnessService:
                     dy_meters=dy_meters,
                     nodata_mask=scen_nodata_mask,
                 )
+                if subgrid_max_slope_deg is not None and subgrid_max_slope_deg.shape == scen_slope.shape:
+                    both_nan_slope = np.isnan(scen_slope) | np.isnan(subgrid_max_slope_deg)
+                    scen_slope = np.where(
+                        both_nan_slope,
+                        np.nan,
+                        np.maximum(scen_slope, subgrid_max_slope_deg),
+                    ).astype(np.float32)
+
                 scen_roughness = compute_roughness_index(
                     perturbed_elev,
                     kernel_size=3,
                     nodata_mask=scen_nodata_mask,
                 )
+                if subgrid_max_roughness is not None and subgrid_max_roughness.shape == scen_roughness.shape:
+                    both_nan_rough = np.isnan(scen_roughness) | np.isnan(subgrid_max_roughness)
+                    scen_roughness = np.where(
+                        both_nan_rough,
+                        np.nan,
+                        np.maximum(scen_roughness, subgrid_max_roughness),
+                    ).astype(np.float32)
 
                 # Build mode-specific traversability masks and TerrainGridGraphs
                 mode_graphs: dict[OptimizationMode, TerrainGridGraph] = {}

@@ -279,6 +279,12 @@ class EvidenceService:
         raw_datum = str(master_meta.vertical_datum or "").strip()
         vertical_datum = raw_datum if raw_datum else "Unknown / Unspecified"
 
+        nat_x = round(float(master_meta.meters_per_px_x), 2)
+        nat_y = round(float(master_meta.meters_per_px_y), 2)
+        agg_applied = bool(provenance.get("aggregation_applied", False))
+        agg_factor = int(provenance.get("aggregation_factor", 1))
+        agg_method = str(provenance.get("aggregation_method", "none"))
+
         return SourceEvidence(
             dataset_name=dataset_name,
             product_id=product_id,
@@ -293,6 +299,11 @@ class EvidenceService:
             file_sha256=provenance.get("file_sha256"),
             pixel_resolution_x_meters=round(dx_meters, 2),
             pixel_resolution_y_meters=round(dy_meters, 2),
+            native_resolution_x_meters=nat_x,
+            native_resolution_y_meters=nat_y,
+            aggregation_applied=agg_applied,
+            aggregation_factor=agg_factor,
+            aggregation_method=agg_method,
             nominal_resolution_meters=nominal_res,
             raster_width=int(master_meta.width),
             raster_height=int(master_meta.height),
@@ -313,10 +324,18 @@ class EvidenceService:
         dx_meters: float,
         dy_meters: float,
         nominal_res: float | None,
+        native_dx_meters: float | None = None,
+        native_dy_meters: float | None = None,
+        aggregation_applied: bool = False,
+        aggregation_factor: int = 1,
+        aggregation_method: str = "none",
     ) -> ResolutionAssessment:
         actual_x = round(dx_meters, 2)
         actual_y = round(dy_meters, 2)
         effective_res = round(max(dx_meters, dy_meters), 2)
+        nat_x = round(native_dx_meters, 2) if native_dx_meters is not None else actual_x
+        nat_y = round(native_dy_meters, 2) if native_dy_meters is not None else actual_y
+        nat_eff = round(max(nat_x, nat_y), 2)
 
         if is_synthetic:
             suitability = "synthetic_simulation_only"
@@ -326,15 +345,25 @@ class EvidenceService:
                 f"per pixel (effective resolution {effective_res} m/px). Suitable only for algorithm "
                 "testing and UI simulation; does not represent physical Martian surface obstacles."
             )
-        elif effective_res <= 1.5:
+        elif effective_res <= 5.0 and not aggregation_applied:
             suitability = "local_corridor_and_hazard_assessment"
-            obstacle_capable = effective_res <= 1.0
+            obstacle_capable = False
             statement = (
                 f"Actual metric cell resolution is {actual_x} m (X) × {actual_y} m (Y) per pixel "
                 f"(effective {effective_res} m/px"
                 + (f", nominal {nominal_res} m/px" if nominal_res else "")
-                + "). Supports local landform and metre-scale hazard evaluation, though sub-pixel "
-                "cobbles and wheel-scale regolith traps (<1 m) remain unresolved."
+                + "). Supports localized landform and scarp evaluation, but orbital stereo DTMs (~2-4 m "
+                "feature scale) do NOT provide flight-grade obstacle detection for wheel-scale (<0.5 m) "
+                "rocks, sharp outcrops, or regolith traps."
+            )
+        elif effective_res <= 50.0 and aggregation_applied:
+            suitability = "aggregated_local_corridor_assessment"
+            obstacle_capable = False
+            statement = (
+                f"Native {nat_x} m × {nat_y} m ({nat_eff} m/px) high-resolution DTM was conservatively "
+                f"aggregated by factor k={aggregation_factor} ({aggregation_method}) to {actual_x} m (X) × "
+                f"{actual_y} m (Y) per pixel (effective {effective_res} m/px) to satisfy MAX_GRID_CELLS while "
+                "preserving sub-block maximum slope and roughness. Does NOT provide flight-grade obstacle detection."
             )
         elif effective_res <= 250.0:
             suitability = "regional_corridor_assessment_only"
@@ -363,6 +392,12 @@ class EvidenceService:
             actual_x_meters_per_pixel=actual_x,
             actual_y_meters_per_pixel=actual_y,
             effective_resolution_meters=effective_res,
+            native_x_meters_per_pixel=nat_x,
+            native_y_meters_per_pixel=nat_y,
+            native_effective_resolution_meters=nat_eff,
+            aggregation_applied=aggregation_applied,
+            aggregation_factor=aggregation_factor,
+            aggregation_method=aggregation_method,
             nominal_dataset_resolution_meters=nominal_res,
             suitability_classification=suitability,
             obstacle_detection_capable=obstacle_capable,
@@ -751,9 +786,14 @@ class EvidenceService:
             "verified_source",
             "official_endpoint_retrieved_checksum_unverified",
         ):
-            limitations.append(
-                "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200 m/px nominal) was originally constructed for global thermal-modelling (THEMIS thermal inertia) rather than precision local surface navigation."
-            )
+            if source.product_id == "dem_hirise_jezero_delta_1m":
+                limitations.append(
+                    "HiRISE stereo DTMs (~1 m/px post spacing) have ~2-4 m horizontal feature resolution and do not resolve wheel-scale (<0.5 m) rocks, overhangs, or unconsolidated sand traps."
+                )
+            else:
+                limitations.append(
+                    "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200 m/px nominal) was originally constructed for global thermal-modelling (THEMIS thermal inertia) rather than precision local surface navigation."
+                )
             if not source.source_checksum_verified:
                 limitations.append(
                     "Retrieved via HTTP range extraction from the official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but the full 11.38 GB upstream file MD5 checksum was not computed over all upstream source bytes."
@@ -805,6 +845,11 @@ class EvidenceService:
             dx_meters=graph.dx,
             dy_meters=graph.dy,
             nominal_res=source.nominal_resolution_meters,
+            native_dx_meters=source.native_resolution_x_meters,
+            native_dy_meters=source.native_resolution_y_meters,
+            aggregation_applied=source.aggregation_applied,
+            aggregation_factor=source.aggregation_factor,
+            aggregation_method=source.aggregation_method,
         )
         segments, coverage, route_flags = cls.build_segments_and_coverage(
             path_nodes=path_nodes,

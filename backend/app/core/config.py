@@ -36,6 +36,8 @@ if HAS_SETTINGS:
         USE_REAL_DEM: bool = False
         DEM_PATH: str = "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
         ALLOW_SYNTHETIC_FALLBACK: bool = True
+        USE_HIRISE_DEM: bool = False
+        HIRISE_DEM_PATH: str = "backend/app/data/rasters/hirise_jezero_delta_dtm.tif"
 
         MARS_RADIUS_METERS: float = 3396190.0
         MARS_EQUATORIAL_RADIUS: float = 3396190.0
@@ -94,6 +96,16 @@ else:
                 "MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true"
             ).lower()
             in ("true", "1")
+        )
+        USE_HIRISE_DEM: bool = Field(
+            default_factory=lambda: os.getenv("MARSPATH_USE_HIRISE_DEM", "false").lower()
+            in ("true", "1")
+        )
+        HIRISE_DEM_PATH: str = Field(
+            default_factory=lambda: os.getenv(
+                "MARSPATH_HIRISE_DEM_PATH",
+                "backend/app/data/rasters/hirise_jezero_delta_dtm.tif",
+            )
         )
 
         MARS_RADIUS_METERS: float = 3396190.0

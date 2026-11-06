@@ -17,27 +17,31 @@ def crop_mission_corridor(
     dest: MarsCoordinate,
     padding_meters: float = 3000.0,
     max_cells: int = 250000,
+    waypoints: list[MarsCoordinate] | None = None,
 ) -> tuple[np.ndarray, RasterMetadata, tuple[int, int], tuple[int, int]]:
     """
-    Crops a subgrid from the master raster surrounding the start and destination points
-    with a buffer/padding margin in physical meters.
+    Crops a subgrid from the master raster surrounding the start, destination,
+    and any science waypoints with a buffer/padding margin in physical meters.
 
     Returns:
         (cropped_elevation, cropped_metadata, (start_col, start_row), (dest_col, dest_row))
         where start and dest indices are local to the cropped subgrid.
     """
     meta = raster.metadata
-    center_lat = (start.lat + dest.lat) / 2.0
+    all_pts = [start, dest] + list(waypoints or [])
+    pts_lons = [p.lon for p in all_pts]
+    pts_lats = [p.lat for p in all_pts]
+    center_lat = (min(pts_lats) + max(pts_lats)) / 2.0
 
     # Convert padding from meters to degrees
     pad_lat_deg = padding_meters / METERS_PER_DEGREE_LATITUDE
     pad_lon_deg = padding_meters / meters_per_degree_lon(center_lat)
 
     # Determine bounding box in geographic coordinates
-    min_lon = max(min(start.lon, dest.lon) - pad_lon_deg, meta.min_lon)
-    max_lon = min(max(start.lon, dest.lon) + pad_lon_deg, meta.max_lon)
-    min_lat = max(min(start.lat, dest.lat) - pad_lat_deg, meta.min_lat)
-    max_lat = min(max(start.lat, dest.lat) + pad_lat_deg, meta.max_lat)
+    min_lon = max(min(pts_lons) - pad_lon_deg, meta.min_lon)
+    max_lon = min(max(pts_lons) + pad_lon_deg, meta.max_lon)
+    min_lat = max(min(pts_lats) - pad_lat_deg, meta.min_lat)
+    max_lat = min(max(pts_lats) + pad_lat_deg, meta.max_lat)
 
     # Convert to master raster pixel indices
     c_min, r_min = geo_to_pixel(

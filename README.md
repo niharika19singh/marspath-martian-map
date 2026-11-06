@@ -16,8 +16,9 @@ MARSPath is an interplanetary routing intelligence and terrain assessment platfo
   - `safety_first`: Strict slope ceilings (≤14°), heavy ruggedness aversion, avoiding uncharacterized terrain.
   - `balanced`: Optimal trade-off between physical distance, slope energy expenditure, and traversal time.
   - `science_first`: Maximizes traversal near high-value geological points of interest (delta deposits, carbonates, crater rims) while enforcing safety constraints.
-- **Transparent Data Provenance & Ingestion:**
-  - Automated cloud-native window extraction (`178 x 252` pixels, 200 m/px nominal resolution) directly from the USGS S3 archive (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`).
+- **Transparent Data Provenance & Multi-Resolution Terrain Selection:**
+  - Automated cloud-native window extraction (`178 x 252` pixels, 200 m/px nominal resolution) directly from the USGS S3 archive (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`) as the default regional Jezero DEM.
+  - Optional localized high-resolution **HiRISE Jezero Western Delta DTM** (~1 m/px, `18.35°N–18.46°N, 77.38°E–77.47°E`) via `MARSPATH_USE_HIRISE_DEM=true` and `MARSPATH_HIRISE_DEM_PATH`, with automatic single-source corridor selection, projected-to-geographic Mars CRS alignment, and conservative hazard-preserving block aggregation when a HiRISE corridor exceeds `MAX_GRID_CELLS`.
   - Strict separation between local SHA-256 file integrity (`local_integrity_verified`) and upstream source checksum authenticity (`source_checksum_verified`).
   - Five explicit validation states: `synthetic_test_fixture`, `incomplete_missing_genuine_dem`, `valid_numeric_raster_unverified_source`, `official_endpoint_retrieved_checksum_unverified` (for partial HTTP range extractions where the full 11.38 GB archive MD5 is not computed over all upstream bytes), and `verified_source` (reserved strictly for independently verified full-source checksums).
 
@@ -63,10 +64,13 @@ This creates:
 - `backend/app/data/rasters/jezero_mola_hrsc_blended.tif` (~90 KB GeoTIFF, git-ignored)
 - `backend/app/data/rasters/jezero_mola_hrsc_blended.tif.provenance.json` (cryptographic sidecar)
 
-To run the backend with the verified real DEM:
+To run the backend with the verified real DEM (and optional localized HiRISE DTM when provisioned):
 ```bash
 export MARSPATH_USE_REAL_DEM=true
 export MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false
+# Optional: enable localized HiRISE Jezero Western Delta DTM (~1 m/px)
+export MARSPATH_USE_HIRISE_DEM=false
+export MARSPATH_HIRISE_DEM_PATH=backend/app/data/rasters/hirise_jezero_delta_dtm.tif
 uvicorn backend.app.main:app --reload
 ```
 
