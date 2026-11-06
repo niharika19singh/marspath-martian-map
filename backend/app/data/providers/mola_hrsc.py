@@ -53,7 +53,22 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
         # Real DEM was requested
         logger.info("Real DEM requested. Checking path: %s", self.dem_path)
         if not os.path.exists(self.dem_path):
-            msg = f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found at: {self.dem_path}"
+            err_detail = ""
+            err_file = f"{self.dem_path}.provision_error.json"
+            if os.path.exists(err_file):
+                try:
+                    import json
+
+                    with open(err_file, encoding="utf-8") as ef:
+                        err_data = json.load(ef)
+                    if err_data.get("error"):
+                        err_detail = f" (provisioning error: {err_data['error']})"
+                except Exception:
+                    pass
+            msg = (
+                f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found at: "
+                f"{self.dem_path}{err_detail}"
+            )
             if not self.allow_fallback:
                 raise TerrainDataUnavailableError(msg)
             logger.warning("%s. Falling back to synthetic test model.", msg)
@@ -255,16 +270,16 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 data_mode = "real_unverified_source"
                 local_integrity_verified = None
                 source_checksum_verified = False
-                dataset_name = f"{matched_prod['product_name']} (Unverified Source / Unauthenticated Tags)"
+                dataset_name = "Local Numerical Elevation Model (Unverified Source / Unauthenticated Tags)"
                 official_product_id = None
                 official_source_url = None
                 pds_doi = None
-                mission_instruments = [matched_prod.get("mission_instruments", "Unverified")]
+                mission_instruments = ["Unverified / Unknown"]
                 data_publisher = "Unknown / Local Origin"
                 limitations = [
                     "Raster passed 2D numerical and Jezero spatial-integrity checks (valid float array, plausible Mars elevations, valid planetary CRS).",
-                    f"Raster header contains tags referencing '{matched_prod['id']}', but authoritative source provenance could NOT be cryptographically authenticated (no verified upstream checksum chain or registered manifest hash).",
-                    "Treated as an unverified local numeric terrain raster; cannot be reported as certified flight-grade planetary data.",
+                    f"Raster header contains unauthenticated tags referencing '{matched_prod['id']}', but authoritative source provenance could NOT be cryptographically authenticated (no verified upstream checksum chain or registered manifest hash).",
+                    "Treated as an unverified local numeric terrain raster; cannot be attributed to NASA or USGS or reported as certified flight-grade planetary data.",
                 ]
             else:
                 validation_status = "valid_numeric_raster_unverified_source"

@@ -199,7 +199,6 @@ def ingest_jezero_dem(
 
     source = source_url_or_path or USGS_MOLA_HRSC_GLOBAL_URL
     is_remote = source.startswith("http://") or source.startswith("https://")
-    vsi_source = f"/vsicurl/{source}" if is_remote else source
 
     # Determine source authenticity BEFORE writing any provenance claims
     computed_source_md5: str | None = None
@@ -257,16 +256,38 @@ def ingest_jezero_dem(
     min_lon, min_lat, max_lon, max_lat = bounds
     logger.info("Opening source raster: %s (method=%s)", source, ingestion_method)
 
-    with rasterio.open(vsi_source) as src:
-        # Calculate integer-aligned pixel window for the given lon/lat bounds
-        window = from_bounds(min_lon, min_lat, max_lon, max_lat, src.transform)
-        window = window.round_offsets().round_lengths()
-        data = src.read(1, window=window)
-        win_transform = rasterio.windows.transform(window, src.transform)
-        win_bounds = rasterio.windows.bounds(window, src.transform)
-        source_crs = src.crs
-        nodata_val = src.nodata if src.nodata is not None else -32768.0
-        src_tags = src.tags()
+    candidate_sources = [source]
+    if source_url_or_path is None and source == USGS_MOLA_HRSC_GLOBAL_URL:
+        candidate_sources.append(USGS_MOLA_HRSC_BACKUP_URL)
+
+    last_open_err: Exception | None = None
+    data = None
+    for cand_src in candidate_sources:
+        cand_vsi = (
+            f"/vsicurl/{cand_src}"
+            if (cand_src.startswith("http://") or cand_src.startswith("https://"))
+            else cand_src
+        )
+        try:
+            with rasterio.open(cand_vsi) as src:
+                # Calculate integer-aligned pixel window for the given lon/lat bounds
+                window = from_bounds(min_lon, min_lat, max_lon, max_lat, src.transform)
+                window = window.round_offsets().round_lengths()
+                data = src.read(1, window=window)
+                win_transform = rasterio.windows.transform(window, src.transform)
+                win_bounds = rasterio.windows.bounds(window, src.transform)
+                source_crs = src.crs
+                nodata_val = src.nodata if src.nodata is not None else -32768.0
+                src_tags = src.tags()
+            source = cand_src
+            break
+        except Exception as exc:
+            last_open_err = exc
+            logger.warning("Failed reading window from source '%s': %s", cand_src, exc)
+
+    if data is None:
+        assert last_open_err is not None
+        raise last_open_err
 
     height, width = data.shape
     valid_mask = data != nodata_val
@@ -374,7 +395,179 @@ def ingest_jezero_dem(
     return provenance_record
 
 
+def _validate_existing_local_dem(dem_path: Path) -> tuple[bool, str, dict[str, Any] | None]:
+    """
+    Validates that `dem_path` and its provenance sidecar exist, pass SHA-256 local
+    integrity verification, and load cleanly as a valid numeric Mars DEM over Jezero Crater.
+    """
+    from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
+    from backend.app.geospatial.raster_loader import load_raster_file
+
+    integrity_ok, reason, sidecar = verify_local_integrity(dem_path)
+    if not integrity_ok or sidecar is None:
+        return False, reason, None
+
+    try:
+        loaded = load_raster_file(str(dem_path))
+        validator = MOLAHRSCRasterProvider(dem_path=str(dem_path))
+        validator._validate_dem_integrity(loaded)
+    except Exception as exc:
+        return False, f"raster_validation_failed: {exc}", sidecar
+
+    return True, "valid_local_dem_and_sidecar", sidecar
+
+
+def provision_runtime_dem(
+    dem_path: str | Path | None = None,
+    use_real_dem: bool | None = None,
+    allow_fallback: bool | None = None,
+    source_url_or_path: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    Idempotent runtime DEM provisioning helper for cloud/Render startup:
+    1. When `use_real_dem` is False, skips remote ingestion and returns immediately.
+    2. When `use_real_dem` is True:
+       - Checks whether the target raster and provenance sidecar already exist,
+         validates local SHA-256 integrity, and verifies the raster metadata.
+         If valid and `force=False`, reuses the existing local data without re-ingesting.
+       - If missing or invalid, removes any stale/corrupted files and runs `ingest_jezero_dem`
+         against the official USGS endpoint (extracting only the 178x252 Jezero window via HTTP Range).
+       - Verifies the newly ingested raster and sidecar before returning.
+       - If ingestion fails: cleans up any partial files, records the failure reason for
+         health/readiness reporting, and either returns `fallback_to_synthetic` when
+         `allow_fallback=True` or raises `RuntimeError` when `allow_fallback=False`.
+    """
+    from backend.app.core.config import get_settings
+
+    settings = get_settings()
+    target_path = Path(dem_path or settings.DEM_PATH)
+    effective_use_real = settings.USE_REAL_DEM if use_real_dem is None else use_real_dem
+    effective_fallback = (
+        settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
+    )
+    sidecar_path = get_provenance_sidecar_path(target_path)
+    error_marker_path = Path(f"{target_path}.provision_error.json")
+
+    if not effective_use_real:
+        logger.info(
+            "MARSPATH_USE_REAL_DEM=false; skipping real DEM provisioning. Operating in synthetic_test_fixture mode."
+        )
+        return {
+            "status": "skipped_real_dem_disabled",
+            "real_dem_requested": False,
+            "real_dem_provisioned": False,
+            "action": "none",
+            "dem_path": str(target_path),
+        }
+
+    if not force and target_path.exists() and sidecar_path.exists():
+        is_valid, reason, sidecar = _validate_existing_local_dem(target_path)
+        if is_valid and sidecar is not None:
+            if error_marker_path.exists():
+                error_marker_path.unlink(missing_ok=True)
+            logger.info(
+                "Valid local Jezero DEM and provenance sidecar already present at %s (SHA-256=%s..., status=%s). Skipping re-ingestion.",
+                target_path,
+                str(sidecar.get("local_file_sha256", ""))[:12],
+                sidecar.get("validation_status"),
+            )
+            return {
+                "status": "already_provisioned_valid",
+                "real_dem_requested": True,
+                "real_dem_provisioned": True,
+                "action": "reused_existing_valid_dem",
+                "dem_path": str(target_path),
+                "local_file_sha256": sidecar.get("local_file_sha256"),
+                "validation_status": sidecar.get("validation_status"),
+            }
+        logger.warning(
+            "Existing DEM at %s failed local integrity/validation (%s); removing before re-ingestion.",
+            target_path,
+            reason,
+        )
+
+    # Remove any stale/corrupted partial files before attempting fresh ingestion
+    for stale in (target_path, sidecar_path):
+        if stale.exists():
+            stale.unlink(missing_ok=True)
+
+    try:
+        record = ingest_jezero_dem(
+            output_path=target_path,
+            source_url_or_path=source_url_or_path,
+            force=True,
+        )
+        is_valid, reason, _ = _validate_existing_local_dem(target_path)
+        if not is_valid:
+            raise RuntimeError(f"Post-ingestion raster verification failed: {reason}")
+
+        if error_marker_path.exists():
+            error_marker_path.unlink(missing_ok=True)
+
+        logger.info(
+            "Successfully provisioned and verified Jezero DEM at %s (status=%s, SHA-256=%s...)",
+            target_path,
+            record.get("validation_status"),
+            str(record.get("local_file_sha256", ""))[:12],
+        )
+        return {
+            "status": "provisioned_from_source",
+            "real_dem_requested": True,
+            "real_dem_provisioned": True,
+            "action": "ingested_and_verified",
+            "dem_path": str(target_path),
+            "local_file_sha256": record.get("local_file_sha256"),
+            "validation_status": record.get("validation_status"),
+        }
+    except Exception as exc:
+        # Clean up any partial files so failed ingestion can NEVER masquerade as ready real data
+        for partial in (target_path, sidecar_path):
+            if partial.exists():
+                partial.unlink(missing_ok=True)
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(error_marker_path, "w", encoding="utf-8") as ef:
+                json.dump(
+                    {
+                        "error": str(exc),
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                    },
+                    ef,
+                )
+        except Exception:
+            pass
+
+        if effective_fallback:
+            logger.warning(
+                "Failed to provision real DEM at %s (%s). MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true; "
+                "continuing startup in synthetic_fallback mode (real_dem_loaded=false, dem_loaded=false).",
+                target_path,
+                exc,
+            )
+            return {
+                "status": "fallback_to_synthetic",
+                "real_dem_requested": True,
+                "real_dem_provisioned": False,
+                "action": "ingestion_failed_using_synthetic_fallback",
+                "dem_path": str(target_path),
+                "error": str(exc),
+            }
+
+        logger.error(
+            "CRITICAL: Failed to provision real DEM at %s (%s) and MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false. Aborting startup.",
+            target_path,
+            exc,
+        )
+        raise RuntimeError(
+            f"Mandatory real DEM provisioning failed (MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false): {exc}"
+        ) from exc
+
+
 if __name__ == "__main__":
+    import sys
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Ingest Jezero Crater DEM from USGS PDS archive.")
     parser.add_argument("--output", type=str, default=None, help="Output GeoTIFF path")
@@ -382,7 +575,27 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force", action="store_true", help="Force re-ingestion even if local extract exists"
     )
+    parser.add_argument(
+        "--provision-runtime",
+        action="store_true",
+        help="Run idempotent runtime DEM provisioning honoring MARSPATH_USE_REAL_DEM and MARSPATH_ALLOW_SYNTHETIC_FALLBACK",
+    )
     args = parser.parse_args()
+
+    if args.provision_runtime:
+        try:
+            res = provision_runtime_dem(
+                dem_path=args.output,
+                source_url_or_path=args.source,
+                force=args.force,
+            )
+            print(f"Runtime provisioning status: {res['status']}")
+            print(f"Real DEM requested: {res['real_dem_requested']}")
+            print(f"Real DEM provisioned: {res['real_dem_provisioned']}")
+            sys.exit(0)
+        except Exception as err:
+            print(f"Runtime provisioning failed: {err}", file=sys.stderr)
+            sys.exit(1)
 
     record = ingest_jezero_dem(
         output_path=args.output,

@@ -18,6 +18,7 @@ def test_health_endpoint():
         "synthetic_test_fixture",
         "synthetic_fallback",
         "real",
+        "real_official_endpoint_unverified_checksum",
         "real_unverified_source",
     )
 

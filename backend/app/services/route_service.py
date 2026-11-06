@@ -386,26 +386,32 @@ class RouteService:
         val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 
         limitations = [
-            f"Elevation resolution ({round(dy_meters, 1)}m/px; 200m/px nominal for USGS global blended DEM) supports regional corridor terrain assessment, not metre-scale obstacle detection or flight-grade rover navigation.",
-            "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM was originally generated for thermal-modelling (THEMIS thermal inertia) rather than precision local navigation.",
+            f"Elevation resolution ({round(dy_meters, 1)}m/px) supports regional corridor terrain assessment, not metre-scale obstacle detection or flight-grade rover navigation.",
             "Route cost weights, hazard penalties, and categorical risk levels are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of failure.",
         ]
         if is_syn:
             if active_mode == "synthetic_fallback":
                 limitations.append(
-                    f"Warning: Real NASA DEM was requested but failed or was missing; operating on synthetic test model ({provenance.get('fallback_reason', '')})."
+                    f"Warning: Real NASA/USGS DEM was requested but failed or was missing; operating on Synthetic Jezero Crater Terrain Model ({provenance.get('fallback_reason', '')})."
                 )
             else:
                 limitations.append(
-                    "Operating on deterministic synthetic test fixture for Jezero Crater. Real NASA DEM is not loaded."
+                    "Operating on Synthetic Jezero Crater Terrain Model. Real NASA/USGS DEM is not loaded."
                 )
-        elif val_status == "official_endpoint_retrieved_checksum_unverified":
+        elif val_status in (
+            "verified_source",
+            "official_endpoint_retrieved_checksum_unverified",
+        ):
             limitations.append(
-                "Retrieved via HTTP range extraction from official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but full 11.38 GB upstream file checksum was not computed over all upstream source bytes."
+                "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200m/px nominal) was originally generated for thermal-modelling (THEMIS thermal inertia) rather than precision local navigation."
             )
+            if val_status == "official_endpoint_retrieved_checksum_unverified":
+                limitations.append(
+                    "Retrieved via HTTP range extraction from official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but full 11.38 GB upstream file checksum was not computed over all upstream source bytes."
+                )
         elif val_status == "valid_numeric_raster_unverified_source":
             limitations.append(
-                "Operating on local numeric terrain raster. Official NASA/ESA/USGS provenance is unverified."
+                "Operating on an unverified local numerical terrain raster. Official NASA/ESA/USGS provenance and product identity are not established."
             )
 
         mission_id = f"mission_{uuid.uuid4().hex[:12]}"

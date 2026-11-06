@@ -43,39 +43,53 @@ MARSPATH_ROUTING_TIMEOUT_SECONDS=10.0
 
 ---
 
-## 2. Render Cloud Deployment & DEM Provisioning
+## 2. Render Cloud Deployment & Idempotent Runtime DEM Provisioning
 
-Render deployment is configured via [`render.yaml`](../render.yaml). Because `.gitignore` excludes `backend/app/data/rasters/*.tif`, a freshly cloned container does **not** contain a local raster unless explicitly provisioned.
+Render deployment is configured via [`render.yaml`](../render.yaml) and uses [`backend/scripts/start_render.sh`](../backend/scripts/start_render.sh) as its `startCommand`.
 
-### Mode A: Default Out-of-the-Box Deployment (`render.yaml` default)
-- `MARSPATH_USE_REAL_DEM="false"`
-- `MARSPATH_DEM_PATH="backend/app/data/rasters/jezero_mola_hrsc_blended.tif"`
-- `MARSPATH_ALLOW_SYNTHETIC_FALLBACK="true"`
-- Operates deterministically in `synthetic_test_fixture` mode with zero external storage dependencies and transparent readiness reporting.
+### Why Runtime Provisioning is Used on Render
+- `.gitignore` excludes `backend/app/data/rasters/*.tif` so binary rasters are never committed to Git.
+- On Render's standard web service tier, container filesystems are ephemeral across deployments and restarts, and persistent disks (when attached) are not mounted during `buildCommand`.
+- The Jezero Crater sub-window (`77.15°E–78.00°E, 18.10°N–18.70°N`) from the USGS `Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2` Cloud-Optimized GeoTIFF is only `178 × 252` pixels (~90 KB).
+- Therefore, [`backend/scripts/start_render.sh`](../backend/scripts/start_render.sh) runs `python3 -m backend.app.data.ingestion --provision-runtime` (`provision_runtime_dem`) immediately before starting Uvicorn:
+  1. **Idempotent Reuse:** Checks whether `MARSPATH_DEM_PATH` and its `.provenance.json` sidecar already exist, validates the local GeoTIFF SHA-256 against the sidecar, and verifies the raster metadata and elevation array. When valid local data is already present (e.g., on warm restarts or a mounted Persistent Disk), it skips remote re-ingestion.
+  2. **HTTP Range Sub-Window Extraction:** When the raster is missing or fails integrity checks, it streams only the `178 × 252` Jezero Crater window via GDAL `/vsicurl/` HTTP Range requests from the official USGS Astrogeology S3 endpoint (`https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif`, with automatic fallback to `https://planetarymaps.usgs.gov/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif`), never downloading the full 11.38 GB global file.
+  3. **Post-Ingestion Verification & Cleanup:** Verifies the written GeoTIFF and sidecar SHA-256. If ingestion fails, any partial file is immediately deleted so failed ingestion can never masquerade as genuine data readiness.
 
-### Mode B: Provisioning the Official USGS 200m DEM on Render
-To run against the USGS `Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2` Jezero Crater extract on Render:
+### Configured Render Environment (`render.yaml`)
+```yaml
+startCommand: "bash backend/scripts/start_render.sh"
+envVars:
+  - key: MARSPATH_DEM_PATH
+    value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
+  - key: MARSPATH_USE_REAL_DEM
+    value: "true"
+  - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
+    value: "true"
+```
 
-1. **Option 1 — Build-Time HTTP Range Ingestion (~90 KB extract):**
-   Update `buildCommand` in Render to run the cloud-native `/vsicurl/` window extractor during build:
-   ```bash
-   pip install -r backend/requirements.txt && PYTHONPATH=. python -m backend.app.data.ingestion --output backend/app/data/rasters/jezero_mola_hrsc_blended.tif
-   ```
-   Then set in Render Environment Variables:
-   ```bash
-   MARSPATH_USE_REAL_DEM=true
-   MARSPATH_DEM_PATH=backend/app/data/rasters/jezero_mola_hrsc_blended.tif
-   MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false
-   ```
-   *(Note: Because build-time `/vsicurl/` streams only the Jezero sub-window rather than hashing the full 11.38 GB upstream archive, `/api/v1/data/status` will report `real_data_validation_status: "official_endpoint_retrieved_checksum_unverified"` and `data_mode: "real_official_endpoint_unverified_checksum"`.)*
-
-2. **Option 2 — Render Persistent Disk with FullCheck-Verified Raster:**
-   Mount a Render Persistent Disk (e.g. at `/var/data/marspath`), upload the checksum-verified DEM and its provenance sidecar, and set:
-   ```bash
-   MARSPATH_USE_REAL_DEM=true
-   MARSPATH_DEM_PATH=/var/data/marspath/jezero_mola_hrsc_blended.tif
-   MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false
-   ```
+- **Default Demo Resilience Policy (`MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true`):**
+  - When runtime USGS provisioning succeeds, `/health` and `/api/v1/data/status` report:
+    - `real_dem_requested: true`
+    - `real_dem_loaded: true`
+    - `dem_loaded: true`
+    - `is_synthetic: false`
+    - `data_mode: "real_official_endpoint_unverified_checksum"`
+    - `real_data_validation_status: "official_endpoint_retrieved_checksum_unverified"`
+    - `local_integrity_verified: true`
+    - `source_checksum_verified: false`
+  - If the upstream USGS endpoint is temporarily unreachable during cold start, the service stays online in `synthetic_fallback` mode and explicitly reports:
+    - `real_dem_requested: true`
+    - `real_dem_loaded: false`
+    - `dem_loaded: false`
+    - `is_synthetic: true`
+    - `data_mode: "synthetic_fallback"`
+    - `real_data_validation_status: "incomplete_missing_genuine_dem"`
+    - `fallback_reason` and `blocking_errors` populated with the provisioning error.
+- **Alternative Strict Policy (`MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false`):**
+  - Set `MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false` in Render Environment Variables to require real DEM provisioning on startup. If the USGS endpoint is unreachable and no valid local DEM exists, `start_render.sh` exits with code `1` and aborts container startup.
+- **Optional Paid Persistent Disk:**
+  - You may optionally mount a Render Persistent Disk (e.g. at `/var/data/marspath`) and set `MARSPATH_DEM_PATH=/var/data/marspath/jezero_mola_hrsc_blended.tif`. `start_render.sh` will provision the DEM onto the disk on first boot and reuse the SHA-256-verified file on all subsequent deploys and restarts.
 
 ---
 

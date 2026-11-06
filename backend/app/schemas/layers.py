@@ -33,8 +33,27 @@ class LayerInfo(BaseModel):
     )
     bounds: BoundingBox = Field(..., description="Spatial coverage extent")
     crs: CRSInfo = Field(..., description="Coordinate system definition")
-    source_name: str = Field(..., description="NASA/ESA/USGS instrument or mission name")
-    source_url: str = Field(..., description="Official landing page or PDS service endpoint")
+    source_name: str = Field(..., description="Data source or terrain model name")
+    source_url: str | None = Field(
+        default=None,
+        description="Official landing page or PDS service endpoint when backed by verified or official-endpoint planetary data; None for synthetic or unverified local sources",
+    )
+    product_id: str | None = Field(
+        default=None,
+        description="Official planetary catalog product ID if derived from an official/verified source; None for synthetic or unverified local rasters",
+    )
+    validation_status: str = Field(
+        default="synthetic_test_fixture",
+        description="Provenance validation status of the underlying terrain source",
+    )
+    source_checksum_verified: bool = Field(
+        default=False,
+        description="True only when the full upstream archive checksum has been independently verified",
+    )
+    provenance_note: str | None = Field(
+        default=None,
+        description="Explicit provenance status disclosure or limitation note",
+    )
     is_numerical: bool = Field(
         ..., description="Whether layer contains floating-point physical values"
     )

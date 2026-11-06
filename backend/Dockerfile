@@ -16,11 +16,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY docs/ ./docs/
 
-ENV PYTHONPATH=/app/backend
+ENV PYTHONPATH=/app:/app/backend
 ENV MARSPATH_ENV=production
 ENV MARSPATH_HOST=0.0.0.0
 ENV MARSPATH_PORT=8000
+ENV MARSPATH_USE_REAL_DEM=true
+ENV MARSPATH_DEM_PATH=backend/app/data/rasters/jezero_mola_hrsc_blended.tif
+ENV MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "backend"]
+CMD ["bash", "backend/scripts/start_render.sh"]

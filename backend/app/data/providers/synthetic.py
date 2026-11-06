@@ -167,7 +167,7 @@ class SyntheticTerrainProvider(BaseRasterProvider):
                     self.max_lat,
                 ),
                 nodata_value=-9999.0,
-                vertical_datum="Mars MOLA Areoid",
+                vertical_datum="Synthetic Reference Datum (Mars Sphere R=3,396,190m)",
                 is_synthetic=True,
             )
             self._raster_data = RasterData(elev, meta)
@@ -187,13 +187,18 @@ class SyntheticTerrainProvider(BaseRasterProvider):
     def get_provenance(self) -> dict[str, Any]:
         return {
             "mode": "synthetic_test_fixture",
+            "dataset_name": "Synthetic Jezero Crater Terrain Model",
+            "official_product_id": None,
+            "official_source_url": None,
+            "pds_doi": None,
+            "data_publisher": "MARSPath Internal Synthetic Generator",
+            "is_synthetic": True,
             "pilot_region": "Jezero Crater, Mars",
             "model_description": "Deterministic procedural simulation of Jezero Crater morphology (rim, delta, floor, Belva)",
             "nominal_resolution_meters": round(
                 ((self.max_lon - self.min_lon) / self.cols) * 56250.0, 1
             ),
             "reference_datum": "Mars IAU2000 Sphere (R=3,396,190m)",
-            "official_source_counterpart": "MOLA/HRSC Blended DEM & CTX/HiRISE Jezero Mosaic",
             "intended_use": "Deterministic algorithm verification, test suite execution, frontend integration sandbox",
             "warning": "Do NOT use synthetic test data for operational flight planning or genuine mission risk assessment.",
         }

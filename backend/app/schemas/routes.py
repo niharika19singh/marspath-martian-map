@@ -174,14 +174,35 @@ class DataStatusResponse(BaseModel):
         default="synthetic_test_fixture",
         description="synthetic_test_fixture, valid_numeric_raster_unverified_source, official_endpoint_retrieved_checksum_unverified, verified_source, or incomplete_missing_genuine_dem",
     )
+    dem_loaded: bool = Field(
+        default=False, description="True only when a non-synthetic numeric DEM raster is loaded"
+    )
+    real_dem_requested: bool = Field(
+        default=False, description="True when MARSPATH_USE_REAL_DEM is enabled"
+    )
+    real_dem_loaded: bool = Field(
+        default=False, description="True when a real numeric DEM raster is loaded and active"
+    )
+    local_integrity_verified: bool | None = Field(
+        default=None, description="True when local file SHA-256 matches its provenance sidecar"
+    )
+    source_checksum_verified: bool = Field(
+        default=False,
+        description="True only when the full upstream archive checksum has been independently verified",
+    )
     is_synthetic: bool
     active_pilot_region: str
     pilot_bounds: BoundingBox
     crs: CRSInfo
     loaded_dem: str | None
+    active_dem_dataset_name: str | None = Field(default=None)
+    active_dem_product_id: str | None = Field(default=None)
+    active_dem_source_url: str | None = Field(default=None)
+    fallback_reason: str | None = Field(default=None)
     dem_resolution_meters: float
     grid_shape: list[int]
     valid_data_fraction: float
+    active_dem_provenance: dict[str, Any] = Field(default_factory=dict)
     configured_products: list[dict[str, Any]]
     limitations: list[str]
     blocking_errors: list[str] = Field(default_factory=list)
