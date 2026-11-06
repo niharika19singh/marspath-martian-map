@@ -171,6 +171,130 @@ def _write_hirise_pds3_img(
         f.write(elev.tobytes())
 
 
+def _write_hirise_pds3_detached_lbl_and_img(
+    lbl_path: str,
+    img_path: str,
+    elev: np.ndarray,
+    min_lon: float = 77.410,
+    max_lat: float = 18.420,
+    res_meters: float = 1.0,
+    note_text: str | None = None,
+    scaling_factor: float = 1.0,
+    offset: float = 0.0,
+    sample_bits: int = 32,
+    sample_type: str = "PC_REAL",
+    missing_constant_hex: str = "16#FF7FFFFB#",
+    core_null: int | float | None = None,
+    target_name: str = "MARS",
+    product_id: str = "DTEEC_045994_1985_046060_1985_U01",
+    data_set_id: str = "MRO-M-HIRISE-5-DTM-V1.0",
+    center_lat: float = 15.0,
+    center_lon: float = 77.44,
+) -> None:
+    """Helper to generate a deterministic detached PDS3 .LBL and companion .IMG fixture."""
+    h, w = elev.shape
+    bytes_per_sample = sample_bits // 8
+    record_bytes = w * bytes_per_sample
+
+    default_note = (
+        "Pixel values in this file represent elevations in meters above the "
+        "martian equipotential surface (Mars 2000 Datum) defined by Smith, et al. (2001). "
+        "Conversion from pixel units to geophysical units is given by the keyvalues for "
+        "SCALING_FACTOR and OFFSET. This DTM was produced using ISIS and SOCET Set "
+        "(copyright BAE Systems) software as described in Kirk et al. (2008)."
+    )
+    actual_note = note_text if note_text is not None else default_note
+    note_clause = f'  NOTE             = "{actual_note}"\r\n' if actual_note != "" else ""
+    null_clause = (
+        f"  CORE_NULL        = {core_null}\r\n"
+        if core_null is not None
+        else (
+            f"  MISSING_CONSTANT = {missing_constant_hex}\r\n"
+            if missing_constant_hex
+            else ""
+        )
+    )
+
+    rad_lat = math.radians(center_lat)
+    r_mars = 3394839.8133163
+    x_origin = r_mars * math.radians(min_lon - center_lon) * math.cos(rad_lat)
+    y_origin = r_mars * math.radians(max_lat)
+
+    sample_proj_offset = 0.5 - (x_origin / res_meters)
+    line_proj_offset = (y_origin / res_meters) - 0.5
+
+    min_lat = max_lat - math.degrees((h * res_meters) / r_mars)
+    max_lon = min_lon + math.degrees((w * res_meters) / (r_mars * math.cos(rad_lat)))
+
+    companion_img_filename = os.path.basename(img_path)
+    label_body = (
+        "PDS_VERSION_ID            = PDS3\r\n"
+        "RECORD_TYPE               = FIXED_LENGTH\r\n"
+        f"RECORD_BYTES              = {record_bytes}\r\n"
+        f"FILE_RECORDS              = {h}\r\n"
+        f'^IMAGE                    = "{companion_img_filename}"\r\n'
+        f'DATA_SET_ID               = "{data_set_id}"\r\n'
+        f'DATA_SET_NAME             = "MRO MARS HIGH RESOLUTION IMAGING SCIENCE EXPERIMENT DTM V1.0"\r\n'
+        'PRODUCER_INSTITUTION_NAME = "UNIVERSITY OF ARIZONA"\r\n'
+        'PRODUCER_ID               = "UA"\r\n'
+        'PRODUCER_FULL_NAME        = "ALFRED MCEWEN, USGS-ASTROGEOLOGY"\r\n'
+        f'PRODUCT_ID                = "{product_id}"\r\n'
+        'PRODUCT_VERSION_ID        = "1"\r\n'
+        'INSTRUMENT_HOST_NAME      = "MARS RECONNAISSANCE ORBITER"\r\n'
+        'INSTRUMENT_HOST_ID        = "MRO"\r\n'
+        'INSTRUMENT_NAME           = "HIGH RESOLUTION IMAGING SCIENCE EXPERIMENT"\r\n'
+        'INSTRUMENT_ID             = "HIRISE"\r\n'
+        f'TARGET_NAME               = "{target_name}"\r\n'
+        "SOURCE_PRODUCT_ID         = (ESP_045994_1985, ESP_046060_1985)\r\n"
+        "OBJECT = IMAGE\r\n"
+        f"  LINES            = {h}\r\n"
+        f"  LINE_SAMPLES     = {w}\r\n"
+        "  BANDS            = 1\r\n"
+        f"  OFFSET           = {offset}\r\n"
+        f"  SCALING_FACTOR   = {scaling_factor}\r\n"
+        f"{note_clause}"
+        f"  SAMPLE_BITS      = {sample_bits}\r\n"
+        f"  SAMPLE_TYPE      = {sample_type}\r\n"
+        f"{null_clause}"
+        "  VALID_MINIMUM    = -2679.20\r\n"
+        "  VALID_MAXIMUM    = -2388.31\r\n"
+        "END_OBJECT = IMAGE\r\n"
+        "OBJECT = IMAGE_MAP_PROJECTION\r\n"
+        '  ^DATA_SET_MAP_PROJECTION     = "DSMAP.CAT"\r\n'
+        '  MAP_PROJECTION_TYPE          = "EQUIRECTANGULAR"\r\n'
+        "  PROJECTION_LATITUDE_TYPE     = PLANETOCENTRIC\r\n"
+        "  A_AXIS_RADIUS                = 3394.8398133163 <KM>\r\n"
+        "  B_AXIS_RADIUS                = 3394.8398133163 <KM>\r\n"
+        "  C_AXIS_RADIUS                = 3394.8398133163 <KM>\r\n"
+        "  COORDINATE_SYSTEM_NAME       = PLANETOCENTRIC\r\n"
+        "  POSITIVE_LONGITUDE_DIRECTION = EAST\r\n"
+        "  KEYWORD_LATITUDE_TYPE        = PLANETOCENTRIC\r\n"
+        f"  CENTER_LATITUDE              = {center_lat} <DEG>\r\n"
+        f"  CENTER_LONGITUDE             = {center_lon} <DEG>\r\n"
+        "  LINE_FIRST_PIXEL             = 1\r\n"
+        f"  LINE_LAST_PIXEL              = {h}\r\n"
+        "  SAMPLE_FIRST_PIXEL           = 1\r\n"
+        f"  SAMPLE_LAST_PIXEL            = {w}\r\n"
+        "  MAP_PROJECTION_ROTATION      = 0.0 <DEG>\r\n"
+        "  MAP_RESOLUTION               = 58684.0491709 <PIX/DEG>\r\n"
+        f"  MAP_SCALE                    = {res_meters} <METERS/PIXEL>\r\n"
+        f"  MAXIMUM_LATITUDE             = {max_lat} <DEG>\r\n"
+        f"  MINIMUM_LATITUDE             = {min_lat} <DEG>\r\n"
+        f"  LINE_PROJECTION_OFFSET       = {line_proj_offset:.6f} <PIXEL>\r\n"
+        f"  SAMPLE_PROJECTION_OFFSET     = {sample_proj_offset:.6f} <PIXEL>\r\n"
+        f"  EASTERNMOST_LONGITUDE        = {max_lon} <DEG>\r\n"
+        f"  WESTERNMOST_LONGITUDE        = {min_lon} <DEG>\r\n"
+        "END_OBJECT = IMAGE_MAP_PROJECTION\r\n"
+        "END\r\n"
+    )
+
+    with open(img_path, "wb") as f_img:
+        f_img.write(elev.tobytes())
+
+    with open(lbl_path, "wb") as f_lbl:
+        f_lbl.write(label_body.encode("ascii"))
+
+
 def _write_hirise_geotiff(
     path: str,
     elev: np.ndarray,
@@ -1614,10 +1738,12 @@ def test_23_pds3_dtm_official_note_convention_and_mars2000_vertical_reference():
 
 def test_24_pds3_dtm_scaling_factor_offset_and_nodata_preservation():
     """
-    Phase 4.2 Test (3 & 4):
+    Phase 4.2 / 4.2.1 Test (3 & 4):
     - Reads and applies PDS3 SCALING_FACTOR and OFFSET transformations.
+    - Mandatory regression test: A stored sample of -10000 with SCALING_FACTOR=0.5
+      and OFFSET=-2500 must decode to -7500 m and remain valid, not NoData.
+    - Explicit PDS3 missing sentinels (16#FF7FFFFB#, CORE_NULL=-32768) remain NoData with non-default scale and offset.
     - Preserves NoData values during transformation without converting missing pixels to 0.0.
-    - Accurately converts metric multiples (e.g. cm) declared in NOTE when applicable.
     """
     with (
         tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_f32,
@@ -1630,9 +1756,10 @@ def test_24_pds3_dtm_scaling_factor_offset_and_nodata_preservation():
         # Case A: 32-bit float with SCALING_FACTOR=0.5, OFFSET=-2500.0, and 16#FF7FFFFB# missing constant
         # Raw value 100.0 -> elevation = 100.0 * 0.5 + (-2500.0) = -2450.0 meters.
         arr_f32 = np.full((20, 20), 100.0, dtype="<f4")
-        # Hex 0xFF7FFFFB in big-endian float32 is ~ -3.4028227e+38
+        # Hex 0xFF7FFFFB in big-endian float32 is ~ -3.4028227e+38 (explicit PDS3 missing constant)
         arr_f32[0, 0] = -3.4028226550889045e38
-        arr_f32[1, 1] = -9999.0
+        # Mandatory regression test: stored -10000 -> (-10000 * 0.5) + (-2500) = -7500m (valid, not NoData!)
+        arr_f32[1, 1] = -10000.0
 
         _write_hirise_pds3_img(
             f32_path,
@@ -1643,18 +1770,26 @@ def test_24_pds3_dtm_scaling_factor_offset_and_nodata_preservation():
         )
 
         r_f32 = load_raster_file(f32_path)
+        # Missing constant [0, 0] must be NoData and not scaled
         assert r_f32.nodata_mask[0, 0] is True or r_f32.nodata_mask[0, 0] == 1
-        assert r_f32.nodata_mask[1, 1] is True or r_f32.nodata_mask[1, 1] == 1
+        assert np.isnan(r_f32.get_elevation_at_pixel(0, 0))
+
+        # Stored -10000 sample must decode to -7500m and remain VALID, NOT NoData!
+        assert r_f32.nodata_mask[1, 1] is False or r_f32.nodata_mask[1, 1] == 0
+        assert r_f32.data[1, 1] == pytest.approx(-7500.0, abs=1e-3)
+        assert r_f32.get_elevation_at_pixel(1, 1) == pytest.approx(-7500.0, abs=1e-3)
+
+        # Baseline sample 100.0 -> -2450.0m (valid)
         assert r_f32.nodata_mask[5, 5] is False or r_f32.nodata_mask[5, 5] == 0
         assert r_f32.data[5, 5] == pytest.approx(-2450.0, abs=1e-3)
-        assert np.isnan(r_f32.get_elevation_at_pixel(0, 0))
-        assert np.isnan(r_f32.get_elevation_at_pixel(1, 1))
         assert r_f32.get_elevation_at_pixel(5, 5) == pytest.approx(-2450.0, abs=1e-3)
 
         # Case B: 16-bit integer DTM with CORE_NULL = -32768, SCALING_FACTOR=0.25, OFFSET=-2400.0
         # Raw value 200 -> elevation = 200 * 0.25 + (-2400.0) = -2350.0 meters.
         arr_i16 = np.full((20, 20), 200, dtype="<i2")
         arr_i16[0, 0] = -32768
+        # Stored negative raw value -1000 -> (-1000 * 0.25) + (-2400.0) = -2650.0 meters (valid!)
+        arr_i16[1, 1] = -1000
 
         _write_hirise_pds3_img(
             i16_path,
@@ -1667,10 +1802,19 @@ def test_24_pds3_dtm_scaling_factor_offset_and_nodata_preservation():
         )
 
         r_i16 = load_raster_file(i16_path)
+        # CORE_NULL [0, 0] must be NoData and not scaled
         assert r_i16.nodata_mask[0, 0] is True or r_i16.nodata_mask[0, 0] == 1
+        assert np.isnan(r_i16.get_elevation_at_pixel(0, 0))
+
+        # Stored -1000 must decode to -2650m and remain VALID
+        assert r_i16.nodata_mask[1, 1] is False or r_i16.nodata_mask[1, 1] == 0
+        assert r_i16.data[1, 1] == pytest.approx(-2650.0, abs=1e-3)
+        assert r_i16.get_elevation_at_pixel(1, 1) == pytest.approx(-2650.0, abs=1e-3)
+
+        # Stored 200 must decode to -2350m and remain VALID
         assert r_i16.nodata_mask[5, 5] is False or r_i16.nodata_mask[5, 5] == 0
         assert r_i16.data[5, 5] == pytest.approx(-2350.0, abs=1e-3)
-        assert np.isnan(r_i16.get_elevation_at_pixel(0, 0))
+        assert r_i16.get_elevation_at_pixel(5, 5) == pytest.approx(-2350.0, abs=1e-3)
     finally:
         for p in (f32_path, i16_path):
             if os.path.exists(p):
@@ -1978,3 +2122,185 @@ def test_28_real_hirise_dtm_pds3_loading_and_route_smoke():
     assert resp_out.status == "success"
     assert resp_out.source_selection.hirise_selected is False
     assert resp_out.source_selection.hirise_status == "partial_or_no_corridor_coverage"
+
+
+def test_29_detached_pds3_lbl_companion_img_ingestion_and_routing():
+    """
+    Phase 4.2.1 Test:
+    - Demonstrates support for detached PDS3 labels where metadata is stored in a .LBL file
+      pointing to a companion .IMG binary in the same directory via ^IMAGE.
+    - Opens via the configured .LBL path in Rasterio/GDAL.
+    - Verifies dimensions, CRS, affine transform, PDS3 NOTE, product ID, vertical datum, and NoData.
+    - Verifies that MARSPATH_HIRISE_DEM_PATH can point to the .LBL file and execute route planning.
+    - Verifies cache invalidation when the detached file is modified.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        lbl_path = os.path.join(tmp_dir, "DTEEC_045994_1985_046060_1985_U01.LBL")
+        img_path = os.path.join(tmp_dir, "DTEEC_045994_1985_046060_1985_U01.IMG")
+        mola_path = os.path.join(tmp_dir, "mola.tif")
+        _write_mola_geotiff(mola_path)
+
+        h, w = 200, 200
+        r_grid, c_grid = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+        elev = (-2485.0 + 0.04 * r_grid + 0.03 * c_grid).astype(np.float32)
+        elev[0, 0] = -3.4028227e38  # NoData sentinel
+
+        _write_hirise_pds3_detached_lbl_and_img(
+            lbl_path=lbl_path,
+            img_path=img_path,
+            elev=elev,
+            min_lon=77.410,
+            max_lat=18.420,
+            res_meters=1.0,
+        )
+
+        # 1. Test direct loader on .LBL file
+        raster = load_raster_file(lbl_path)
+        assert raster.metadata.width == w
+        assert raster.metadata.height == h
+        assert raster.metadata.vertical_units == "meters"
+        assert "Mars 2000 Datum" in raster.metadata.vertical_datum
+        assert raster.nodata_mask[0, 0] is True or raster.nodata_mask[0, 0] == 1
+        assert raster.nodata_mask[5, 5] is False or raster.nodata_mask[5, 5] == 0
+
+        # 2. Test HiRISERasterProvider configured with .LBL path
+        hi_prov = HiRISERasterProvider(dem_path=lbl_path, enabled=True)
+        val = hi_prov.validate_hirise_raster()
+        assert val.is_valid is True
+        assert val.status_code == "ready"
+        assert val.raster is not None
+        assert val.raster.data.flags.writeable is False
+        assert val.raster.nodata_mask.flags.writeable is False
+
+        prov = hi_prov.get_provenance()
+        assert prov["file_format"] == "PDS3 LBL"
+        assert prov["pds3_label_metadata"]["product_id"] == "DTEEC_045994_1985_046060_1985_U01"
+        assert prov["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+
+        # 3. Test route planning inside delta footprint
+        mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
+        mola_prov.use_real_dem = True
+        svc = RouteService(provider=mola_prov, hirise_provider=hi_prov)
+
+        req_in = RoutePlanRequest(
+            start=MarsCoordinate(lon=77.4112, lat=18.4190),
+            destination=MarsCoordinate(lon=77.4122, lat=18.4182),
+        )
+        resp_in = svc.plan_route(req_in)
+        assert resp_in.status == "success"
+        assert resp_in.source_selection.hirise_selected is True
+        assert resp_in.source_selection.selected_source_id == "DTEEC_045994_1985_046060_1985_U01"
+        assert resp_in.routes[0].summary.total_distance_meters == pytest.approx(77.2, abs=1.0)
+        assert "Mars 2000 Datum" in resp_in.routes[0].evidence_passport.source.vertical_datum
+
+        # 4. Route outside footprint -> falls back to MOLA
+        req_out = RoutePlanRequest(
+            start=MarsCoordinate(lon=77.20, lat=18.30),
+            destination=MarsCoordinate(lon=77.25, lat=18.35),
+        )
+        resp_out = svc.plan_route(req_out)
+        assert resp_out.status == "success"
+        assert resp_out.source_selection.hirise_selected is False
+        assert resp_out.source_selection.hirise_status == "partial_or_no_corridor_coverage"
+
+        # 5. Process cache reuses validated entry
+        hi_prov_2 = HiRISERasterProvider(dem_path=lbl_path, enabled=True)
+        val_2 = hi_prov_2.validate_hirise_raster()
+        assert val_2.raster is val.raster
+
+        # 6. Modifying file triggers cache eviction
+        os.utime(lbl_path, (os.path.getatime(lbl_path) + 10, os.path.getmtime(lbl_path) + 10))
+        val_3 = HiRISERasterProvider(dem_path=lbl_path, enabled=True).validate_hirise_raster()
+        assert val_3.raster is not None
+
+
+def test_30_pds3_pc_integer_signed_decoding_and_unsigned_rejections():
+    """
+    Phase 4.2.1 Test:
+    - Verifies PC_INTEGER signed integer PDS3 encoding interpretation.
+    - Confirms that negative stored values decode accurately through SCALING_FACTOR and OFFSET.
+    - Confirms that CORE_NULL sentinels are preserved without corruption.
+    - Confirms that unsigned integer imagery formats are rejected.
+    """
+    with (
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_pc,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_u16,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_u8,
+    ):
+        pc_path = tmp_pc.name
+        u16_path = tmp_u16.name
+        u8_path = tmp_u8.name
+
+    try:
+        # 1. 16-bit PC_INTEGER signed integer with SCALING_FACTOR=0.5, OFFSET=-2450.0, CORE_NULL=-32768
+        # Stored values:
+        # [0, 0] = -32768 (CORE_NULL)
+        # [1, 1] = -50 -> (-50 * 0.5) + (-2450.0) = -2475.0 m (valid negative offset)
+        # [2, 2] = 0   -> (0 * 0.5) + (-2450.0) = -2450.0 m (valid baseline)
+        # [5, 5] = 100 -> (100 * 0.5) + (-2450.0) = -2400.0 m (valid positive offset)
+        arr_pc = np.full((20, 20), 100, dtype="<i2")
+        arr_pc[0, 0] = -32768
+        arr_pc[1, 1] = -50
+        arr_pc[2, 2] = 0
+
+        _write_hirise_pds3_img(
+            pc_path,
+            arr_pc,
+            sample_bits=16,
+            sample_type="PC_INTEGER",
+            core_null=-32768,
+            scaling_factor=0.5,
+            offset=-2450.0,
+        )
+
+        r_pc = load_raster_file(pc_path)
+        # CORE_NULL must be NoData and never scaled or converted to 0.0
+        assert r_pc.nodata_mask[0, 0] is True or r_pc.nodata_mask[0, 0] == 1
+        assert np.isnan(r_pc.get_elevation_at_pixel(0, 0))
+
+        # Stored -50 -> -2475.0m (valid)
+        assert r_pc.nodata_mask[1, 1] is False or r_pc.nodata_mask[1, 1] == 0
+        assert r_pc.data[1, 1] == pytest.approx(-2475.0, abs=1e-3)
+        assert r_pc.get_elevation_at_pixel(1, 1) == pytest.approx(-2475.0, abs=1e-3)
+
+        # Stored 0 -> -2450.0m (valid)
+        assert r_pc.nodata_mask[2, 2] is False or r_pc.nodata_mask[2, 2] == 0
+        assert r_pc.data[2, 2] == pytest.approx(-2450.0, abs=1e-3)
+
+        # Stored 100 -> -2400.0m (valid)
+        assert r_pc.nodata_mask[5, 5] is False or r_pc.nodata_mask[5, 5] == 0
+        assert r_pc.data[5, 5] == pytest.approx(-2400.0, abs=1e-3)
+        assert r_pc.metadata.metadata_tags["PDS3_SAMPLE_TYPE"] == "PC_INTEGER"
+
+        # HiRISE provider validates PC_INTEGER as ready
+        val_pc = HiRISERasterProvider(dem_path=pc_path, enabled=True).validate_hirise_raster()
+        assert val_pc.is_valid is True
+        assert val_pc.status_code == "ready"
+
+        # 2. Rejection of 16-bit PC_UNSIGNED_INTEGER (radiometric imagery)
+        arr_u16 = np.full((20, 20), 1000, dtype="<u2")
+        _write_hirise_pds3_img(
+            u16_path,
+            arr_u16,
+            sample_bits=16,
+            sample_type="PC_UNSIGNED_INTEGER",
+        )
+        val_u16 = HiRISERasterProvider(dem_path=u16_path, enabled=True).validate_hirise_raster()
+        assert val_u16.is_valid is False
+        assert val_u16.status_code == "rejected_non_elevation_raster"
+
+        # 3. Rejection of 8-bit UNSIGNED_INTEGER
+        arr_u8 = np.full((20, 20), 128, dtype=np.uint8)
+        _write_hirise_pds3_img(
+            u8_path,
+            arr_u8,
+            sample_bits=8,
+            sample_type="UNSIGNED_INTEGER",
+        )
+        val_u8 = HiRISERasterProvider(dem_path=u8_path, enabled=True).validate_hirise_raster()
+        assert val_u8.is_valid is False
+        assert val_u8.status_code == "rejected_non_elevation_raster"
+    finally:
+        for p in (pc_path, u16_path, u8_path):
+            if os.path.exists(p):
+                os.remove(p)

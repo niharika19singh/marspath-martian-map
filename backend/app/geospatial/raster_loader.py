@@ -231,6 +231,7 @@ _SUPPORTED_PDS3_DTM_SAMPLE_TYPES: frozenset[str] = frozenset(
     {
         "PC_REAL",
         "IEEE_REAL",
+        "PC_INTEGER",
         "MSB_INTEGER",
         "LSB_INTEGER",
         "SIGNED_INTEGER",
@@ -273,6 +274,10 @@ def _decode_pds3_missing_constant(raw_val: Any, sample_bits: int | None = 32) ->
             val_le = struct.unpack("<f", raw_bytes)[0]
             if math.isfinite(val_le):
                 return float(val_le)
+        if len(hex_str) == 4 and (sample_bits in (None, 16)):
+            raw_bytes = bytes.fromhex(hex_str)
+            val_signed = struct.unpack(">h", raw_bytes)[0]
+            return float(val_signed)
         try:
             return float(int(hex_str, 16))
         except ValueError:
@@ -1142,46 +1147,53 @@ def load_raster_file(file_path: str) -> RasterData:
                     vert_datum = explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
 
                 nodata_val: float | None = float(src.nodata) if src.nodata is not None else None
-                if nodata_val is None and pds3_res is not None and pds3_res.core_null is not None:
-                    nodata_val = float(pds3_res.core_null)
+                pds_core_null: float | None = None
+                pds_missing_const: float | None = None
+                if pds3_res is not None:
+                    if pds3_res.core_null is not None:
+                        pds_core_null = float(pds3_res.core_null)
+                    if pds3_res.missing_constant_raw is not None:
+                        pds_missing_const = _decode_pds3_missing_constant(
+                            pds3_res.missing_constant_raw, pds3_res.sample_bits
+                        )
+                if nodata_val is None:
+                    if pds_core_null is not None:
+                        nodata_val = pds_core_null
+                    elif pds_missing_const is not None:
+                        nodata_val = pds_missing_const
 
                 data_f32 = data.astype(np.float32).copy()
 
-                # Determine valid vs NoData mask BEFORE applying PDS3 SCALING_FACTOR / OFFSET or metric unit conversion
-                unit_s = (
-                    float(unit_scale)
-                    if (unit_ok and unit_scale is not None and unit_scale > 0)
-                    else 1.0
-                )
-                raw_sentinel_min = -9000.0 / unit_s
+                # Step 1: Construct raw NoData mask strictly using explicit source NoData,
+                # PDS3 CORE_NULL, PDS3 MISSING_CONSTANT, NaN, non-finite values, and extreme sentinels (> 1e30).
+                # Do NOT apply physical elevation thresholds (< -9000m) to unscaled storage values!
                 raw_nd = (
                     np.isnan(data_f32)
                     | ~np.isfinite(data_f32)
-                    | (data_f32 < raw_sentinel_min)
-                    | (data_f32 > 1e30)
+                    | (np.abs(data_f32) > 1e30)
                 )
                 if nodata_val is not None:
                     raw_nd = raw_nd | np.isclose(data_f32, nodata_val, rtol=1e-6, atol=1e-3)
-                if pds3_res is not None and pds3_res.core_null is not None:
-                    raw_nd = raw_nd | np.isclose(data_f32, float(pds3_res.core_null), rtol=1e-6, atol=1e-3)
+                if pds_core_null is not None:
+                    raw_nd = raw_nd | np.isclose(data_f32, pds_core_null, rtol=1e-6, atol=1e-3)
+                if pds_missing_const is not None:
+                    raw_nd = raw_nd | np.isclose(data_f32, pds_missing_const, rtol=1e-6, atol=1e-3)
 
                 pds_scale = float(pds3_res.scaling_factor) if (pds3_res and pds3_res.is_valid_dtm) else 1.0
                 pds_offset = float(pds3_res.offset) if (pds3_res and pds3_res.is_valid_dtm) else 0.0
                 needs_pds_transform = abs(pds_scale - 1.0) > 1e-12 or abs(pds_offset) > 1e-12
                 needs_unit_scale = unit_ok and abs(unit_scale - 1.0) > 1e-12
 
+                # Step 2: Apply PDS3 transformation and unit conversion to valid cells only.
+                # Raw invalid pixels are preserved without applying scale or offset to them.
+                valid_idx = ~raw_nd
                 if unit_ok and (needs_pds_transform or needs_unit_scale):
-                    valid_idx = ~raw_nd
                     if needs_pds_transform:
                         # Official HiRISE PDS3 equation: elevation_in_label_units = (stored_value * SCALING_FACTOR) + OFFSET
                         data_f32[valid_idx] = (data_f32[valid_idx] * pds_scale) + pds_offset
                     if needs_unit_scale:
                         data_f32[valid_idx] *= float(unit_scale)
-                    # Preserve original NoData values on invalid cells
-                    if nodata_val is not None:
-                        data_f32[raw_nd] = float(nodata_val)
-                    else:
-                        data_f32[raw_nd] = np.nan
+
                     conv_parts: list[str] = []
                     if needs_pds_transform:
                         conv_parts.append(
@@ -1190,6 +1202,21 @@ def load_raster_file(file_path: str) -> RasterData:
                     if needs_unit_scale:
                         conv_parts.append(f"scaled to meters (*{unit_scale:g})")
                     merged_tags["VERTICAL_UNIT_CONVERSION"] = "; ".join(conv_parts) + f" ({unit_reason})"
+
+                # Step 3: Physical elevation plausibility threshold operates on DECODED elevations in meters,
+                # NOT unscaled storage values. On Mars, lowest elevation is Hellas (~-8.2 km) and highest
+                # is Olympus Mons (~21.3 km). Any decoded elevation < -9000m or > 30000m is unphysical/sentinel.
+                decoded_sentinel_nd = valid_idx & (
+                    (data_f32 < -9000.0) | (data_f32 > 30000.0) | ~np.isfinite(data_f32)
+                )
+                final_nd = raw_nd | decoded_sentinel_nd
+
+                # Step 4: Preserve all original NoData mask semantics through conversion.
+                # Never turn missing samples into zero elevation.
+                if nodata_val is not None:
+                    data_f32[final_nd] = float(nodata_val)
+                else:
+                    data_f32[final_nd] = np.nan
 
                 if is_metric:
                     # Projected coordinates in meters!

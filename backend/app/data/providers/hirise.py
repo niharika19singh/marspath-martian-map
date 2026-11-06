@@ -566,7 +566,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                 or meta.metadata_tags.get("_HAS_PDS3_LABEL") == "true"
             )
             if is_pds3 and not is_geotiff:
-                file_format = "PDS3 IMG"
+                file_format = "PDS3 LBL" if self.dem_path.lower().endswith(".lbl") else "PDS3 IMG"
             elif is_geotiff and is_pds3:
                 file_format = "GeoTIFF (PDS3 Metadata)"
             elif is_geotiff:

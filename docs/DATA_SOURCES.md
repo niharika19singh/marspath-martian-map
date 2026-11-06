@@ -48,10 +48,11 @@ This document details the scientific datasets evaluated and supported for **MARS
   - Validates `IMAGE.NOTE` against official UArizona / USGS elevation semantics: `"Pixel values in this file represent elevations in meters above the martian equipotential surface (Mars 2000 Datum) defined by Smith, et al. (2001)."`.
   - Recognizes Mars vertical datum variants including `Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)`, `Mars Areoid (MOLA 0m reference datum)`, and `Martian Equipotential Surface`.
   - Rejects non-elevation browse/radiometric products (`status_code: "rejected_non_elevation_raster"`), non-metric or unsupported units (`"rejected_unsupported_vertical_units"`), non-Mars target names or Earth datums (`"rejected_invalid_crs"`), and missing NOTE declarations (`"rejected_unknown_vertical_units"`).
-- **PDS3 Transformation & NoData Preservation:**
-  - Evaluates official PDS3 conversion formula: `elevation_meters = (stored_value * SCALING_FACTOR) + OFFSET`.
-  - Decodes PDS3 `MISSING_CONSTANT` (such as `16#FF7FFFFB#` representing $-3.4028227 \times 10^{38}$) and `CORE_NULL` sentinels before scaling, preserving NoData cells strictly without converting them to $0.0\text{ m}$.
-  - Supports 32-bit floating point (`PC_REAL`, `IEEE_REAL`) and 16-bit integer (`MSB_INTEGER`, `LSB_INTEGER`, `PC_INTEGER`) DTM encodings.
+- **PDS3 Transformation, Scaling & NoData Preservation Order:**
+  - Raw NoData cells are identified **prior** to scaling using explicit source NoData, PDS3 `CORE_NULL`, PDS3 `MISSING_CONSTANT` (such as `16#FF7FFFFB#` $\approx -3.4028227 \times 10^{38}$), `NaN`, and non-finite values. Raw invalid pixels are strictly preserved without applying scale or offset to them.
+  - On valid cells only, the official PDS3 transformation is applied: $\text{elevation}_{\text{meters}} = (\text{stored\_value} \times \text{SCALING\_FACTOR}) + \text{OFFSET}$, followed by metric unit conversion if applicable.
+  - Physical elevation plausibility thresholds ($< -9000.0\text{ m}$ or $> 30000.0\text{ m}$) operate strictly on **decoded elevations in meters**, never on unscaled raw storage values. Consequently, negative stored samples (e.g. $-10000$ with scale $0.5$ and offset $-2500$) decode accurately to valid Martian elevations ($-7500.0\text{ m}$) without false NoData classification.
+  - Supported PDS3 sample encodings in `_SUPPORTED_PDS3_DTM_SAMPLE_TYPES` comprise: 32-bit floating point (`PC_REAL`, `IEEE_REAL`) and signed integers (`PC_INTEGER`, `MSB_INTEGER`, `LSB_INTEGER`, `SIGNED_INTEGER`, `INTEGER`). Unsigned integer imagery (`PC_UNSIGNED_INTEGER`, `MSB_UNSIGNED_INTEGER`, `UNSIGNED_INTEGER`, 8-bit) is strictly rejected (`status_code: "rejected_non_elevation_raster"`).
 - **Explicit Vertical Elevation-Unit Validation:**
   - `HiRISERasterProvider` inspects Rasterio band units (`src.units[0]`), band tags (`src.tags(1)`), dataset tags (`src.tags()`), and PDS3 label fields for `VERTICAL_UNIT`, `VERTICAL_UNITS`, `ELEVATION_UNIT`, `ELEVATION_UNITS`, `Z_UNIT`, `Z_UNITS`, `UNIT_TYPE`, `UNITTYPE`, `UNIT`, `UNITS`.
   - Metres (`"m"`, `"meter"`, `"meters"`, `"metre"`, `"metres"`) are accepted only when explicitly declared. Explicit metric linear units (`"cm"`, `"mm"`, `"km"`) are converted to meters on valid non-NoData pixels with documented conversion metadata (`VERTICAL_UNIT_CONVERSION`).
@@ -60,12 +61,15 @@ This document details the scientific datasets evaluated and supported for **MARS
   - Validation results, read-only `RasterData` (`writeable = False`), full-file SHA-256 digests, raster statistics, and provenance dictionaries are cached in a thread-safe (`threading.RLock()`), bounded (`MAX_CACHE_ENTRIES = 2`) process-level `OrderedDict` keyed by file identity (`(realpath, st_size, st_mtime_ns, st_ctime_ns, st_ino, sample_crc32)`).
   - Avoids redundant full-file MD5 hashing passes when no catalog candidate contains an MD5 checksum for the product, computing only SHA-256 for local integrity verification.
   - Across repeated `RouteService`, `DataCatalogService`, and `HiRISERasterProvider` requests, an unchanged local HiRISE file is loaded **once** and hashed **once** per process (~250 MB float32 + bool mask memory footprint for a $7{,}000 \times 7{,}000$ DTM). If the file on disk is modified or replaced, stale entries for that path are immediately evicted and recomputed.
-- **Configuration & Provisioning:**
-  - Controlled via `MARSPATH_USE_HIRISE_DEM=true|false` (default `false`) and `MARSPATH_HIRISE_DEM_PATH` (accepting either `.tif` or `.IMG` paths).
-  - Optional: when `MARSPATH_USE_HIRISE_DEM=false` or when a route extends outside the HiRISE footprint, MARSPath automatically uses the regional MOLA–HRSC 200 m/px DEM without failing startup.
+- **Configuration, Provisioning & Attached vs. Detached Path Requirements:**
+  - Controlled via `MARSPATH_USE_HIRISE_DEM=true|false` (default `false`) and `MARSPATH_HIRISE_DEM_PATH`.
+  - **Attached `.IMG` vs. Detached `.LBL` Usage:**
+    - When using official attached HiRISE DTM files (such as `DTEEC_045994_1985_046060_1985_U01.IMG`), configure `MARSPATH_HIRISE_DEM_PATH` pointing directly to the `.IMG` file.
+    - When using detached PDS3 labels where metadata resides in a `.LBL` file pointing to a companion `.IMG` in the same directory (via `^IMAGE = "companion.IMG"`), users **must** configure `MARSPATH_HIRISE_DEM_PATH` pointing directly to the `.LBL` file (e.g. `path/to/product.LBL`). Rasterio/GDAL opens the `.LBL` label file and automatically resolves the companion `.IMG` binary stream.
+  - Optional fallback: when `MARSPATH_USE_HIRISE_DEM=false` or when a route extends outside the HiRISE footprint, MARSPath automatically uses the regional MOLA–HRSC 200 m/px DEM without failing startup.
 - **Honest Provenance & Product Identity Integrity:**
   - Preserves exact product identity (e.g. `DTEEC_045994_1985_046060_1985_U01` is never misattributed as `ESP_037803_1985` merely due to spatial overlap).
-  - Unless an authoritative upstream SHA-256 or MD5 checksum is independently verified against `DATA_CATALOG_MANIFEST`, a locally supplied HiRISE product is classified as `valid_numeric_raster_unverified_source` (`data_mode = "real_unverified_source"`, `source_checksum_verified = false`, `official_product_id = null`, `evidence_passport.quality_tier = "unverified"`).
+  - The real DTEEC product remains classified as `UNVERIFIED` for source authenticity (`valid_numeric_raster_unverified_source`, `source_checksum_verified = false`, `official_product_id = null`, `evidence_passport.quality_tier = "unverified"`) until an authoritative upstream checksum is published and independently matched in `DATA_CATALOG_MANIFEST`. Computing a local SHA-256 digest proves local file integrity, not upstream authenticity.
   - MARSPath **never** fabricates HiRISE checksums, URLs, or `verified_source` status for unauthenticated local HiRISE files.
 - **Vertical Datum & Stereo DTM Caveats:**
   - HiRISE stereo DTMs are controlled to Mars equipotential surfaces / MOLA altimetry profiles; the verified vertical reference datum is preserved and displayed in the Evidence Passport.
