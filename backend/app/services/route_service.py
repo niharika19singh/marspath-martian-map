@@ -35,6 +35,7 @@ from backend.app.schemas.routes import (
     RoutePlanRequest,
     RoutePlanResponse,
 )
+from backend.app.services.evidence_service import EvidenceService
 from backend.app.services.risk_service import RiskService
 
 logger = logging.getLogger("marspath.services.route_service")
@@ -140,6 +141,8 @@ class RouteService:
         )
 
         science_pois = self.provider.get_science_targets()
+        is_syn = self.provider.is_synthetic()
+        provenance = self.provider.get_provenance()
         search_start = time.perf_counter()
         total_nodes_expanded = 0
         routes: list[RouteAlternative] = []
@@ -191,6 +194,14 @@ class RouteService:
             summary_wp, geom_wp, breakdown_wp, visited_wp, nearby_wp = reconstruct_route_summary(
                 full_path, graph, cropped_meta, request.mode, science_targets=science_pois
             )
+            passport_wp = EvidenceService.build_route_evidence_passport(
+                path_nodes=full_path,
+                graph=graph,
+                master_meta=meta,
+                cropped_meta=cropped_meta,
+                provenance=provenance,
+                mode=request.mode,
+            )
 
             primary_route = RouteAlternative(
                 route_id="route_primary_waypoint_guided",
@@ -205,6 +216,7 @@ class RouteService:
                 science_targets_visited=visited_wp,
                 science_targets_nearby=nearby_wp,
                 warnings=[],
+                evidence_passport=passport_wp,
             )
             routes.append(primary_route)
 
@@ -218,6 +230,8 @@ class RouteService:
                     requested_mode=request.mode,
                     num_alternatives=request.num_alternatives - 1,
                     science_targets=science_pois,
+                    master_meta=meta,
+                    provenance=provenance,
                 )
                 total_nodes_expanded += alt_nodes
                 for a in alts:
@@ -312,6 +326,14 @@ class RouteService:
                     request.mode,
                     science_targets=science_pois,
                 )
+                passport_sci = EvidenceService.build_route_evidence_passport(
+                    path_nodes=best_detour_nodes,
+                    graph=graph,
+                    master_meta=meta,
+                    cropped_meta=cropped_meta,
+                    provenance=provenance,
+                    mode=request.mode,
+                )
                 sci_route = RouteAlternative(
                     route_id="route_science_primary",
                     name=f"Science-First Detour via {candidate_poi.name}",
@@ -328,6 +350,7 @@ class RouteService:
                         f"Selected science target '{candidate_poi.name}' (Priority {candidate_poi.scientific_priority:.1f}, "
                         f"detour ratio {best_detour_ratio:.2f}x direct cost, candidate score {best_candidate_score:.2f})."
                     ],
+                    evidence_passport=passport_sci,
                 )
                 routes.append(sci_route)
 
@@ -339,6 +362,14 @@ class RouteService:
                         cropped_meta,
                         request.mode,
                         science_targets=science_pois,
+                    )
+                    passport_dir = EvidenceService.build_route_evidence_passport(
+                        path_nodes=direct_nodes,
+                        graph=graph,
+                        master_meta=meta,
+                        cropped_meta=cropped_meta,
+                        provenance=provenance,
+                        mode=request.mode,
                     )
                     dir_route = RouteAlternative(
                         route_id="route_direct_baseline",
@@ -352,6 +383,7 @@ class RouteService:
                         science_targets_visited=vis_dir,
                         science_targets_nearby=near_dir,
                         warnings=["Bypasses science targets in favor of direct traversal."],
+                        evidence_passport=passport_dir,
                     )
                     routes.append(dir_route)
             else:
@@ -364,6 +396,8 @@ class RouteService:
                     requested_mode=request.mode,
                     num_alternatives=request.num_alternatives,
                     science_targets=science_pois,
+                    master_meta=meta,
+                    provenance=provenance,
                 )
                 total_nodes_expanded += alt_nodes
         else:
@@ -376,12 +410,12 @@ class RouteService:
                 requested_mode=request.mode,
                 num_alternatives=request.num_alternatives,
                 science_targets=science_pois,
+                master_meta=meta,
+                provenance=provenance,
             )
             total_nodes_expanded += alt_nodes
 
         # 11. Compile provenance & limitations
-        is_syn = self.provider.is_synthetic()
-        provenance = self.provider.get_provenance()
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
         val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 

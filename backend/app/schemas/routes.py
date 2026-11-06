@@ -1,9 +1,152 @@
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo, MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode, RouteConstraints
+
+
+class EvidenceQualityTier(str, Enum):
+    """
+    Deterministic classification of terrain evidence quality for regional route assessment.
+    NOTE: This is a data-evidence classification, NOT a probability of rover survival or mission safety.
+    """
+
+    HIGH = "high"
+    MODERATE = "moderate"
+    LOW = "low"
+    UNVERIFIED = "unverified"
+
+
+class SourceEvidence(BaseModel):
+    """Authoritative source identity, provenance status, and physical grid metadata."""
+
+    dataset_name: str = Field(..., description="Human-readable name of the active terrain source")
+    product_id: str | None = Field(
+        default=None,
+        description="Official planetary catalog product ID when genuinely established; None for synthetic or unverified local sources",
+    )
+    publisher: str | None = Field(
+        default=None,
+        description="Data publisher or origin authority",
+    )
+    official_source_url: str | None = Field(
+        default=None,
+        description="Authoritative USGS/PDS source URL when genuinely established; None for synthetic or unverified local sources",
+    )
+    data_mode: str = Field(
+        ...,
+        description="Active data mode: real, real_official_endpoint_unverified_checksum, real_unverified_source, synthetic_fallback, or synthetic_test_fixture",
+    )
+    validation_status: str = Field(
+        ...,
+        description="Provenance validation status: verified_source, official_endpoint_retrieved_checksum_unverified, valid_numeric_raster_unverified_source, synthetic_test_fixture, or incomplete_missing_genuine_dem",
+    )
+    verification_method: str = Field(
+        ...,
+        description="Specific cryptographic or procedural provenance verification method executed",
+    )
+    is_synthetic: bool = Field(
+        ..., description="True if terrain is procedurally synthesized rather than observational"
+    )
+    local_integrity_verified: bool | None = Field(
+        default=None,
+        description="True if local file SHA-256 matches its recorded provenance sidecar",
+    )
+    source_checksum_verified: bool = Field(
+        default=False,
+        description="True ONLY when the full upstream archive checksum has been independently verified against official catalog bytes",
+    )
+    file_sha256: str | None = Field(
+        default=None, description="SHA-256 digest of the local DEM file when loaded from disk"
+    )
+    pixel_resolution_x_meters: float = Field(
+        ..., description="Actual physical zonal pixel width (dx) in meters at route latitude"
+    )
+    pixel_resolution_y_meters: float = Field(
+        ..., description="Actual physical meridional pixel height (dy) in meters"
+    )
+    nominal_resolution_meters: float | None = Field(
+        default=None,
+        description="Nominal published dataset resolution in meters per pixel if applicable",
+    )
+    raster_width: int = Field(..., description="Width of the loaded master DEM raster in pixels")
+    raster_height: int = Field(..., description="Height of the loaded master DEM raster in pixels")
+    crs_identifier: str = Field(..., description="Horizontal Coordinate Reference System identifier")
+    vertical_datum: str = Field(..., description="Vertical elevation reference datum")
+    spatial_coverage: BoundingBox = Field(
+        ..., description="Actual geographic bounding box of the loaded DEM raster"
+    )
+    source_limitations: list[str] = Field(
+        default_factory=list,
+        description="Source-specific provenance and scientific caveats",
+    )
+
+
+class CoverageEvidence(BaseModel):
+    """Independent observation completeness measurements along the route and across the cropped corridor."""
+
+    route_sample_count: int = Field(
+        ..., description="Total number of discrete raster cell samples along the route"
+    )
+    valid_route_sample_count: int = Field(
+        ..., description="Number of route cell samples with valid numerical terrain observations"
+    )
+    invalid_route_sample_count: int = Field(
+        ..., description="Number of route cell samples falling on nodata or invalid cells"
+    )
+    route_data_coverage_fraction: float = Field(
+        ...,
+        description="Valid route samples divided by total route samples [0.0 - 1.0]",
+    )
+    corridor_total_cells: int = Field(
+        ..., description="Total raster cells within the cropped mission analysis corridor"
+    )
+    corridor_valid_cells: int = Field(
+        ..., description="Valid numerical raster cells within the cropped mission corridor"
+    )
+    corridor_invalid_cells: int = Field(
+        ..., description="Nodata or invalid cells within the cropped mission corridor"
+    )
+    corridor_data_coverage_fraction: float = Field(
+        ...,
+        description="Valid corridor cells divided by total corridor cells [0.0 - 1.0]",
+    )
+    near_nodata_segment_count: int = Field(
+        default=0,
+        description="Number of route segments passing adjacent to a nodata boundary in the corridor",
+    )
+
+
+class ResolutionAssessment(BaseModel):
+    """Physical resolution evaluation and scale suitability disclosure."""
+
+    actual_x_meters_per_pixel: float = Field(
+        ..., description="Actual zonal cell size (dx) in meters per pixel at the corridor latitude"
+    )
+    actual_y_meters_per_pixel: float = Field(
+        ..., description="Actual meridional cell size (dy) in meters per pixel"
+    )
+    effective_resolution_meters: float = Field(
+        ..., description="Conservative effective grid resolution max(dx, dy) in meters"
+    )
+    nominal_dataset_resolution_meters: float | None = Field(
+        default=None,
+        description="Nominal published equatorial resolution in meters per pixel when established",
+    )
+    suitability_classification: str = Field(
+        ...,
+        description="Scale suitability classification (e.g. regional_corridor_assessment_only, synthetic_simulation_only)",
+    )
+    obstacle_detection_capable: bool = Field(
+        default=False,
+        description="True only if resolution is fine enough (<=1 m/px) to resolve rover-scale boulders/obstacles",
+    )
+    limitation_statement: str = Field(
+        ...,
+        description="Explicit disclosure of what physical features are and are not resolved at this pixel scale",
+    )
 
 
 class RoutePlanRequest(BaseModel):
@@ -38,18 +181,96 @@ class RoutePlanRequest(BaseModel):
 
 
 class RouteSegment(BaseModel):
-    """Detailed terrain attributes for a single discrete step along the path."""
+    """Detailed terrain attributes and data-quality flags for a single discrete step along the path."""
 
+    segment_index: int = Field(
+        default=0, description="Zero-based index of this segment along the route"
+    )
     from_coord: MarsCoordinate
     to_coord: MarsCoordinate
     step_distance_meters: float
-    elevation_start_m: float
-    elevation_end_m: float
-    delta_elevation_m: float
-    slope_deg: float
-    roughness: float
-    is_valid_data: bool
+    elevation_start_m: float | None = Field(
+        default=None,
+        description="Start cell elevation in meters, or None if start cell is invalid/nodata",
+    )
+    elevation_end_m: float | None = Field(
+        default=None,
+        description="End cell elevation in meters, or None if end cell is invalid/nodata",
+    )
+    delta_elevation_m: float | None = Field(
+        default=None,
+        description="Elevation change (end - start) in meters, or None if either endpoint is invalid/nodata",
+    )
+    slope_deg: float | None = Field(
+        default=None,
+        description="Target cell physical slope in degrees, or None if invalid/nodata",
+    )
+    roughness: float | None = Field(
+        default=None,
+        description="Target cell normalized TRI roughness [0.0 - 1.0], or None if invalid/nodata",
+    )
+    is_valid_data: bool = Field(
+        ...,
+        description="True only when both endpoints and derived terrain metrics are backed by valid non-nodata observations",
+    )
     segment_cost: float
+    quality_flags: list[str] = Field(
+        default_factory=list,
+        description="Segment-level data quality flags grounded in actual raster/corridor conditions",
+    )
+
+
+class RouteEvidencePassport(BaseModel):
+    """
+    Structured Terrain Evidence & Route Confidence Passport accompanying each route alternative.
+    Quantifies dataset provenance, observation coverage, physical resolution, and segment-level
+    evidence flags. Does NOT represent a probability of rover survival or mission success.
+    """
+
+    schema_version: str = Field(
+        default="1.0.0", description="Evidence passport schema version"
+    )
+    assessment_scope: str = Field(
+        default="regional_terrain_evidence_assessment_not_mission_survival_probability",
+        description="Explicit scope declaration distinguishing terrain data quality from mission safety",
+    )
+    scientific_disclaimer: str = Field(
+        default=(
+            "Terrain evidence quality measures the provenance, spatial resolution, and observation "
+            "completeness of the underlying elevation data. It is NOT a probability of rover survival, "
+            "probability of mission success, or calibrated probability of mechanical failure."
+        ),
+        description="Mandatory scientific interpretation disclaimer",
+    )
+    quality_tier: EvidenceQualityTier = Field(
+        ...,
+        description="Deterministic evidence quality tier: high, moderate, low, or unverified",
+    )
+    tier_explanation: str = Field(
+        ...,
+        description="Human-readable explanation describing the exact evidence rules that determined quality_tier",
+    )
+    quality_flags: list[str] = Field(
+        default_factory=list,
+        description="Route-level evidence and provenance quality flags",
+    )
+    source: SourceEvidence = Field(
+        ..., description="Source dataset identity, provenance verification, and grid metadata"
+    )
+    coverage: CoverageEvidence = Field(
+        ..., description="Independent route sample coverage and cropped corridor cell coverage"
+    )
+    resolution_assessment: ResolutionAssessment = Field(
+        ..., description="Actual vs. nominal resolution assessment and obstacle detection disclaimer"
+    )
+    known_limitations: list[str] = Field(
+        default_factory=list,
+        description="Consolidated scientific and engineering limitations applicable to this route",
+    )
+    segments: list[RouteSegment] = Field(
+        default_factory=list,
+        description="Ordered segment-by-segment terrain measurements and quality flags (N-1 segments for N route coordinates)",
+    )
 
 
 class RouteSummary(BaseModel):
@@ -127,6 +348,10 @@ class RouteAlternative(BaseModel):
         description="IDs of science targets within sensor observation range (<500m)",
     )
     warnings: list[str] = Field(default_factory=list)
+    evidence_passport: RouteEvidencePassport | None = Field(
+        default=None,
+        description="Structured Terrain Evidence & Route Confidence Passport for this route alternative",
+    )
 
 
 class ComputationStats(BaseModel):

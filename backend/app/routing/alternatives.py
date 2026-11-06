@@ -1,5 +1,6 @@
 import logging
 import math
+from typing import Any
 
 import numpy as np
 
@@ -15,6 +16,10 @@ from backend.app.routing.cost_model import calculate_edge_cost
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode, ScienceTarget
 from backend.app.schemas.routes import GeoJSONGeometry, RouteAlternative, RouteSummary
+from backend.app.services.evidence_service import (
+    EvidenceService,
+    compute_nodata_and_boundary_masks,
+)
 
 logger = logging.getLogger("marspath.routing.alternatives")
 
@@ -30,10 +35,13 @@ def reconstruct_route_summary(
     """
     Computes detailed summary metrics, GeoJSON geometry, exact cost breakdown,
     and visited/nearby science targets from an ordered sequence of grid nodes.
-    Uses the exact active mode cost model for score reconciliation.
+    Uses the exact active mode cost model for score reconciliation and measures
+    actual route observation coverage from the active terrain grid.
     """
     if not path_nodes:
         raise ValueError("Cannot summarize empty path.")
+
+    nodata_mask, _ = compute_nodata_and_boundary_masks(graph.elevation, meta.nodata_value)
 
     total_dist = 0.0
     elev_gain = 0.0
@@ -52,9 +60,21 @@ def reconstruct_route_summary(
     total_duration_seconds = 0.0
     hazard_exposure_meters = 0.0
 
+    valid_sample_count = 0
+    for r_node, c_node in path_nodes:
+        if (
+            not bool(nodata_mask[r_node, c_node])
+            and not math.isnan(float(graph.slope_deg[r_node, c_node]))
+            and not math.isnan(float(graph.roughness[r_node, c_node]))
+        ):
+            valid_sample_count += 1
+    measured_coverage_fraction = round(valid_sample_count / max(len(path_nodes), 1), 4)
+
     prev_r, prev_c = path_nodes[0]
+    prev_valid = not bool(nodata_mask[prev_r, prev_c])
     z_prev = float(graph.elevation[prev_r, prev_c])
-    elevations.append(z_prev)
+    if prev_valid:
+        elevations.append(z_prev)
 
     lon_start, lat_start = pixel_to_geo(
         prev_c,
@@ -65,11 +85,15 @@ def reconstruct_route_summary(
         meta.deg_per_px_lat,
         pixel_center=True,
     )
-    geojson_coords.append([round(lon_start, 6), round(lat_start, 6), round(z_prev, 2)])
+    geojson_coords.append(
+        [round(lon_start, 6), round(lat_start, 6), round(z_prev, 2) if prev_valid else 0.0]
+    )
 
     for curr_r, curr_c in path_nodes[1:]:
+        curr_valid = not bool(nodata_mask[curr_r, curr_c])
         z_curr = float(graph.elevation[curr_r, curr_c])
-        elevations.append(z_curr)
+        if curr_valid:
+            elevations.append(z_curr)
 
         dr = curr_r - prev_r
         dc = curr_c - prev_c
@@ -79,35 +103,46 @@ def reconstruct_route_summary(
             if (dr != 0 and dc != 0)
             else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
         )
-        dz = z_curr - z_prev
+        dz = (z_curr - z_prev) if (prev_valid and curr_valid) else 0.0
         d3d = math.sqrt(d2d**2 + dz**2)
         total_dist += d3d
 
-        if dz > 0:
-            elev_gain += dz
-        else:
-            elev_loss += abs(dz)
+        if prev_valid and curr_valid:
+            if dz > 0:
+                elev_gain += dz
+            else:
+                elev_loss += abs(dz)
 
-        slope = float(graph.slope_deg[curr_r, curr_c])
-        slopes.append(slope)
-        rough = float(graph.roughness[curr_r, curr_c])
-        roughnesses.append(rough)
+        slope_raw = float(graph.slope_deg[curr_r, curr_c])
+        rough_raw = float(graph.roughness[curr_r, curr_c])
+        slope_valid = not math.isnan(slope_raw)
+        rough_valid = not math.isnan(rough_raw)
 
-        if slope > 12.0 or rough > 0.5:
+        if slope_valid:
+            slopes.append(slope_raw)
+        if rough_valid:
+            roughnesses.append(rough_raw)
+
+        slope_for_calc = slope_raw if slope_valid else 0.0
+        rough_for_calc = rough_raw if rough_valid else 0.0
+
+        if (slope_valid and slope_raw > 12.0) or (rough_valid and rough_raw > 0.5):
             hazard_exposure_meters += d3d
 
         extra_pen = 0.0
         if penalized_edges and ((prev_r, prev_c), (curr_r, curr_c)) in penalized_edges:
             extra_pen = penalized_edges[((prev_r, prev_c), (curr_r, curr_c))]
 
+        step_is_nodata = not (prev_valid and curr_valid and slope_valid and rough_valid)
+
         # Reconcile exact edge cost using active cost model
         _, step_breakdown = calculate_edge_cost(
             distance_3d=d3d,
-            slope_deg=slope,
-            roughness=rough,
+            slope_deg=slope_for_calc,
+            roughness=rough_for_calc,
             delta_z=dz,
             mode=mode,
-            is_nodata=False,
+            is_nodata=step_is_nodata,
             extra_penalty=extra_pen,
         )
 
@@ -118,7 +153,7 @@ def reconstruct_route_summary(
         cost_extra += step_breakdown["extra_penalty"]
 
         # Motion profile: Rover nominal 0.15 m/s with slope-dependent derating
-        speed_mps = 0.15 * max(0.2, 1.0 - (slope / 30.0))
+        speed_mps = 0.15 * max(0.2, 1.0 - (slope_for_calc / 30.0))
         step_time_sec = d3d / speed_mps
         total_duration_seconds += step_time_sec
 
@@ -131,9 +166,12 @@ def reconstruct_route_summary(
             meta.deg_per_px_lat,
             pixel_center=True,
         )
-        geojson_coords.append([round(lon, 6), round(lat, 6), round(z_curr, 2)])
+        geojson_coords.append(
+            [round(lon, 6), round(lat, 6), round(z_curr, 2) if curr_valid else 0.0]
+        )
 
         prev_r, prev_c = curr_r, curr_c
+        prev_valid = curr_valid
         z_prev = z_curr
 
     avg_slope = float(np.mean(slopes)) if slopes else 0.0
@@ -178,16 +216,19 @@ def reconstruct_route_summary(
     else:
         risk_category = "nominal"
 
+    min_elev = round(float(min(elevations)), 1) if elevations else 0.0
+    max_elev = round(float(max(elevations)), 1) if elevations else 0.0
+
     summary = RouteSummary(
         total_distance_meters=round(total_dist, 1),
         elevation_gain_meters=round(elev_gain, 1),
         elevation_loss_meters=round(elev_loss, 1),
-        min_elevation_meters=round(float(min(elevations)), 1),
-        max_elevation_meters=round(float(max(elevations)), 1),
+        min_elevation_meters=min_elev,
+        max_elevation_meters=max_elev,
         max_slope_deg=round(max_slope, 2),
         average_slope_deg=round(avg_slope, 2),
         average_roughness=round(avg_rough, 3),
-        data_coverage_fraction=1.0,
+        data_coverage_fraction=measured_coverage_fraction,
         estimated_duration_hours=round(duration_hrs, 2),
         motion_profile="rover_slope_derated_0.15mps",
         energy_index=round(energy_idx, 2),
@@ -217,9 +258,12 @@ def generate_route_alternatives(
     requested_mode: OptimizationMode,
     num_alternatives: int = 1,
     science_targets: list[ScienceTarget] | None = None,
+    master_meta: RasterMetadata | None = None,
+    provenance: dict[str, Any] | None = None,
 ) -> tuple[list[RouteAlternative], int]:
     """
-    Computes 1 to 3 distinct candidate routes.
+    Computes 1 to 3 distinct candidate routes and attaches a structured
+    `RouteEvidencePassport` to every alternative.
     Route 1: Primary route for the requested mode.
     Route 2: Backup corridor generated by penalizing primary route edges.
     Route 3: Safety-first or Science-oriented corridor.
@@ -229,6 +273,8 @@ def generate_route_alternatives(
     """
     results: list[RouteAlternative] = []
     total_nodes_expanded = 0
+    effective_master_meta = master_meta or meta
+    effective_prov = provenance or {}
 
     # 1. Primary route
     primary_nodes, primary_cost, nodes_1, _ = astar_search(graph, start_px, dest_px)
@@ -236,6 +282,14 @@ def generate_route_alternatives(
 
     summary_1, geom_1, breakdown_1, visited_1, nearby_1 = reconstruct_route_summary(
         primary_nodes, graph, meta, requested_mode, science_targets=science_targets
+    )
+    passport_1 = EvidenceService.build_route_evidence_passport(
+        path_nodes=primary_nodes,
+        graph=graph,
+        master_meta=effective_master_meta,
+        cropped_meta=meta,
+        provenance=effective_prov,
+        mode=requested_mode,
     )
 
     results.append(
@@ -251,6 +305,7 @@ def generate_route_alternatives(
             science_targets_visited=visited_1,
             science_targets_nearby=nearby_1,
             warnings=[],
+            evidence_passport=passport_1,
         )
     )
 
@@ -283,6 +338,15 @@ def generate_route_alternatives(
                 penalized_edges=penalized_edges,
                 science_targets=science_targets,
             )
+            passport_2 = EvidenceService.build_route_evidence_passport(
+                path_nodes=alt_nodes,
+                graph=graph,
+                master_meta=effective_master_meta,
+                cropped_meta=meta,
+                provenance=effective_prov,
+                mode=requested_mode,
+                penalized_edges=penalized_edges,
+            )
             results.append(
                 RouteAlternative(
                     route_id="route_alt_corridor",
@@ -298,6 +362,7 @@ def generate_route_alternatives(
                     warnings=[
                         "Alternative corridor avoids high-traffic bottlenecks of primary route."
                     ],
+                    evidence_passport=passport_2,
                 )
             )
         else:
@@ -339,6 +404,14 @@ def generate_route_alternatives(
                 summary_3, geom_3, breakdown_3, visited_3, nearby_3 = reconstruct_route_summary(
                     safety_nodes, graph_safety, meta, alt_mode, science_targets=science_targets
                 )
+                passport_3 = EvidenceService.build_route_evidence_passport(
+                    path_nodes=safety_nodes,
+                    graph=graph_safety,
+                    master_meta=effective_master_meta,
+                    cropped_meta=meta,
+                    provenance=effective_prov,
+                    mode=alt_mode,
+                )
                 results.append(
                     RouteAlternative(
                         route_id="route_safety_backup",
@@ -354,6 +427,7 @@ def generate_route_alternatives(
                         warnings=[
                             "Strict 14° slope constraint enforced; prioritizes minimum roughness."
                         ],
+                        evidence_passport=passport_3,
                     )
                 )
             except (UnreachableDestinationError, ComputationalBoundExceededError) as e:

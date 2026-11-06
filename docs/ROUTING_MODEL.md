@@ -72,3 +72,17 @@ When `num_alternatives > 1` is requested:
 1. **Regional Resolution Scale (200 m/px):** The selected USGS global blended DEM (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`) has a nominal resolution of 200 metres per pixel ($\sim 189.77\text{ m} \times 200.00\text{ m}$ at Jezero Crater). It supports **regional corridor terrain assessment**, not metre-scale boulder/obstacle detection, wheel-scale hazard avoidance, or flight-grade autonomous rover navigation.
 2. **HRSC/MOLA Blending & Thermal-Modelling Caveat:** As documented by USGS Astrogeology (Fergason et al., 2018), this global blended DEM was originally constructed to derive global thermal inertia (for THEMIS) where smooth regional transitions were prioritized over local topographic fidelity. Blending HRSC stereo-photogrammetry with MOLA laser altimetry introduces seam artifacts, vertical registration offsets, and smoothing inconsistencies across coverage boundaries.
 3. **Heuristic Risk Scoring Disclaimer:** Route cost weights, slope/roughness penalties, `hazard_exposure_meters`, and categorical risk classifications (`nominal`, `moderate`, `high`) are **deterministic multi-criteria decision heuristics** for comparative corridor trade-offs. They are **not** empirically calibrated probabilities of mechanical rover failure or mission loss.
+
+---
+
+## 7. Terrain Evidence Quality vs. Physical Traversal Risk
+
+MARSPath explicitly separates **physical terrain traversal heuristics** (`summary.risk_category`, `summary.hazard_exposure_meters`) from **data evidence quality** (`evidence_passport.quality_tier`):
+
+- **Physical Traversal Risk (`summary.risk_category`):** Measures the relative topographic severity along a route (slope angles, roughness index, elevation change) assuming the underlying raster values are true.
+- **Terrain Evidence Quality (`evidence_passport.quality_tier`):** Measures how trustworthy and complete the underlying raster observations are (`high`, `moderate`, `low`, `unverified`) based on:
+  1. **Source Provenance:** Cryptographic verification of the official archival file (`verified_source`), direct official USGS endpoint retrieval of a subset extract (`official_endpoint_retrieved_checksum_unverified`), unverified local numeric raster (`valid_numeric_raster_unverified_source`), or procedural synthetic terrain (`synthetic_fallback` / `synthetic_test_fixture`).
+  2. **Spatial Resolution Suitability:** Actual cell dimensions in metres (`actual_x_meters_per_pixel`, `actual_y_meters_per_pixel`, `effective_resolution_meters`) and whether the grid can resolve rover-scale hazards (`obstacle_detection_capable`).
+  3. **Route & Corridor Observation Coverage:** Independent measurements of valid non-nodata cells along the route (`route_data_coverage_fraction`), across the cropped mission corridor (`corridor_data_coverage_fraction`), and within a 2-cell boundary buffer around nodata gaps (`near_nodata_segment_count`).
+
+> **Scientific Integrity Rule:** A route on smooth synthetic terrain may have `risk_category = "nominal"` (flat geometry) while simultaneously receiving `evidence_passport.quality_tier = "unverified"` (procedural terrain). Conversely, a route on the real USGS HRSC/MOLA 200 m/px Jezero extract receives `evidence_passport.quality_tier = "moderate"` because the subset extract is retrieved from the official USGS endpoint without a full-file archival MD5 match and its 200 m/px grid resolves regional corridors rather than metre-scale obstacles. `quality_tier` is **never** a probability of rover survival or mission success.

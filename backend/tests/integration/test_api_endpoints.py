@@ -80,6 +80,36 @@ def test_route_plan_success():
     assert 77.0 <= coord0[0] <= 78.0  # East longitude
     assert 18.0 <= coord0[1] <= 19.0  # Planetocentric latitude
 
+    # Check that every route alternative includes a structured Terrain Evidence & Route Confidence Passport
+    for route_item in data["routes"]:
+        assert "evidence_passport" in route_item
+        passport = route_item["evidence_passport"]
+        assert passport is not None
+        assert passport["schema_version"] == "1.0.0"
+        assert passport["quality_tier"] in ("high", "moderate", "low", "unverified")
+        assert isinstance(passport["tier_explanation"], str) and len(passport["tier_explanation"]) > 10
+        assert "source" in passport
+        assert "coverage" in passport
+        assert "resolution_assessment" in passport
+        assert "known_limitations" in passport
+        assert "segments" in passport
+        assert len(passport["segments"]) == len(route_item["geometry"]["coordinates"]) - 1
+
+
+def test_openapi_exposes_evidence_passport_schemas():
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    schemas = response.json()["components"]["schemas"]
+    for model_name in [
+        "RouteEvidencePassport",
+        "SourceEvidence",
+        "CoverageEvidence",
+        "ResolutionAssessment",
+        "RouteSegment",
+        "EvidenceQualityTier",
+    ]:
+        assert model_name in schemas, f"Missing OpenAPI schema: {model_name}"
+
 
 def test_route_plan_unsupported_crs():
     payload = {
