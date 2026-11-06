@@ -277,7 +277,24 @@ class RouteSummary(BaseModel):
     """Aggregate quantitative metrics for a planned route corridor."""
 
     total_distance_meters: float = Field(
-        ..., description="Total ground path distance in physical meters"
+        ...,
+        description=(
+            "Total path distance in physical meters: 3D topographic surface distance when all "
+            "route elevation observations are valid, or 2D horizontal ground distance when "
+            "elevation observations are incomplete (see distance_measurement_basis)"
+        ),
+    )
+    horizontal_distance_meters: float = Field(
+        default=0.0,
+        description="Total 2D horizontal ground distance in physical meters (always complete from grid geometry)",
+    )
+    surface_3d_distance_meters: float | None = Field(
+        default=None,
+        description="Complete 3D topographic surface distance in meters when all route elevation transitions are valid, or None when any elevation observation is missing",
+    )
+    distance_measurement_basis: str = Field(
+        default="complete_3d_surface",
+        description="'complete_3d_surface' when all route vertices have valid elevations, or 'horizontal_2d_only_incomplete_elevation' when any elevation sample is missing",
     )
     elevation_gain_meters: float | None = Field(
         default=None,
@@ -318,26 +335,53 @@ class RouteSummary(BaseModel):
         default=True,
         description="True only when 100% of route vertices have valid elevation, slope, and roughness observations; False when summary metrics are partial aggregates over observed subsets or None",
     )
-    estimated_duration_hours: float = Field(
-        ..., description="Estimated traversal time assuming rover motion profile"
+    estimated_duration_hours: float | None = Field(
+        default=None,
+        description="Complete estimated traversal time in hours assuming rover motion profile when all route steps have valid elevation and slope observations, or None when observations are incomplete",
+    )
+    observed_duration_hours_partial: float | None = Field(
+        default=None,
+        description="Partial traversal duration in hours summed strictly over fully observed steps without substituting zero slope, or None if no steps are fully observed",
     )
     motion_profile: str = Field(
         default="rover_slope_derated_0.15mps",
         description="Physical velocity profile: nominal 0.15 m/s with slope-dependent speed derating",
     )
-    energy_index: float = Field(
-        ..., description="Relative energy consumption score factoring distance and slopes"
+    energy_index: float | None = Field(
+        default=None,
+        description="Complete relative energy consumption score factoring 3D distance and ascent when all route elevation transitions are valid, or None when elevation observations are incomplete",
+    )
+    observed_energy_index_partial: float | None = Field(
+        default=None,
+        description="Partial energy consumption score computed strictly over valid elevation transitions, or None if no valid elevation transitions exist",
     )
     science_score: float = Field(
         ..., description="Science acquisition score based on visited targets and proximity"
     )
-    hazard_exposure_meters: float = Field(
+    hazard_exposure_meters: float | None = Field(
         default=0.0,
-        description="Physical meters traversed through high-risk terrain (slope > 12° or roughness > 0.5)",
+        description="Complete physical meters traversed through high-risk terrain (slope > 12° or roughness > 0.5) when all route steps are fully observed, or None when slope/roughness/elevation observations are incomplete",
+    )
+    observed_hazard_exposure_meters_min: float = Field(
+        default=0.0,
+        description="Confirmed lower-bound physical meters traversed through observed high-risk steps",
+    )
+    unobserved_step_distance_meters: float = Field(
+        default=0.0,
+        description="Physical horizontal meters traversed across steps with missing elevation, slope, or roughness observations where hazard exposure is unknown",
     )
     risk_category: str = Field(
         default="nominal",
-        description="Categorical risk classification for mission planning: nominal, moderate, or high",
+        description=(
+            "Categorical risk classification: 'nominal', 'moderate', or 'high' when terrain "
+            "observations are complete; 'unverified_incomplete_terrain_data', "
+            "'moderate_observed_incomplete_data', 'high_observed_incomplete_data', or "
+            "'unverified_no_valid_terrain_data' when observations are incomplete"
+        ),
+    )
+    risk_assessment_status: str = Field(
+        default="complete_observed",
+        description="'complete_observed', 'incomplete_partial_observations', or 'unverified_no_valid_observations'",
     )
 
 

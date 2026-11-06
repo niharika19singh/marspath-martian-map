@@ -591,8 +591,321 @@ def test_geometry_and_summary_never_fabricate_zero_elevations_across_valid_parti
     assert sum_all_bad.max_slope_deg is None
     assert sum_all_bad.average_slope_deg is None
     assert sum_all_bad.average_roughness is None
-    assert sum_all_bad.risk_category == "high"
+    assert sum_all_bad.estimated_duration_hours is None
+    assert sum_all_bad.observed_duration_hours_partial is None
+    assert sum_all_bad.energy_index is None
+    assert sum_all_bad.observed_energy_index_partial is None
+    assert sum_all_bad.hazard_exposure_meters is None
+    assert sum_all_bad.surface_3d_distance_meters is None
+    assert sum_all_bad.distance_measurement_basis == "horizontal_2d_only_incomplete_elevation"
+    assert sum_all_bad.risk_category == "unverified_no_valid_terrain_data"
+    assert sum_all_bad.risk_assessment_status == "unverified_no_valid_observations"
     assert all(len(c) == 2 for c in geom_all_bad.coordinates)
+
+
+def test_incomplete_route_summary_metrics_duration_energy_hazard_distance_and_risk_disclosure():
+    """
+    Phase 2.2 Regression Tests 1, 2, 3, 4, 5, and 9:
+    1. Missing slope does not produce an optimistic complete duration (`estimated_duration_hours is None`).
+    2. Missing elevation transitions do not silently produce a complete energy estimate (`energy_index is None`).
+    3. Missing slope/roughness does not silently understate hazard exposure (`hazard_exposure_meters is None`,
+       `unobserved_step_distance_meters > 0`).
+    4. Incomplete vertical measurements are distinguishable from complete 3D surface distance
+       (`surface_3d_distance_meters is None`, `distance_measurement_basis == 'horizontal_2d_only_incomplete_elevation'`).
+    5. Partial route observations do not receive a misleading `nominal` risk classification without an
+       explicit incomplete-data disclosure (`risk_category != 'nominal'`).
+    9. Fully valid routes preserve existing summary output and ranking.
+    """
+    rows, cols = 10, 10
+    deg_step = 200.0 / METERS_PER_DEGREE_LATITUDE
+    dx, dy = 200.0, 200.0
+    meta = RasterMetadata(
+        width=cols,
+        height=rows,
+        coordinate_type="geographic",
+        crs_str="IAU2000:49900",
+        units="degrees",
+        min_lon=77.30,
+        min_lat=18.30,
+        max_lon=77.30 + cols * deg_step,
+        max_lat=18.30 + rows * deg_step,
+        deg_per_px_lon=deg_step,
+        deg_per_px_lat=deg_step,
+        meters_per_px_x=dx,
+        meters_per_px_y=dy,
+        affine_transform=(deg_step, 0.0, 77.30, 0.0, -deg_step, 18.30 + rows * deg_step),
+        nodata_value=-9999.0,
+        vertical_datum="Mars Areoid (MOLA 0m reference datum)",
+        is_synthetic=False,
+    )
+    path_nodes = [(5, 2), (5, 3), (5, 4), (5, 5), (5, 6)]
+
+    # A. Fully valid route (Test 9): preserves 3D surface distance, duration, energy, hazard, and nominal risk
+    elev_full = np.full((rows, cols), -2500.0, dtype=np.float32)
+    # Add gentle uphill (+4m per col) so 3D surface distance > 2D horizontal distance
+    for c in range(cols):
+        elev_full[:, c] = -2500.0 + (c * 4.0)
+    nodata_full = np.zeros((rows, cols), dtype=bool)
+    slopes_full = compute_slope_degrees(elev_full, dx, dy, nodata_mask=nodata_full)
+    rough_full = compute_roughness_index(elev_full, kernel_size=3, nodata_mask=nodata_full)
+    graph_full = TerrainGridGraph(
+        elevation=elev_full,
+        slope_deg=slopes_full,
+        roughness=rough_full,
+        traversable_mask=np.ones((rows, cols), dtype=bool),
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    sum_full, _, _, _, _ = reconstruct_route_summary(
+        path_nodes=path_nodes,
+        graph=graph_full,
+        meta=meta,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert sum_full.is_complete_measurement is True
+    assert sum_full.distance_measurement_basis == "complete_3d_surface"
+    assert sum_full.surface_3d_distance_meters is not None
+    assert sum_full.total_distance_meters == sum_full.surface_3d_distance_meters
+    assert sum_full.horizontal_distance_meters == 800.0
+    assert sum_full.estimated_duration_hours is not None
+    assert sum_full.energy_index is not None
+    assert sum_full.hazard_exposure_meters == 0.0
+    assert sum_full.unobserved_step_distance_meters == 0.0
+    assert sum_full.risk_category == "nominal"
+    assert sum_full.risk_assessment_status == "complete_observed"
+
+    # B. Missing slope/roughness only (valid elevations, NaN slope/roughness on one cell) -> Tests 1, 3, 5
+    slopes_missing_one = slopes_full.copy()
+    rough_missing_one = rough_full.copy()
+    slopes_missing_one[5, 4] = np.nan
+    rough_missing_one[5, 4] = np.nan
+    graph_missing_slope = TerrainGridGraph(
+        elevation=elev_full,
+        slope_deg=slopes_missing_one,
+        roughness=rough_missing_one,
+        traversable_mask=np.ones((rows, cols), dtype=bool),
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    sum_missing_slope, _, _, _, _ = reconstruct_route_summary(
+        path_nodes=path_nodes,
+        graph=graph_missing_slope,
+        meta=meta,
+        mode=OptimizationMode.BALANCED,
+    )
+    # Test 1: Missing slope does NOT produce an optimistic complete duration
+    assert sum_missing_slope.is_complete_measurement is False
+    assert sum_missing_slope.estimated_duration_hours is None
+    assert sum_missing_slope.observed_duration_hours_partial is not None
+    assert sum_missing_slope.observed_duration_hours_partial < sum_full.estimated_duration_hours
+    # Test 3: Missing slope/roughness does NOT silently understate hazard exposure as a complete 0.0
+    assert sum_missing_slope.hazard_exposure_meters is None
+    assert sum_missing_slope.observed_hazard_exposure_meters_min == 0.0
+    assert sum_missing_slope.unobserved_step_distance_meters == 200.0
+    # Test 5: Partial route observations do NOT receive a misleading 'nominal' risk classification
+    assert sum_missing_slope.risk_category != "nominal"
+    assert sum_missing_slope.risk_category == "unverified_incomplete_terrain_data"
+    assert sum_missing_slope.risk_assessment_status == "incomplete_partial_observations"
+    # Because all elevations are still valid here, 3D distance and energy_index remain valid
+    assert sum_missing_slope.elevation_sample_coverage_fraction == 1.0
+    assert sum_missing_slope.surface_3d_distance_meters == sum_full.surface_3d_distance_meters
+    assert sum_missing_slope.energy_index == sum_full.energy_index
+
+    # C. Missing elevation at (5, 4) -> Tests 2, 4, 5
+    elev_missing_one = elev_full.copy()
+    elev_missing_one[5, 4] = -9999.0
+    nodata_missing_one = np.zeros((rows, cols), dtype=bool)
+    nodata_missing_one[5, 4] = True
+    slopes_elev_bad = compute_slope_degrees(elev_missing_one, dx, dy, nodata_mask=nodata_missing_one)
+    rough_elev_bad = compute_roughness_index(
+        elev_missing_one, kernel_size=3, nodata_mask=nodata_missing_one
+    )
+    graph_missing_elev = TerrainGridGraph(
+        elevation=elev_missing_one,
+        slope_deg=slopes_elev_bad,
+        roughness=rough_elev_bad,
+        traversable_mask=np.ones((rows, cols), dtype=bool),
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    sum_missing_elev, _, _, _, _ = reconstruct_route_summary(
+        path_nodes=path_nodes,
+        graph=graph_missing_elev,
+        meta=meta,
+        mode=OptimizationMode.BALANCED,
+    )
+    # Test 2: Missing elevation transitions do NOT silently produce a complete energy estimate
+    assert sum_missing_elev.energy_index is None
+    assert sum_missing_elev.observed_energy_index_partial is not None
+    # Test 4: Incomplete vertical measurements are distinguishable from complete 3D surface distance
+    assert sum_missing_elev.surface_3d_distance_meters is None
+    assert sum_missing_elev.distance_measurement_basis == "horizontal_2d_only_incomplete_elevation"
+    assert sum_missing_elev.total_distance_meters == sum_missing_elev.horizontal_distance_meters
+    assert sum_missing_elev.total_distance_meters == 800.0
+    # Test 5: Risk category explicitly discloses incomplete terrain data
+    assert sum_missing_elev.risk_category == "unverified_incomplete_terrain_data"
+    assert sum_missing_elev.risk_assessment_status == "incomplete_partial_observations"
+
+
+def test_strict_mars_crs_and_vertical_datum_validation_gates():
+    """
+    Phase 2.2 Regression Tests 6, 7, and 8:
+    6. An arbitrary CRS string containing 'Mars' cannot pass the high-tier CRS gate.
+    7. An arbitrary non-empty vertical datum cannot pass the high-tier datum gate.
+    8. Legitimate supported Mars CRS and MOLA areoid metadata (plus registered future Mars datums) still pass.
+    """
+    from backend.app.services.evidence_service import (
+        ESTABLISHED_MARS_CRS_IDENTIFIERS,
+        ESTABLISHED_MARS_VERTICAL_DATUMS,
+        register_mars_crs_identifier,
+        register_mars_vertical_datum,
+    )
+
+    # Test 6: Arbitrary strings containing 'Mars' are strictly rejected
+    for bogus_crs in (
+        "Mars",
+        "Mars_Custom_Unverified_CRS",
+        "Mars Rover Local Grid",
+        "NOT_A_VALID_MARS_CRS",
+        'LOCAL_CS["Mars"]',
+        "+proj=longlat +R=6378137 +no_defs",
+        "EPSG:4326",
+    ):
+        assert EvidenceService._is_established_mars_crs(bogus_crs) is False, f"Should reject {bogus_crs}"
+
+    # Test 7: Arbitrary non-empty vertical datum strings are strictly rejected
+    for bogus_datum in (
+        "Custom_Vertical_Datum_123",
+        "Mars_Arbitrary_Height",
+        "Mean Sea Level",
+        "EGM96",
+        "NAVD88",
+        "Synthetic Reference Datum (Mars Sphere R=3,396,190m)",
+    ):
+        assert EvidenceService._is_known_vertical_datum(bogus_datum) is False, f"Should reject {bogus_datum}"
+
+    # Test 8: Legitimate supported Mars CRS identifiers, PROJ definitions, and WKT definitions pass
+    for valid_crs in (
+        "IAU2000:49900",
+        "IAU_2015:49900",
+        "ESRI:104971",
+        "+proj=longlat +R=3396190 +no_defs",
+        "+proj=eqc +lat_ts=18.38 +lat_0=18.38 +lon_0=77.58 +R=3396190 +units=m +no_defs",
+        'GEOGCS["unknown",DATUM["unnamed",SPHEROID["unnamed",3396190,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]',
+        'GEOGCS["GCS_Mars_2000_Sphere",DATUM["D_Mars_2000_Sphere",SPHEROID["Mars_2000_Sphere_IAU_IAG",3396190.0,0.0]],AUTHORITY["ESRI","104971"]]',
+    ):
+        assert EvidenceService._is_established_mars_crs(valid_crs) is True, f"Should accept {valid_crs}"
+
+    for valid_datum in (
+        "Mars Areoid (MOLA 0m reference datum)",
+        "Mars_2000_Areoid_MOLA_0m",
+        "Mars Areoid (MOLA MEGDR IAU2000)",
+    ):
+        assert EvidenceService._is_known_vertical_datum(valid_datum) is True, f"Should accept {valid_datum}"
+
+    # Also verify end-to-end passport downgrade when bogus "Mars_Custom_CRS" or bogus datum is supplied
+    rows, cols = 10, 10
+    deg_step = 200.0 / METERS_PER_DEGREE_LATITUDE
+    dx, dy = 189.79, 200.0
+    elev = np.full((rows, cols), -2480.0, dtype=np.float32)
+    nodata_mask = np.zeros((rows, cols), dtype=bool)
+    slopes = compute_slope_degrees(elev, dx, dy, nodata_mask=nodata_mask)
+    rough = compute_roughness_index(elev, kernel_size=3, nodata_mask=nodata_mask)
+    graph = TerrainGridGraph(
+        elevation=elev,
+        slope_deg=slopes,
+        roughness=rough,
+        traversable_mask=np.ones((rows, cols), dtype=bool),
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    base_meta = RasterMetadata(
+        width=cols,
+        height=rows,
+        coordinate_type="geographic",
+        crs_str="IAU2000:49900",
+        units="degrees",
+        min_lon=77.30,
+        min_lat=18.30,
+        max_lon=77.30 + cols * deg_step,
+        max_lat=18.30 + rows * deg_step,
+        deg_per_px_lon=deg_step,
+        deg_per_px_lat=deg_step,
+        meters_per_px_x=dx,
+        meters_per_px_y=dy,
+        affine_transform=(deg_step, 0.0, 77.30, 0.0, -deg_step, 18.30 + rows * deg_step),
+        nodata_value=-32768.0,
+        vertical_datum="Mars Areoid (MOLA 0m reference datum)",
+        is_synthetic=False,
+    )
+    base_prov = {
+        "dataset_name": "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2",
+        "official_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+        "official_source_url": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
+        "data_mode": "real",
+        "real_data_validation_status": "verified_source",
+        "provenance_verification_method": "authoritative_manifest_sha256_match",
+        "local_integrity_verified": True,
+        "source_checksum_verified": True,
+        "is_synthetic": False,
+    }
+    path_nodes = [(4, 2), (4, 3), (4, 4), (4, 5)]
+
+    meta_bogus_mars_crs = RasterMetadata(
+        **{**base_meta.__dict__, "crs_str": "Mars_Arbitrary_Unvalidated_CRS"}
+    )
+    p_bogus_crs = EvidenceService.build_route_evidence_passport(
+        path_nodes=path_nodes,
+        graph=graph,
+        master_meta=meta_bogus_mars_crs,
+        cropped_meta=meta_bogus_mars_crs,
+        provenance=base_prov,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert p_bogus_crs.quality_tier == EvidenceQualityTier.LOW
+    assert "unknown_crs" in p_bogus_crs.quality_flags
+
+    meta_bogus_datum = RasterMetadata(
+        **{**base_meta.__dict__, "vertical_datum": "Arbitrary_NonEmpty_Vertical_Datum"}
+    )
+    p_bogus_datum = EvidenceService.build_route_evidence_passport(
+        path_nodes=path_nodes,
+        graph=graph,
+        master_meta=meta_bogus_datum,
+        cropped_meta=meta_bogus_datum,
+        provenance=base_prov,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert p_bogus_datum.quality_tier == EvidenceQualityTier.LOW
+    assert "unknown_vertical_datum" in p_bogus_datum.quality_flags
+
+    # Verify documented registration mechanism for future Mars datasets
+    try:
+        register_mars_crs_identifier("IAU_2025:49999_FUTURE_MARS")
+        register_mars_vertical_datum("MOLA_HRSC_Future_Areoid_v3")
+        meta_future = RasterMetadata(
+            **{
+                **base_meta.__dict__,
+                "crs_str": "IAU_2025:49999_FUTURE_MARS",
+                "vertical_datum": "MOLA_HRSC_Future_Areoid_v3",
+            }
+        )
+        p_future = EvidenceService.build_route_evidence_passport(
+            path_nodes=path_nodes,
+            graph=graph,
+            master_meta=meta_future,
+            cropped_meta=meta_future,
+            provenance=base_prov,
+            mode=OptimizationMode.BALANCED,
+        )
+        assert p_future.quality_tier == EvidenceQualityTier.HIGH
+    finally:
+        ESTABLISHED_MARS_CRS_IDENTIFIERS.discard("IAU_2025:49999_FUTURE_MARS")
+        ESTABLISHED_MARS_VERTICAL_DATUMS.discard("MOLA_HRSC_FUTURE_AREOID_V3")
 
 
 def test_explicit_high_tier_verification_gates_and_regional_200m_semantics():

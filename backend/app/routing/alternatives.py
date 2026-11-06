@@ -43,7 +43,9 @@ def reconstruct_route_summary(
 
     nodata_mask, _ = compute_nodata_and_boundary_masks(graph.elevation, meta.nodata_value)
 
-    total_dist = 0.0
+    total_dist_2d = 0.0
+    total_dist_3d = 0.0
+    observed_3d_dist = 0.0
     elev_gain = 0.0
     elev_loss = 0.0
     slopes: list[float] = []
@@ -57,8 +59,10 @@ def reconstruct_route_summary(
     cost_hazard = 0.0
     cost_extra = 0.0
 
-    total_duration_seconds = 0.0
-    hazard_exposure_meters = 0.0
+    observed_duration_seconds = 0.0
+    observed_duration_step_count = 0
+    observed_hazard_meters = 0.0
+    unobserved_step_meters = 0.0
 
     valid_sample_count = 0
     valid_elev_sample_count = 0
@@ -114,10 +118,12 @@ def reconstruct_route_summary(
         )
         dz = (z_curr - z_prev) if (prev_valid and curr_valid) else 0.0
         d3d = math.sqrt(d2d**2 + dz**2)
-        total_dist += d3d
+        total_dist_2d += d2d
+        total_dist_3d += d3d
 
         if prev_valid and curr_valid:
             valid_elev_transition_count += 1
+            observed_3d_dist += d3d
             if dz > 0:
                 elev_gain += dz
             else:
@@ -136,16 +142,18 @@ def reconstruct_route_summary(
         slope_for_calc = slope_raw if slope_valid else 0.0
         rough_for_calc = rough_raw if rough_valid else 0.0
 
+        step_is_nodata = not (prev_valid and curr_valid and slope_valid and rough_valid)
+        if step_is_nodata:
+            unobserved_step_meters += d2d
+
         if (slope_valid and slope_raw > 12.0) or (rough_valid and rough_raw > 0.5):
-            hazard_exposure_meters += d3d
+            observed_hazard_meters += d3d if (prev_valid and curr_valid) else d2d
 
         extra_pen = 0.0
         if penalized_edges and ((prev_r, prev_c), (curr_r, curr_c)) in penalized_edges:
             extra_pen = penalized_edges[((prev_r, prev_c), (curr_r, curr_c))]
 
-        step_is_nodata = not (prev_valid and curr_valid and slope_valid and rough_valid)
-
-        # Reconcile exact edge cost using active cost model
+        # Reconcile exact edge cost using active cost model (unchanged)
         _, step_breakdown = calculate_edge_cost(
             distance_3d=d3d,
             slope_deg=slope_for_calc,
@@ -162,10 +170,12 @@ def reconstruct_route_summary(
         cost_hazard += step_breakdown["hazard_penalty"]
         cost_extra += step_breakdown["extra_penalty"]
 
-        # Motion profile: Rover nominal 0.15 m/s with slope-dependent derating
-        speed_mps = 0.15 * max(0.2, 1.0 - (slope_for_calc / 30.0))
-        step_time_sec = d3d / speed_mps
-        total_duration_seconds += step_time_sec
+        # Motion profile: Only accumulate duration when step elevation and slope are genuinely observed;
+        # never substitute 0.0 slope to produce an optimistic complete duration estimate.
+        if prev_valid and curr_valid and slope_valid:
+            speed_mps = 0.15 * max(0.2, 1.0 - (slope_raw / 30.0))
+            observed_duration_seconds += d3d / speed_mps
+            observed_duration_step_count += 1
 
         lon, lat = pixel_to_geo(
             curr_c,
@@ -189,8 +199,50 @@ def reconstruct_route_summary(
     max_slope: float | None = round(float(np.max(slopes)), 2) if slopes else None
     avg_rough: float | None = round(float(np.mean(roughnesses)), 3) if roughnesses else None
 
-    duration_hrs = total_duration_seconds / 3600.0
-    energy_idx = (total_dist * 0.001) + (elev_gain * 0.02)
+    num_steps = max(len(path_nodes) - 1, 0)
+    all_elev_transitions_valid = all_elevations_valid and (valid_elev_transition_count == num_steps)
+    all_duration_steps_valid = all_elev_transitions_valid and (
+        observed_duration_step_count == num_steps
+    )
+    all_steps_fully_observed = is_complete_measurement and (unobserved_step_meters == 0.0)
+
+    # Distance: distinguish complete 3D surface distance from horizontal 2D distance
+    horizontal_dist_val = round(total_dist_2d, 1)
+    if all_elev_transitions_valid:
+        surface_3d_dist_val: float | None = round(total_dist_3d, 1)
+        total_dist_val = round(total_dist_3d, 1)
+        dist_basis = "complete_3d_surface"
+    else:
+        surface_3d_dist_val = None
+        total_dist_val = horizontal_dist_val
+        dist_basis = "horizontal_2d_only_incomplete_elevation"
+
+    # Duration: complete only when all steps have observed elevation and slope
+    observed_dur_partial: float | None = (
+        round(observed_duration_seconds / 3600.0, 2) if observed_duration_step_count > 0 else None
+    )
+    estimated_dur_val: float | None = (
+        observed_dur_partial if all_duration_steps_valid else None
+    )
+
+    # Energy: complete only when all elevation transitions are observed
+    if all_elev_transitions_valid:
+        energy_val: float | None = round((total_dist_3d * 0.001) + (elev_gain * 0.02), 2)
+        observed_energy_partial: float | None = energy_val
+    else:
+        energy_val = None
+        observed_energy_partial = (
+            round((observed_3d_dist * 0.001) + (elev_gain * 0.02), 2)
+            if valid_elev_transition_count > 0
+            else None
+        )
+
+    # Hazard exposure: complete only when all steps are fully observed
+    observed_hazard_min = round(observed_hazard_meters, 1)
+    unobserved_dist_val = round(unobserved_step_meters, 1)
+    hazard_exposure_val: float | None = (
+        observed_hazard_min if all_steps_fully_observed else None
+    )
 
     # Distinguish science targets visited vs in proximity using Mars metric distance
     visited_target_ids: list[str] = []
@@ -220,15 +272,27 @@ def reconstruct_route_summary(
                 nearby_target_ids.append(target.id)
                 science_score += target.scientific_priority * 5.0
 
-    hazard_ratio = hazard_exposure_meters / max(total_dist, 1.0)
-    if max_slope is None or measured_coverage_fraction == 0.0:
-        risk_category = "high"
-    elif hazard_ratio >= 0.20 or max_slope >= 18.0:
-        risk_category = "high"
-    elif hazard_ratio >= 0.05 or max_slope >= 12.0:
-        risk_category = "moderate"
+    ref_dist_for_ratio = max(total_dist_3d if all_elev_transitions_valid else total_dist_2d, 1.0)
+    hazard_ratio = observed_hazard_meters / ref_dist_for_ratio
+    if all_steps_fully_observed:
+        risk_assessment_status = "complete_observed"
+        if hazard_ratio >= 0.20 or (max_slope is not None and max_slope >= 18.0):
+            risk_category = "high"
+        elif hazard_ratio >= 0.05 or (max_slope is not None and max_slope >= 12.0):
+            risk_category = "moderate"
+        else:
+            risk_category = "nominal"
+    elif measured_coverage_fraction == 0.0 and not slopes and not roughnesses:
+        risk_assessment_status = "unverified_no_valid_observations"
+        risk_category = "unverified_no_valid_terrain_data"
     else:
-        risk_category = "nominal"
+        risk_assessment_status = "incomplete_partial_observations"
+        if hazard_ratio >= 0.20 or (max_slope is not None and max_slope >= 18.0):
+            risk_category = "high_observed_incomplete_data"
+        elif hazard_ratio >= 0.05 or (max_slope is not None and max_slope >= 12.0):
+            risk_category = "moderate_observed_incomplete_data"
+        else:
+            risk_category = "unverified_incomplete_terrain_data"
 
     min_elev: float | None = round(float(min(elevations)), 1) if elevations else None
     max_elev: float | None = round(float(max(elevations)), 1) if elevations else None
@@ -236,7 +300,10 @@ def reconstruct_route_summary(
     loss_val: float | None = round(elev_loss, 1) if valid_elev_transition_count > 0 else None
 
     summary = RouteSummary(
-        total_distance_meters=round(total_dist, 1),
+        total_distance_meters=total_dist_val,
+        horizontal_distance_meters=horizontal_dist_val,
+        surface_3d_distance_meters=surface_3d_dist_val,
+        distance_measurement_basis=dist_basis,
         elevation_gain_meters=gain_val,
         elevation_loss_meters=loss_val,
         min_elevation_meters=min_elev,
@@ -247,12 +314,17 @@ def reconstruct_route_summary(
         data_coverage_fraction=measured_coverage_fraction,
         elevation_sample_coverage_fraction=elev_coverage_fraction,
         is_complete_measurement=is_complete_measurement,
-        estimated_duration_hours=round(duration_hrs, 2),
+        estimated_duration_hours=estimated_dur_val,
+        observed_duration_hours_partial=observed_dur_partial,
         motion_profile="rover_slope_derated_0.15mps",
-        energy_index=round(energy_idx, 2),
+        energy_index=energy_val,
+        observed_energy_index_partial=observed_energy_partial,
         science_score=round(science_score, 1),
-        hazard_exposure_meters=round(hazard_exposure_meters, 1),
+        hazard_exposure_meters=hazard_exposure_val,
+        observed_hazard_exposure_meters_min=observed_hazard_min,
+        unobserved_step_distance_meters=unobserved_dist_val,
         risk_category=risk_category,
+        risk_assessment_status=risk_assessment_status,
     )
 
     geometry = GeoJSONGeometry(type="LineString", coordinates=geojson_coords)

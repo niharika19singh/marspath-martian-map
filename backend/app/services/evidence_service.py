@@ -18,12 +18,18 @@ mission success, or calibrated probability of mechanical failure.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import numpy as np
 from scipy import ndimage
 
-from backend.app.geospatial.crs import pixel_to_geo
+from backend.app.data.manifest import DATA_CATALOG_MANIFEST
+from backend.app.geospatial.crs import (
+    SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS,
+    SUPPORTED_PROJECTED_CRS_IDENTIFIERS,
+    pixel_to_geo,
+)
 from backend.app.geospatial.raster_loader import RasterMetadata
 from backend.app.routing.cost_model import calculate_edge_cost
 from backend.app.routing.graph_builder import TerrainGridGraph
@@ -37,6 +43,64 @@ from backend.app.schemas.routes import (
     RouteSegment,
     SourceEvidence,
 )
+
+# Explicit registry of recognized Mars CRS authority identifiers (extensible for future Mars products)
+ESTABLISHED_MARS_CRS_IDENTIFIERS: set[str] = (
+    set(SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS)
+    | set(SUPPORTED_PROJECTED_CRS_IDENTIFIERS)
+    | {
+        "IAU_2015:49900",
+        "IAU2015:49900",
+        "GCS_MARS_2000",
+        "MARS_2000_SPHERE",
+        "URN:OGC:DEF:CRS:IAU:2015:49900",
+        "MARS_LOCAL_EQUIRECTANGULAR_METRIC",
+    }
+)
+
+# Explicit registry of recognized Mars vertical reference datums (extensible via DATA_CATALOG_MANIFEST or register_mars_vertical_datum)
+ESTABLISHED_MARS_VERTICAL_DATUMS: set[str] = {
+    "MARS AREOID (MOLA 0M REFERENCE DATUM)",
+    "MARS_2000_AREOID_MOLA_0M",
+    "MARS AREOID (MOLA MEGDR IAU2000)",
+    "MARS 2000 MOLA AREOID (R = 3396190.0 M)",
+    "MARS 2000 MOLA AEROID (R = 3396190.0 M)",
+    "MARS_AREOID",
+    "MOLA_AREOID",
+    "MARS_2000_SPHERE_3396190M",
+    "MARS_IAU2000_SPHERE",
+    "MARS_REFERENCE_ELLIPSOID_IAU2000",
+}
+
+_PROJ_MARS_RADIUS_RE = re.compile(
+    r"(?:^|\s)\+(?:R|a)=3396190(?:\.0+)?(?:\s|$)", re.IGNORECASE
+)
+_PROJ_VALID_PROJECTION_RE = re.compile(
+    r"(?:^|\s)\+proj=(?:longlat|latlong|eqc|sinu|stere|merc|tmerc|laea)(?:\s|$)",
+    re.IGNORECASE,
+)
+_WKT_MARS_SPHEROID_RE = re.compile(
+    r'(?:SPHEROID|ELLIPSOID)\s*\[\s*"[^"]+"\s*,\s*3396190(?:\.0+)?\s*,',
+    re.IGNORECASE,
+)
+_WKT_MARS_AUTHORITY_RE = re.compile(
+    r'(?:AUTHORITY|ID)\s*\[\s*"(?:IAU|IAU2000|IAU_2000|IAU_2015|ESRI)"\s*,\s*"?(?:49900|104971)"?\s*\]',
+    re.IGNORECASE,
+)
+
+
+def register_mars_crs_identifier(crs_identifier: str) -> None:
+    """Explicit mechanism to register additional validated Mars CRS identifiers for future datasets."""
+    cleaned = crs_identifier.strip().upper()
+    if cleaned:
+        ESTABLISHED_MARS_CRS_IDENTIFIERS.add(cleaned)
+
+
+def register_mars_vertical_datum(vertical_datum: str) -> None:
+    """Explicit mechanism to register additional validated Mars vertical datums for future datasets."""
+    cleaned = vertical_datum.strip().upper()
+    if cleaned:
+        ESTABLISHED_MARS_VERTICAL_DATUMS.add(cleaned)
 
 
 def compute_nodata_and_boundary_masks(
@@ -69,33 +133,69 @@ class EvidenceService:
 
     @staticmethod
     def _is_established_mars_crs(crs_identifier: str | None) -> bool:
-        """Returns True only if `crs_identifier` is an established Mars planetary CRS."""
+        """
+        Returns True ONLY if `crs_identifier` is:
+        1. An explicitly registered Mars CRS identifier (or registered in DATA_CATALOG_MANIFEST), OR
+        2. A validated PROJ definition declaring a supported projection and the IAU Mars radius (3,396,190 m), OR
+        3. A validated OGC WKT CRS definition declaring a Mars spheroid/ellipsoid (R=3,396,190 m) or IAU/ESRI Mars authority code.
+        Arbitrary strings merely containing the substring 'Mars' are strictly rejected.
+        """
         if not crs_identifier or not crs_identifier.strip():
             return False
-        norm = crs_identifier.strip().upper()
+        raw = crs_identifier.strip()
+        norm = raw.upper()
         if norm in ("UNKNOWN", "UNSPECIFIED", "UNKNOWN / UNSPECIFIED", "NONE"):
             return False
-        return any(
-            token in norm
-            for token in (
-                "IAU2000:49900",
-                "IAU_2000:49900",
-                "IAU_2015:49900",
-                "ESRI:104971",
-                "MARS",
-                "49900",
-                "104971",
-                "3396190",
+        # Reject any Earth WGS84 / Web Mercator references
+        if "WGS84" in norm or "6378137" in norm or "EPSG:4326" in norm or "EPSG:3857" in norm:
+            return False
+
+        catalog_crs = {
+            str(entry.get("crs", "")).strip().upper()
+            for entry in DATA_CATALOG_MANIFEST
+            if entry.get("crs")
+        }
+        if norm in ESTABLISHED_MARS_CRS_IDENTIFIERS or norm in catalog_crs:
+            return True
+
+        # Check validated PROJ string
+        if norm.startswith("+PROJ="):
+            return bool(
+                _PROJ_VALID_PROJECTION_RE.search(raw) and _PROJ_MARS_RADIUS_RE.search(raw)
             )
-        )
+
+        # Check validated OGC WKT string
+        if norm.startswith(("GEOGCS[", "PROJCS[", "GEOGCRS[", "PROJCRS[", "COMPD_CS[")):
+            return bool(
+                _WKT_MARS_SPHEROID_RE.search(raw) or _WKT_MARS_AUTHORITY_RE.search(raw)
+            )
+
+        return False
 
     @staticmethod
     def _is_known_vertical_datum(vertical_datum: str | None) -> bool:
-        """Returns True only if `vertical_datum` is explicitly declared and not unknown/unspecified."""
+        """
+        Returns True ONLY if `vertical_datum` matches an explicitly recognized Mars vertical
+        datum in `ESTABLISHED_MARS_VERTICAL_DATUMS` or `DATA_CATALOG_MANIFEST`.
+        Arbitrary non-empty strings and synthetic datums are rejected.
+        """
         if not vertical_datum or not vertical_datum.strip():
             return False
-        norm = vertical_datum.strip().lower()
-        return "unknown" not in norm and "unspecified" not in norm and norm != "none"
+        norm = vertical_datum.strip().upper()
+        if (
+            "UNKNOWN" in norm
+            or "UNSPECIFIED" in norm
+            or "SYNTHETIC" in norm
+            or norm == "NONE"
+        ):
+            return False
+
+        catalog_datums = {
+            str(entry.get("vertical_datum", "")).strip().upper()
+            for entry in DATA_CATALOG_MANIFEST
+            if entry.get("vertical_datum")
+        }
+        return norm in ESTABLISHED_MARS_VERTICAL_DATUMS or norm in catalog_datums
 
     @staticmethod
     def build_source_evidence(
@@ -333,7 +433,7 @@ class EvidenceService:
         if not cls._is_established_mars_crs(source.crs_identifier):
             base_segment_flags.append("unknown_crs")
 
-        if not cls._is_known_vertical_datum(source.vertical_datum):
+        if not source.is_synthetic and not cls._is_known_vertical_datum(source.vertical_datum):
             base_segment_flags.append("unknown_vertical_datum")
 
         if not resolution.obstacle_detection_capable:
