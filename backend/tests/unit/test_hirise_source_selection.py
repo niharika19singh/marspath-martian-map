@@ -1,5 +1,7 @@
+import math
 import os
 import tempfile
+import unittest.mock as mock
 
 import numpy as np
 import pytest
@@ -7,10 +9,17 @@ import rasterio
 from rasterio.transform import Affine, from_origin
 
 from backend.app.core.exceptions import ComputationalBoundExceededError
+from backend.app.data import manifest
+from backend.app.data.manifest import DATA_CATALOG_MANIFEST
 from backend.app.data.providers.hirise import HiRISERasterProvider
 from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
 from backend.app.geospatial.crs import METERS_PER_DEGREE_LATITUDE, meters_per_degree_lon
-from backend.app.geospatial.raster_loader import RasterMetadata
+from backend.app.geospatial.raster_loader import (
+    RasterMetadata,
+    extract_pds3_label_dict,
+    load_raster_file,
+    parse_pds3_hirise_dtm_label,
+)
 from backend.app.schemas.coordinates import MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode
 from backend.app.schemas.routes import (
@@ -21,6 +30,145 @@ from backend.app.schemas.routes import (
 from backend.app.services.data_catalog import DataCatalogService
 from backend.app.services.route_service import RouteService
 from backend.app.services.terrain_source_service import aggregate_corridor_hazard_preserving
+
+
+def _write_hirise_pds3_img(
+    path: str,
+    elev: np.ndarray,
+    min_lon: float = 77.410,
+    max_lat: float = 18.420,
+    res_meters: float = 1.0,
+    note_text: str | None = None,
+    scaling_factor: float = 1.0,
+    offset: float = 0.0,
+    sample_bits: int = 32,
+    sample_type: str = "PC_REAL",
+    missing_constant_hex: str = "16#FF7FFFFB#",
+    core_null: int | float | None = None,
+    target_name: str = "MARS",
+    product_id: str = "DTEEC_045994_1985_046060_1985_U01",
+    data_set_id: str = "MRO-M-HIRISE-5-DTM-V1.0",
+    center_lat: float = 15.0,
+    center_lon: float = 77.44,
+) -> None:
+    """Helper to generate a deterministic PDS3 HiRISE DTM .IMG raster fixture."""
+    h, w = elev.shape
+    bytes_per_sample = sample_bits // 8
+    record_bytes = w * bytes_per_sample
+
+    default_note = (
+        "Pixel values in this file represent elevations in meters above the "
+        "martian equipotential surface (Mars 2000 Datum) defined by Smith, et al. (2001). "
+        "Conversion from pixel units to geophysical units is given by the keyvalues for "
+        "SCALING_FACTOR and OFFSET. This DTM was produced using ISIS and SOCET Set "
+        "(copyright BAE Systems) software as described in Kirk et al. (2008)."
+    )
+    actual_note = note_text if note_text is not None else default_note
+    note_clause = f'  NOTE             = "{actual_note}"\r\n' if actual_note != "" else ""
+    null_clause = (
+        f"  CORE_NULL        = {core_null}\r\n"
+        if core_null is not None
+        else (
+            f"  MISSING_CONSTANT = {missing_constant_hex}\r\n"
+            if missing_constant_hex
+            else ""
+        )
+    )
+
+    rad_lat = math.radians(center_lat)
+    r_mars = 3394839.8133163
+    x_origin = r_mars * math.radians(min_lon - center_lon) * math.cos(rad_lat)
+    y_origin = r_mars * math.radians(max_lat)
+
+    sample_proj_offset = 0.5 - (x_origin / res_meters)
+    line_proj_offset = (y_origin / res_meters) - 0.5
+
+    min_lat = max_lat - math.degrees((h * res_meters) / r_mars)
+    max_lon = min_lon + math.degrees((w * res_meters) / (r_mars * math.cos(rad_lat)))
+
+    label_body = (
+        "PDS_VERSION_ID            = PDS3\r\n"
+        "RECORD_TYPE               = FIXED_LENGTH\r\n"
+        f"RECORD_BYTES              = {record_bytes}\r\n"
+        "FILE_RECORDS              = __FILE_RECORDS__\r\n"
+        "^IMAGE                    = __IMAGE_PTR__\r\n"
+        f'DATA_SET_ID               = "{data_set_id}"\r\n'
+        f'DATA_SET_NAME             = "MRO MARS HIGH RESOLUTION IMAGING SCIENCE EXPERIMENT DTM V1.0"\r\n'
+        'PRODUCER_INSTITUTION_NAME = "UNIVERSITY OF ARIZONA"\r\n'
+        'PRODUCER_ID               = "UA"\r\n'
+        'PRODUCER_FULL_NAME        = "ALFRED MCEWEN, USGS-ASTROGEOLOGY"\r\n'
+        f'PRODUCT_ID                = "{product_id}"\r\n'
+        'PRODUCT_VERSION_ID        = "1"\r\n'
+        'INSTRUMENT_HOST_NAME      = "MARS RECONNAISSANCE ORBITER"\r\n'
+        'INSTRUMENT_HOST_ID        = "MRO"\r\n'
+        'INSTRUMENT_NAME           = "HIGH RESOLUTION IMAGING SCIENCE EXPERIMENT"\r\n'
+        'INSTRUMENT_ID             = "HIRISE"\r\n'
+        f'TARGET_NAME               = "{target_name}"\r\n'
+        "SOURCE_PRODUCT_ID         = (ESP_045994_1985, ESP_046060_1985)\r\n"
+        "OBJECT = IMAGE\r\n"
+        f"  LINES            = {h}\r\n"
+        f"  LINE_SAMPLES     = {w}\r\n"
+        "  BANDS            = 1\r\n"
+        f"  OFFSET           = {offset}\r\n"
+        f"  SCALING_FACTOR   = {scaling_factor}\r\n"
+        f"{note_clause}"
+        f"  SAMPLE_BITS      = {sample_bits}\r\n"
+        f"  SAMPLE_TYPE      = {sample_type}\r\n"
+        f"{null_clause}"
+        "  VALID_MINIMUM    = -2679.20\r\n"
+        "  VALID_MAXIMUM    = -2388.31\r\n"
+        "END_OBJECT = IMAGE\r\n"
+        "OBJECT = IMAGE_MAP_PROJECTION\r\n"
+        '  ^DATA_SET_MAP_PROJECTION     = "DSMAP.CAT"\r\n'
+        '  MAP_PROJECTION_TYPE          = "EQUIRECTANGULAR"\r\n'
+        "  PROJECTION_LATITUDE_TYPE     = PLANETOCENTRIC\r\n"
+        "  A_AXIS_RADIUS                = 3394.8398133163 <KM>\r\n"
+        "  B_AXIS_RADIUS                = 3394.8398133163 <KM>\r\n"
+        "  C_AXIS_RADIUS                = 3394.8398133163 <KM>\r\n"
+        "  COORDINATE_SYSTEM_NAME       = PLANETOCENTRIC\r\n"
+        "  POSITIVE_LONGITUDE_DIRECTION = EAST\r\n"
+        "  KEYWORD_LATITUDE_TYPE        = PLANETOCENTRIC\r\n"
+        f"  CENTER_LATITUDE              = {center_lat} <DEG>\r\n"
+        f"  CENTER_LONGITUDE             = {center_lon} <DEG>\r\n"
+        "  LINE_FIRST_PIXEL             = 1\r\n"
+        f"  LINE_LAST_PIXEL              = {h}\r\n"
+        "  SAMPLE_FIRST_PIXEL           = 1\r\n"
+        f"  SAMPLE_LAST_PIXEL            = {w}\r\n"
+        "  MAP_PROJECTION_ROTATION      = 0.0 <DEG>\r\n"
+        "  MAP_RESOLUTION               = 58684.0491709 <PIX/DEG>\r\n"
+        f"  MAP_SCALE                    = {res_meters} <METERS/PIXEL>\r\n"
+        f"  MAXIMUM_LATITUDE             = {max_lat} <DEG>\r\n"
+        f"  MINIMUM_LATITUDE             = {min_lat} <DEG>\r\n"
+        f"  LINE_PROJECTION_OFFSET       = {line_proj_offset:.6f} <PIXEL>\r\n"
+        f"  SAMPLE_PROJECTION_OFFSET     = {sample_proj_offset:.6f} <PIXEL>\r\n"
+        f"  EASTERNMOST_LONGITUDE        = {max_lon} <DEG>\r\n"
+        f"  WESTERNMOST_LONGITUDE        = {min_lon} <DEG>\r\n"
+        "END_OBJECT = IMAGE_MAP_PROJECTION\r\n"
+        "END\r\n"
+    )
+
+    label_bytes = label_body.encode("ascii")
+    num_hdr_records = int(np.ceil(len(label_bytes) / record_bytes))
+    image_ptr = num_hdr_records + 1
+    total_records = num_hdr_records + h
+
+    label_text = label_body.replace("__FILE_RECORDS__", str(total_records).ljust(10))
+    label_text = label_text.replace("__IMAGE_PTR__", str(image_ptr).ljust(10))
+    raw_label = label_text.encode("ascii")
+    total_hdr_bytes = num_hdr_records * record_bytes
+    if len(raw_label) > total_hdr_bytes:
+        num_hdr_records += 1
+        image_ptr = num_hdr_records + 1
+        total_records = num_hdr_records + h
+        label_text = label_body.replace("__FILE_RECORDS__", str(total_records).ljust(10))
+        label_text = label_text.replace("__IMAGE_PTR__", str(image_ptr).ljust(10))
+        raw_label = label_text.encode("ascii")
+        total_hdr_bytes = num_hdr_records * record_bytes
+
+    padded_header = raw_label.ljust(total_hdr_bytes, b" ")
+    with open(path, "wb") as f:
+        f.write(padded_header)
+        f.write(elev.tobytes())
 
 
 def _write_hirise_geotiff(
@@ -1395,3 +1543,438 @@ def test_22_concurrent_route_requests_never_mutate_shared_source_terrain():
         for p in (mola_path, hi_path):
             if os.path.exists(p):
                 os.remove(p)
+
+
+def test_23_pds3_dtm_official_note_convention_and_mars2000_vertical_reference():
+    """
+    Phase 4.2 Test (1 & 2):
+    - Parses official NASA/JPL/UArizona HiRISE PDS3 DTM label semantics.
+    - Recognizes the documented elevation-in-metres statement without accepting arbitrary prose.
+    - Recognizes the Mars 2000 equipotential surface vertical reference datum.
+    - Validates recognized variants without inventing unstated datums.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_hi:
+        hi_path = tmp_hi.name
+
+    try:
+        elev = np.full((25, 25), -2480.0, dtype=np.float32)
+        _write_hirise_pds3_img(
+            hi_path,
+            elev,
+            min_lon=77.410,
+            max_lat=18.420,
+            res_meters=1.0,
+            note_text=(
+                "Pixel values in this file represent elevations in meters above the "
+                "martian equipotential surface (Mars 2000 Datum) defined by Smith, et al. (2001). "
+                "Conversion from pixel units to geophysical units is given by the keyvalues for "
+                "SCALING_FACTOR and OFFSET. This DTM was produced using ISIS and SOCET Set "
+                "(copyright BAE Systems) software as described in Kirk et al. (2008)."
+            ),
+        )
+
+        pds_dict = extract_pds3_label_dict(hi_path)
+        assert pds_dict is not None
+        assert pds_dict.get("PRODUCT_ID") == "DTEEC_045994_1985_046060_1985_U01"
+
+        raster = load_raster_file(hi_path)
+        assert raster.metadata.vertical_units == "meters"
+        assert (
+            raster.metadata.vertical_datum
+            == "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"
+        )
+        assert raster.metadata.metadata_tags["_HAS_PDS3_LABEL"] == "true"
+        assert raster.metadata.metadata_tags["PRODUCT_ID"] == "DTEEC_045994_1985_046060_1985_U01"
+
+        prov = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+        val = prov.validate_hirise_raster()
+        assert val.is_valid is True
+        assert val.status_code == "ready"
+
+        # Test variant NOTE declarations
+        var_note_1 = "Pixel values in this file represent elevations in meters above Mars 2000 Datum."
+        res_v1 = parse_pds3_hirise_dtm_label({"IMAGE": {"NOTE": var_note_1}})
+        assert res_v1.is_valid_dtm is True
+        assert res_v1.vertical_units == "meters"
+        assert res_v1.vertical_datum == "Mars 2000 Datum"
+
+        var_note_2 = "Pixel values in this file represent elevations in meters above Martian Equipotential Surface."
+        res_v2 = parse_pds3_hirise_dtm_label({"IMAGE": {"NOTE": var_note_2}})
+        assert res_v2.is_valid_dtm is True
+        assert res_v2.vertical_datum == "Mars 2000 Datum (Martian Equipotential Surface)"
+
+        var_note_3 = "Pixel values in this file represent elevations in metres above Mars Areoid (MOLA 0m reference datum)."
+        res_v3 = parse_pds3_hirise_dtm_label({"IMAGE": {"NOTE": var_note_3}})
+        assert res_v3.is_valid_dtm is True
+        assert res_v3.vertical_datum == "Mars Areoid (MOLA 0m reference datum)"
+    finally:
+        if os.path.exists(hi_path):
+            os.remove(hi_path)
+
+
+def test_24_pds3_dtm_scaling_factor_offset_and_nodata_preservation():
+    """
+    Phase 4.2 Test (3 & 4):
+    - Reads and applies PDS3 SCALING_FACTOR and OFFSET transformations.
+    - Preserves NoData values during transformation without converting missing pixels to 0.0.
+    - Accurately converts metric multiples (e.g. cm) declared in NOTE when applicable.
+    """
+    with (
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_f32,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_i16,
+    ):
+        f32_path = tmp_f32.name
+        i16_path = tmp_i16.name
+
+    try:
+        # Case A: 32-bit float with SCALING_FACTOR=0.5, OFFSET=-2500.0, and 16#FF7FFFFB# missing constant
+        # Raw value 100.0 -> elevation = 100.0 * 0.5 + (-2500.0) = -2450.0 meters.
+        arr_f32 = np.full((20, 20), 100.0, dtype="<f4")
+        # Hex 0xFF7FFFFB in big-endian float32 is ~ -3.4028227e+38
+        arr_f32[0, 0] = -3.4028226550889045e38
+        arr_f32[1, 1] = -9999.0
+
+        _write_hirise_pds3_img(
+            f32_path,
+            arr_f32,
+            scaling_factor=0.5,
+            offset=-2500.0,
+            missing_constant_hex="16#FF7FFFFB#",
+        )
+
+        r_f32 = load_raster_file(f32_path)
+        assert r_f32.nodata_mask[0, 0] is True or r_f32.nodata_mask[0, 0] == 1
+        assert r_f32.nodata_mask[1, 1] is True or r_f32.nodata_mask[1, 1] == 1
+        assert r_f32.nodata_mask[5, 5] is False or r_f32.nodata_mask[5, 5] == 0
+        assert r_f32.data[5, 5] == pytest.approx(-2450.0, abs=1e-3)
+        assert np.isnan(r_f32.get_elevation_at_pixel(0, 0))
+        assert np.isnan(r_f32.get_elevation_at_pixel(1, 1))
+        assert r_f32.get_elevation_at_pixel(5, 5) == pytest.approx(-2450.0, abs=1e-3)
+
+        # Case B: 16-bit integer DTM with CORE_NULL = -32768, SCALING_FACTOR=0.25, OFFSET=-2400.0
+        # Raw value 200 -> elevation = 200 * 0.25 + (-2400.0) = -2350.0 meters.
+        arr_i16 = np.full((20, 20), 200, dtype="<i2")
+        arr_i16[0, 0] = -32768
+
+        _write_hirise_pds3_img(
+            i16_path,
+            arr_i16,
+            sample_bits=16,
+            sample_type="LSB_INTEGER",
+            core_null=-32768,
+            scaling_factor=0.25,
+            offset=-2400.0,
+        )
+
+        r_i16 = load_raster_file(i16_path)
+        assert r_i16.nodata_mask[0, 0] is True or r_i16.nodata_mask[0, 0] == 1
+        assert r_i16.nodata_mask[5, 5] is False or r_i16.nodata_mask[5, 5] == 0
+        assert r_i16.data[5, 5] == pytest.approx(-2350.0, abs=1e-3)
+        assert np.isnan(r_i16.get_elevation_at_pixel(0, 0))
+    finally:
+        for p in (f32_path, i16_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def test_25_pds3_dtm_missing_unknown_and_unsupported_label_rejections():
+    """
+    Phase 4.2 Test (5, 6, 7):
+    - Rejects missing NOTE declaration.
+    - Rejects radiometric I/F or orthoimage note text.
+    - Rejects non-metric or unsupported units (e.g. feet).
+    - Rejects non-Mars planetary datum (e.g. WGS84, Earth sea level).
+    - Rejects 8-bit browse image formats.
+    - Rejects non-Mars target name.
+    - Rejects conflicting datum declarations.
+    - Falls back to regional MOLA-HRSC with explicit rejection status.
+    """
+    with (
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_no_note,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_feet,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_radio,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_earth,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_moon,
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_8bit,
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_mola,
+    ):
+        no_note_path = tmp_no_note.name
+        feet_path = tmp_feet.name
+        radio_path = tmp_radio.name
+        earth_path = tmp_earth.name
+        moon_path = tmp_moon.name
+        bit8_path = tmp_8bit.name
+        mola_path = tmp_mola.name
+
+    try:
+        _write_mola_geotiff(mola_path)
+        elev_f32 = np.full((20, 20), -2480.0, dtype=np.float32)
+
+        # 1. Missing NOTE
+        _write_hirise_pds3_img(no_note_path, elev_f32, note_text="")
+        val1 = HiRISERasterProvider(dem_path=no_note_path, enabled=True).validate_hirise_raster()
+        assert val1.is_valid is False
+        assert val1.status_code == "rejected_unknown_vertical_units"
+
+        # 2. Feet units in NOTE
+        _write_hirise_pds3_img(
+            feet_path,
+            elev_f32,
+            note_text="Pixel values in this file represent elevations in feet above the Mars 2000 Datum.",
+        )
+        val2 = HiRISERasterProvider(dem_path=feet_path, enabled=True).validate_hirise_raster()
+        assert val2.is_valid is False
+        assert val2.status_code == "rejected_unsupported_vertical_units"
+
+        # 3. Radiometric / Orthoimage NOTE
+        _write_hirise_pds3_img(
+            radio_path,
+            elev_f32,
+            note_text="The conversion from DN to I/F (intensity/flux) is given by SCALING_FACTOR.",
+        )
+        val3 = HiRISERasterProvider(dem_path=radio_path, enabled=True).validate_hirise_raster()
+        assert val3.is_valid is False
+        assert val3.status_code == "rejected_non_elevation_raster"
+
+        # 4. Earth datum in NOTE
+        _write_hirise_pds3_img(
+            earth_path,
+            elev_f32,
+            note_text="Pixel values represent elevations in meters above Earth WGS84 mean sea level.",
+        )
+        val4 = HiRISERasterProvider(dem_path=earth_path, enabled=True).validate_hirise_raster()
+        assert val4.is_valid is False
+        assert val4.status_code == "rejected_invalid_crs"
+
+        # 5. Non-Mars TARGET_NAME
+        _write_hirise_pds3_img(moon_path, elev_f32, target_name="MOON")
+        val5 = HiRISERasterProvider(dem_path=moon_path, enabled=True).validate_hirise_raster()
+        assert val5.is_valid is False
+        assert val5.status_code == "rejected_invalid_crs"
+
+        # 6. 8-bit sample bits
+        elev_u8 = np.full((20, 20), 128, dtype=np.uint8)
+        _write_hirise_pds3_img(
+            bit8_path, elev_u8, sample_bits=8, sample_type="MSB_UNSIGNED_INTEGER"
+        )
+        val6 = HiRISERasterProvider(dem_path=bit8_path, enabled=True).validate_hirise_raster()
+        assert val6.is_valid is False
+        assert val6.status_code == "rejected_non_elevation_raster"
+
+        # Verify route fallback to regional MOLA with explicit status reporting
+        mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
+        mola_prov.use_real_dem = True
+        svc = RouteService(
+            provider=mola_prov,
+            hirise_provider=HiRISERasterProvider(dem_path=feet_path, enabled=True),
+        )
+        resp = svc.plan_route(
+            RoutePlanRequest(
+                start=MarsCoordinate(lon=77.4106, lat=18.4094),
+                destination=MarsCoordinate(lon=77.4114, lat=18.4086),
+            )
+        )
+        assert resp.source_selection.hirise_selected is False
+        assert resp.source_selection.hirise_status == "rejected_unsupported_vertical_units"
+        assert resp.source_selection.selected_source_tier == "regional_blended_dem"
+    finally:
+        for p in (no_note_path, feet_path, radio_path, earth_path, moon_path, bit8_path, mola_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def test_26_pds3_img_and_geotiff_validation_parity_and_route_equivalence():
+    """
+    Phase 4.2 Test (8):
+    - Confirms validation and routing parity between GeoTIFF and PDS3 IMG formats.
+    - Both formats validate correctly, extract identical corridors, and yield equivalent routes.
+    """
+    with (
+        tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_pds3,
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_gtiff,
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_mola,
+    ):
+        pds3_path = tmp_pds3.name
+        gtiff_path = tmp_gtiff.name
+        mola_path = tmp_mola.name
+
+    try:
+        _write_mola_geotiff(mola_path)
+
+        r_grid, c_grid = np.meshgrid(np.arange(200), np.arange(200), indexing="ij")
+        elev = (-2485.0 + 0.04 * r_grid + 0.03 * c_grid).astype(np.float32)
+
+        _write_hirise_pds3_img(
+            pds3_path,
+            elev,
+            min_lon=77.410,
+            max_lat=18.420,
+            res_meters=1.0,
+        )
+        _write_hirise_geotiff(
+            gtiff_path,
+            elev,
+            min_lon=77.410,
+            max_lat=18.420,
+            res_meters=1.0,
+            band_unit="m",
+            tags={"VERTICAL_DATUM": "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"},
+        )
+
+        pds3_val = HiRISERasterProvider(dem_path=pds3_path, enabled=True).validate_hirise_raster()
+        gtiff_val = HiRISERasterProvider(dem_path=gtiff_path, enabled=True).validate_hirise_raster()
+        assert pds3_val.is_valid is True
+        assert gtiff_val.is_valid is True
+        assert pds3_val.status_code == "ready"
+        assert gtiff_val.status_code == "ready"
+
+        mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
+        mola_prov.use_real_dem = True
+
+        req = RoutePlanRequest(
+            start=MarsCoordinate(lon=77.4112, lat=18.4190),
+            destination=MarsCoordinate(lon=77.4122, lat=18.4182),
+        )
+
+        svc_pds3 = RouteService(
+            provider=mola_prov,
+            hirise_provider=HiRISERasterProvider(dem_path=pds3_path, enabled=True),
+        )
+        resp_pds3 = svc_pds3.plan_route(req)
+
+        svc_gtiff = RouteService(
+            provider=mola_prov,
+            hirise_provider=HiRISERasterProvider(dem_path=gtiff_path, enabled=True),
+        )
+        resp_gtiff = svc_gtiff.plan_route(req)
+
+        assert resp_pds3.source_selection.hirise_selected is True
+        assert resp_gtiff.source_selection.hirise_selected is True
+        assert (
+            resp_pds3.routes[0].summary.total_distance_meters
+            == pytest.approx(resp_gtiff.routes[0].summary.total_distance_meters, abs=1.0)
+        )
+        assert resp_pds3.routes[0].total_cost == pytest.approx(resp_gtiff.routes[0].total_cost, abs=1.0)
+        assert (
+            resp_pds3.routes[0].evidence_passport.source.vertical_datum
+            == resp_gtiff.routes[0].evidence_passport.source.vertical_datum
+        )
+    finally:
+        for p in (pds3_path, gtiff_path, mola_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def test_27_pds3_provenance_attribution_no_redundant_hashing_and_unverified_status():
+    """
+    Phase 4.2 Test (9, 10, 11):
+    - Confirms that genuine HiRISE DTM identity (DTEEC_045994_1985_046060_1985_U01) is preserved.
+    - Avoids attributing different products (e.g. ESP_037803) merely because coverage overlaps.
+    - Keeps provenance status as `valid_numeric_raster_unverified_source` when no matching authoritative hash exists.
+    - Avoids unnecessary full-file MD5 hashing when no matching catalog MD5 exists.
+    - Reuses cached SHA-256 and provenance across repeated calls.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".IMG", delete=False) as tmp_hi:
+        hi_path = tmp_hi.name
+
+    try:
+        elev = np.full((25, 25), -2480.0, dtype=np.float32)
+        _write_hirise_pds3_img(
+            hi_path,
+            elev,
+            product_id="DTEEC_045994_1985_046060_1985_U01",
+        )
+
+        HiRISERasterProvider.clear_process_cache()
+        prov = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+
+        with mock.patch("backend.app.data.manifest._compute_file_digest", wraps=manifest._compute_file_digest) as mock_digest:
+            p1 = prov.get_provenance()
+            assert mock_digest.call_count == 0  # Zero MD5 full-file passes!
+
+            assert p1["declared_product_id"] == "DTEEC_045994_1985_046060_1985_U01"
+            assert p1["matched_catalog_product_id"] == "DTEEC_045994_1985_046060_1985_U01"
+            assert p1["official_product_id"] is None
+            assert p1["source_checksum_verified"] is False
+            assert p1["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+            assert p1["file_format"] == "PDS3 IMG"
+            assert p1["pds3_label_metadata"] is not None
+            assert p1["pds3_label_metadata"]["product_id"] == "DTEEC_045994_1985_046060_1985_U01"
+
+            # Second provenance call: cached, zero additional file digest calls
+            p2 = prov.get_provenance()
+            assert mock_digest.call_count == 0
+            assert p2["file_sha256"] == p1["file_sha256"]
+
+        # When authoritative checksum is registered in manifest, transitions to verified_source
+        file_sha = p1["file_sha256"]
+        dteec_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "DTEEC_045994_1985_046060_1985_U01")
+        old_sha = dteec_entry.get("sha256")
+        dteec_entry["sha256"] = file_sha
+        try:
+            HiRISERasterProvider.clear_process_cache()
+            p_auth = HiRISERasterProvider(dem_path=hi_path, enabled=True).get_provenance()
+            assert p_auth["real_data_validation_status"] == "verified_source"
+            assert p_auth["official_product_id"] == "DTEEC_045994_1985_046060_1985_U01"
+            assert p_auth["source_checksum_verified"] is True
+            assert p_auth["provenance_verification_method"] == "authoritative_manifest_sha256_match"
+        finally:
+            dteec_entry["sha256"] = old_sha
+    finally:
+        if os.path.exists(hi_path):
+            os.remove(hi_path)
+
+
+@pytest.mark.skipif(
+    not os.path.exists("/tmp/DTEEC_045994_1985_046060_1985_U01.IMG"),
+    reason="Real official HiRISE PDS3 DTM file not present on local machine",
+)
+def test_28_real_hirise_dtm_pds3_loading_and_route_smoke():
+    """
+    Phase 4.2 Test: Real-data validation and route planning smoke test using the genuine
+    NASA/JPL/UArizona 381 MB HiRISE PDS3 DTM (DTEEC_045994_1985_046060_1985_U01.IMG).
+    """
+    real_path = "/tmp/DTEEC_045994_1985_046060_1985_U01.IMG"
+    hi_prov = HiRISERasterProvider(dem_path=real_path, enabled=True)
+    val = hi_prov.validate_hirise_raster()
+
+    assert val.is_valid is True
+    assert val.status_code == "ready"
+    assert val.raster is not None
+    assert val.raster.metadata.width == 6673
+    assert val.raster.metadata.height == 14266
+    assert val.raster.metadata.vertical_units == "meters"
+    assert "Mars 2000 Datum" in val.raster.metadata.vertical_datum
+
+    prov = hi_prov.get_provenance()
+    assert prov["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+    assert prov["file_format"] == "PDS3 IMG"
+    assert prov["pds3_label_metadata"]["product_id"] == "DTEEC_045994_1985_046060_1985_U01"
+
+    # Plan route inside usable HiRISE delta footprint
+    mola_prov = MOLAHRSCRasterProvider()
+    svc = RouteService(provider=mola_prov, hirise_provider=hi_prov)
+
+    req_in = RoutePlanRequest(
+        start=MarsCoordinate(lon=77.435, lat=18.420),
+        destination=MarsCoordinate(lon=77.438, lat=18.423),
+    )
+    resp_in = svc.plan_route(req_in)
+    assert resp_in.status == "success"
+    assert resp_in.source_selection.hirise_selected is True
+    assert resp_in.source_selection.selected_source_id == "DTEEC_045994_1985_046060_1985_U01"
+    assert resp_in.source_selection.selected_source_tier == "localized_high_resolution_dtm"
+    assert resp_in.source_selection.native_resolution_meters == pytest.approx(1.01, abs=0.05)
+    ev = resp_in.routes[0].evidence_passport
+    assert "Mars 2000 Datum" in ev.source.vertical_datum
+    assert ev.quality_tier == EvidenceQualityTier.UNVERIFIED
+
+    # Plan route outside footprint -> MOLA fallback
+    req_out = RoutePlanRequest(
+        start=MarsCoordinate(lon=77.20, lat=18.30),
+        destination=MarsCoordinate(lon=77.25, lat=18.35),
+    )
+    resp_out = svc.plan_route(req_out)
+    assert resp_out.status == "success"
+    assert resp_out.source_selection.hirise_selected is False
+    assert resp_out.source_selection.hirise_status == "partial_or_no_corridor_coverage"

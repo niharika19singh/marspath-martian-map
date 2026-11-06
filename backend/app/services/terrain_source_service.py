@@ -628,7 +628,11 @@ class TerrainSourceSelector:
         nat_res_m = round(native_res_m, 3)
 
         prov = dict(hirise_provider.get_provenance())
-        selected_id = prov.get("official_product_id") or "dem_hirise_jezero_delta_1m"
+        selected_id = (
+            prov.get("official_product_id")
+            or prov.get("declared_product_id")
+            or "dem_hirise_jezero_delta_1m"
+        )
         dataset_name = str(prov.get("dataset_name", "HiRISE Jezero Western Delta DTM"))
 
         if agg_applied:

@@ -23,6 +23,7 @@ from backend.app.geospatial.raster_loader import (
     HAS_PYPROJ,
     HAS_RASTERIO,
     RasterData,
+    extract_pds3_label_dict,
     get_file_identity,
     inspect_vertical_unit_declarations,
     load_raster_file,
@@ -220,15 +221,15 @@ class HiRISERasterProvider(BaseRasterProvider):
             return res
 
     def _validate_and_load_uncached(self) -> HiRISEValidationResult:
-        # Pre-check GeoTIFF header for CRS, affine transform, dtype, and explicit vertical units
-        if self.dem_path.lower().endswith((".tif", ".tiff")) and HAS_RASTERIO:
+        # Pre-check GeoTIFF or PDS3 IMG header for CRS, affine transform, dtype, and explicit vertical units
+        if self.dem_path.lower().endswith((".tif", ".tiff", ".img", ".lbl")) and HAS_RASTERIO:
             try:
                 with rasterio.open(self.dem_path) as src:
                     if src.crs is None or not str(src.crs).strip():
                         return HiRISEValidationResult(
                             is_valid=False,
                             status_code="rejected_missing_crs",
-                            reason=f"HiRISE GeoTIFF '{self.dem_path}' lacks an explicit Coordinate Reference System (CRS).",
+                            reason=f"HiRISE raster '{self.dem_path}' lacks an explicit Coordinate Reference System (CRS).",
                             raster=None,
                         )
 
@@ -252,7 +253,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                         return HiRISEValidationResult(
                             is_valid=False,
                             status_code="rejected_invalid_georeferencing",
-                            reason=f"HiRISE GeoTIFF '{self.dem_path}' has a degenerate or uncalibrated identity affine transform.",
+                            reason=f"HiRISE raster '{self.dem_path}' has a degenerate or uncalibrated identity affine transform.",
                             raster=None,
                         )
 
@@ -268,10 +269,12 @@ class HiRISERasterProvider(BaseRasterProvider):
                     band_unit = src.units[0] if (src.units and len(src.units) > 0) else None
                     band_tags = dict(src.tags(1)) if src.count >= 1 else {}
                     dataset_tags = dict(src.tags())
+                    pds3_dict = extract_pds3_label_dict(src)
                     unit_ok, unit_status, unit_reason, _, _ = inspect_vertical_unit_declarations(
                         band_unit=band_unit,
                         band_tags=band_tags,
                         dataset_tags=dataset_tags,
+                        pds3_dict=pds3_dict,
                     )
                     if not unit_ok:
                         return HiRISEValidationResult(
@@ -284,7 +287,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                 return HiRISEValidationResult(
                     is_valid=False,
                     status_code="rejected_corrupt_raster",
-                    reason=f"Failed to inspect HiRISE GeoTIFF '{self.dem_path}': {exc}",
+                    reason=f"Failed to inspect HiRISE raster '{self.dem_path}': {exc}",
                     raster=None,
                 )
 
@@ -558,8 +561,47 @@ class HiRISERasterProvider(BaseRasterProvider):
             )
 
             is_geotiff = self.dem_path.lower().endswith((".tif", ".tiff"))
-            file_format = "GeoTIFF" if is_geotiff else "NumPy (.npz/.npy)"
+            is_pds3 = (
+                self.dem_path.lower().endswith((".img", ".lbl"))
+                or meta.metadata_tags.get("_HAS_PDS3_LABEL") == "true"
+            )
+            if is_pds3 and not is_geotiff:
+                file_format = "PDS3 IMG"
+            elif is_geotiff and is_pds3:
+                file_format = "GeoTIFF (PDS3 Metadata)"
+            elif is_geotiff:
+                file_format = "GeoTIFF"
+            else:
+                file_format = "NumPy (.npz/.npy)"
             native_res_m = round((meta.meters_per_px_x + meta.meters_per_px_y) / 2.0, 3)
+
+            pds3_meta: dict[str, Any] | None = None
+            if meta.metadata_tags.get("_HAS_PDS3_LABEL") == "true":
+                pds3_meta = {
+                    "pds_version_id": "PDS3",
+                    "product_id": meta.metadata_tags.get("PDS3_PRODUCT_ID")
+                    or meta.metadata_tags.get("PRODUCT_ID"),
+                    "data_set_id": meta.metadata_tags.get("DATA_SET_ID"),
+                    "source_product_id": [
+                        s for s in meta.metadata_tags.get("SOURCE_PRODUCT_ID", "").split(",") if s
+                    ],
+                    "producer_institution_name": meta.metadata_tags.get(
+                        "PRODUCER_INSTITUTION_NAME"
+                    ),
+                    "sample_type": meta.metadata_tags.get("PDS3_SAMPLE_TYPE"),
+                    "sample_bits": int(meta.metadata_tags["PDS3_SAMPLE_BITS"])
+                    if meta.metadata_tags.get("PDS3_SAMPLE_BITS", "").isdigit()
+                    else None,
+                    "scaling_factor": float(meta.metadata_tags.get("PDS3_SCALING_FACTOR", "1.0")),
+                    "offset": float(meta.metadata_tags.get("PDS3_OFFSET", "0.0")),
+                    "missing_constant": meta.metadata_tags.get("PDS3_MISSING_CONSTANT"),
+                    "core_null": float(meta.metadata_tags["PDS3_CORE_NULL"])
+                    if meta.metadata_tags.get("PDS3_CORE_NULL") is not None
+                    else None,
+                    "note": meta.metadata_tags.get("PDS3_NOTE"),
+                    "vertical_datum": meta.vertical_datum,
+                    "vertical_units": meta.vertical_units,
+                }
 
             limitations: list[str] = []
             conv_note = meta.metadata_tags.get("VERTICAL_UNIT_CONVERSION")
@@ -625,6 +667,8 @@ class HiRISERasterProvider(BaseRasterProvider):
                         "max_lat": round(meta.max_lat, 6),
                     },
                     "nodata_value": meta.nodata_value,
+                    "pds3_label_metadata": pds3_meta,
+                    "vertical_unit_conversion": conv_note,
                     "raster_statistics": stats,
                     "provenance_limitations": limitations,
                 }
@@ -638,6 +682,10 @@ class HiRISERasterProvider(BaseRasterProvider):
                 ):
                     local_ok = False
 
+                declared_pds_id = (
+                    meta.metadata_tags.get("PDS3_PRODUCT_ID")
+                    or meta.metadata_tags.get("PRODUCT_ID")
+                )
                 limitations.insert(
                     0,
                     "Raster is numerically valid and georeferenced to the Mars Jezero Western Delta region, "
@@ -646,6 +694,10 @@ class HiRISERasterProvider(BaseRasterProvider):
                 prov_dict = {
                     "dataset_name": f"Local Unverified Mars High-Resolution DTM ({os.path.basename(self.dem_path)})",
                     "official_product_id": None,
+                    "declared_product_id": declared_pds_id,
+                    "matched_catalog_product_id": matched_manifest["id"]
+                    if matched_manifest
+                    else None,
                     "mission_instruments": ["Unverified Local High-Resolution Stereo DTM"],
                     "data_publisher": "Unknown / Local Origin",
                     "pds_doi": None,
@@ -680,6 +732,8 @@ class HiRISERasterProvider(BaseRasterProvider):
                         "max_lat": round(meta.max_lat, 6),
                     },
                     "nodata_value": meta.nodata_value,
+                    "pds3_label_metadata": pds3_meta,
+                    "vertical_unit_conversion": conv_note,
                     "raster_statistics": stats,
                     "provenance_limitations": limitations,
                 }

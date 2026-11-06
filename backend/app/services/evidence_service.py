@@ -65,6 +65,10 @@ ESTABLISHED_MARS_VERTICAL_DATUMS: set[str] = {
     "MARS AREOID (MOLA MEGDR IAU2000)",
     "MARS 2000 MOLA AREOID (R = 3396190.0 M)",
     "MARS 2000 MOLA AEROID (R = 3396190.0 M)",
+    "MARS 2000 DATUM (MARTIAN EQUIPOTENTIAL SURFACE, SMITH ET AL. 2001)",
+    "MARS 2000 DATUM (MARTIAN EQUIPOTENTIAL SURFACE)",
+    "MARS 2000 DATUM",
+    "MARTIAN EQUIPOTENTIAL SURFACE (MARS 2000 DATUM)",
     "MARS_AREOID",
     "MOLA_AREOID",
     "MARS_2000_SPHERE_3396190M",
@@ -73,13 +77,15 @@ ESTABLISHED_MARS_VERTICAL_DATUMS: set[str] = {
 }
 
 _PROJ_MARS_RADIUS_RE = re.compile(
-    r"(?:^|\s)\+(?:R|a)=3396190(?:\.0+)?(?:\s|$)", re.IGNORECASE
+    r"(?:^|\s)\+(?:R|a)=(?:3396190(?:\.0+)?|33[789]\d{4}(?:\.\d+)?|340[0-4]\d{3}(?:\.\d+)?)(?:\s|$)",
+    re.IGNORECASE,
 )
 _PROJ_VALID_PROJECTION_RE = re.compile(
     r"(?:^|\s)\+proj=(?:longlat|latlong|eqc|sinu|stere|merc|tmerc|laea)(?:\s|$)",
     re.IGNORECASE,
 )
 _WKT_MARS_SPHEROID_RE = re.compile(
+    r'(?:SPHEROID|ELLIPSOID)\s*\[\s*"[^"]*MARS[^"]*"\s*,\s*(?:3396190(?:\.0+)?|33[789]\d{4}(?:\.\d+)?|340[0-4]\d{3}(?:\.\d+)?)\s*,|'
     r'(?:SPHEROID|ELLIPSOID)\s*\[\s*"[^"]+"\s*,\s*3396190(?:\.0+)?\s*,',
     re.IGNORECASE,
 )
@@ -248,7 +254,7 @@ class EvidenceService:
             source_checksum_verified = provenance.get("source_checksum_verified") is True
             if product_id == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2":
                 nominal_res = 200.0
-            elif product_id == "dem_hirise_jezero_delta_1m":
+            elif product_id in ("dem_hirise_jezero_delta_1m", "DTEEC_045994_1985_046060_1985_U01"):
                 nominal_res = 1.0
             else:
                 nominal_res = round(dy_meters, 1)
@@ -786,7 +792,10 @@ class EvidenceService:
             "verified_source",
             "official_endpoint_retrieved_checksum_unverified",
         ):
-            if source.product_id == "dem_hirise_jezero_delta_1m":
+            if source.product_id in (
+                "dem_hirise_jezero_delta_1m",
+                "DTEEC_045994_1985_046060_1985_U01",
+            ):
                 limitations.append(
                     "HiRISE stereo DTMs (~1 m/px post spacing) have ~2-4 m horizontal feature resolution and do not resolve wheel-scale (<0.5 m) rocks, overhangs, or unconsolidated sand traps."
                 )

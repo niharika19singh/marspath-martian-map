@@ -1,5 +1,9 @@
+import json
 import logging
+import math
 import os
+import re
+import struct
 import zlib
 from dataclasses import dataclass, field
 from typing import Any
@@ -205,14 +209,485 @@ def normalize_vertical_unit_token(
     return None, None, "rejected_unknown_vertical_units"
 
 
+_PDS3_MARS2000_CANONICAL_DATUM = (
+    "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"
+)
+
+_PDS3_ELEVATION_NOTE_RE = re.compile(
+    r"pixel\s+values\s+(?:in\s+this\s+file\s+)?represent\s+elevations?\s+in\s+"
+    r"(?P<unit>meters|metres|centimeters|centimetres|millimeters|millimetres|kilometers|kilometres|"
+    r"feet|foot|us\s+survey\s+feet|degrees|radians|[a-z_]+)"
+    r"\s+above\s+(?P<datum>[^.]+)\.",
+    re.IGNORECASE,
+)
+
+_PDS3_RADIOMETRIC_NOTE_RE = re.compile(
+    r"\b(?:conversion\s+from\s+dn\s+to\s+i/f|intensity/flux|radiance|reflectance|"
+    r"albedo|brightness\s+temperature|figure\s+of\s+merit)\b",
+    re.IGNORECASE,
+)
+
+_SUPPORTED_PDS3_DTM_SAMPLE_TYPES: frozenset[str] = frozenset(
+    {
+        "PC_REAL",
+        "IEEE_REAL",
+        "MSB_INTEGER",
+        "LSB_INTEGER",
+        "SIGNED_INTEGER",
+        "INTEGER",
+    }
+)
+
+
+def _strip_pds_quotes(val: Any) -> str:
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if len(s) >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+        s = s[1:-1].strip()
+    return s
+
+
+def _decode_pds3_missing_constant(raw_val: Any, sample_bits: int | None = 32) -> float | None:
+    """
+    Decodes a PDS3 MISSING_CONSTANT or CORE_NULL literal (such as `16#FF7FFFFB#` or `-32768`)
+    into its numerical float representation.
+    """
+    if raw_val is None:
+        return None
+    if isinstance(raw_val, (int, float)):
+        return float(raw_val)
+    s = _strip_pds_quotes(raw_val)
+    if not s:
+        return None
+    m_hex = re.match(r"^16#([0-9A-Fa-f]+)#$", s)
+    if m_hex:
+        hex_str = m_hex.group(1)
+        if len(hex_str) == 8 and (sample_bits in (None, 32)):
+            raw_bytes = bytes.fromhex(hex_str)
+            # In HiRISE PDS3 PC_REAL labels, 16#FF7FFFFB# is the 32-bit hex representation
+            # corresponding to -3.4028226550889045e+38 (big-endian float32 0xFF7FFFFB).
+            val_be = struct.unpack(">f", raw_bytes)[0]
+            if math.isfinite(val_be) and abs(val_be) > 1e30:
+                return float(val_be)
+            val_le = struct.unpack("<f", raw_bytes)[0]
+            if math.isfinite(val_le):
+                return float(val_le)
+        try:
+            return float(int(hex_str, 16))
+        except ValueError:
+            return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def extract_pds3_label_dict(src: Any) -> dict[str, Any] | None:
+    """
+    Extracts the parsed PDS3 label dictionary from Rasterio's `json:PDS` metadata domain
+    (or `PDS` domain if present). Accepts a Rasterio DatasetReader or a filepath.
+    Returns None if the dataset has no PDS3 metadata domain.
+    """
+    if isinstance(src, (str, bytes, os.PathLike)):
+        try:
+            with rasterio.open(src) as ds:
+                return extract_pds3_label_dict(ds)
+        except Exception:
+            return None
+
+    if src is None or not hasattr(src, "tag_namespaces"):
+        return None
+    try:
+        namespaces = list(src.tag_namespaces() or [])
+    except Exception:
+        namespaces = []
+
+    for ns in namespaces:
+        if ns in ("json:PDS", "PDS"):
+            try:
+                ns_tags = src.tags(ns=ns)
+            except Exception:
+                continue
+            if not ns_tags:
+                continue
+            for k, v in ns_tags.items():
+                candidate = f"{k}:{v}" if k.lstrip().startswith("{") else str(v)
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    continue
+    return None
+
+
+@dataclass
+class PDS3DTMParseResult:
+    """Controlled parse result for an embedded NASA/USGS/UArizona PDS3 DTM label."""
+
+    has_pds3_label: bool
+    is_valid_dtm: bool
+    status_code: str
+    reason: str
+    vertical_units: str = "Unknown / Unspecified"
+    unit_scale_to_meters: float = 1.0
+    vertical_datum: str = "Unknown / Unspecified"
+    scaling_factor: float = 1.0
+    offset: float = 0.0
+    sample_bits: int | None = None
+    sample_type: str | None = None
+    core_null: float | None = None
+    missing_constant_raw: str | None = None
+    note_text: str | None = None
+    product_id: str | None = None
+    data_set_id: str | None = None
+    source_product_ids: list[str] = field(default_factory=list)
+    producer_institution_name: str | None = None
+    valid_minimum: float | None = None
+    valid_maximum: float | None = None
+
+
+def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParseResult:
+    """
+    Controlled parser for the official NASA/JPL/UArizona HiRISE PDS3 DTM label semantics.
+
+    Inspects:
+    - `IMAGE.NOTE` (or top-level `NOTE`)
+    - `IMAGE.SCALING_FACTOR`
+    - `IMAGE.OFFSET`
+    - `IMAGE.SAMPLE_BITS`
+    - `IMAGE.SAMPLE_TYPE`
+    - `IMAGE.CORE_NULL` / `IMAGE.MISSING_CONSTANT`
+    - `TARGET_NAME`, `PRODUCT_ID`, `DATA_SET_ID`, `SOURCE_PRODUCT_ID`
+
+    Never accepts arbitrary prose as proof of metre units, and never invents a unit or
+    vertical datum if the PDS3 label does not explicitly establish one.
+    """
+    if not pds_dict or not isinstance(pds_dict, dict):
+        return PDS3DTMParseResult(
+            has_pds3_label=False,
+            is_valid_dtm=False,
+            status_code="no_pds3_label",
+            reason="No PDS3 label metadata domain found.",
+        )
+
+    pds_ver = _strip_pds_quotes(pds_dict.get("PDS_VERSION_ID", "")).upper()
+    if pds_ver and pds_ver != "PDS3":
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_unknown_vertical_units",
+            reason=f"Unsupported PDS label version '{pds_ver}' (expected PDS3).",
+        )
+
+    target_name = _strip_pds_quotes(pds_dict.get("TARGET_NAME", "")).upper()
+    if target_name and target_name != "MARS":
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_invalid_crs",
+            reason=f"PDS3 label declares non-Mars TARGET_NAME='{target_name}'.",
+        )
+
+    product_id = _strip_pds_quotes(pds_dict.get("PRODUCT_ID")) or None
+    data_set_id = _strip_pds_quotes(pds_dict.get("DATA_SET_ID")) or None
+    producer_inst = _strip_pds_quotes(pds_dict.get("PRODUCER_INSTITUTION_NAME")) or None
+
+    raw_src_ids = pds_dict.get("SOURCE_PRODUCT_ID")
+    src_ids: list[str] = []
+    if isinstance(raw_src_ids, list):
+        src_ids = [_strip_pds_quotes(x) for x in raw_src_ids if _strip_pds_quotes(x)]
+    elif isinstance(raw_src_ids, str):
+        cleaned_src = raw_src_ids.strip().strip("()")
+        src_ids = [
+            _strip_pds_quotes(tok)
+            for tok in cleaned_src.split(",")
+            if _strip_pds_quotes(tok)
+        ]
+
+    # Locate the IMAGE object (either direct `IMAGE` or `UNCOMPRESSED_FILE.IMAGE`)
+    img_obj = pds_dict.get("IMAGE")
+    if not isinstance(img_obj, dict):
+        uncomp = pds_dict.get("UNCOMPRESSED_FILE")
+        if isinstance(uncomp, dict) and isinstance(uncomp.get("IMAGE"), dict):
+            img_obj = uncomp["IMAGE"]
+        else:
+            img_obj = {}
+
+    # 1. Validate SAMPLE_TYPE and SAMPLE_BITS
+    sample_type_raw = _strip_pds_quotes(img_obj.get("SAMPLE_TYPE", pds_dict.get("SAMPLE_TYPE", ""))).upper()
+    sample_bits_raw = img_obj.get("SAMPLE_BITS", pds_dict.get("SAMPLE_BITS"))
+    sample_bits: int | None = None
+    if sample_bits_raw is not None:
+        try:
+            sample_bits = int(sample_bits_raw)
+        except (TypeError, ValueError):
+            return PDS3DTMParseResult(
+                has_pds3_label=True,
+                is_valid_dtm=False,
+                status_code="rejected_corrupt_raster",
+                reason=f"Invalid non-integer PDS3 SAMPLE_BITS='{sample_bits_raw}'.",
+            )
+
+    if sample_type_raw and (
+        "UNSIGNED" in sample_type_raw
+        or "COMPLEX" in sample_type_raw
+        or sample_type_raw not in _SUPPORTED_PDS3_DTM_SAMPLE_TYPES
+    ):
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_non_elevation_raster",
+            reason=(
+                f"PDS3 SAMPLE_TYPE='{sample_type_raw}' (SAMPLE_BITS={sample_bits}) indicates "
+                "radiometric imagery or unsupported sample encoding rather than numerical DTM elevation."
+            ),
+            sample_bits=sample_bits,
+            sample_type=sample_type_raw or None,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    if sample_bits is not None and sample_bits <= 8:
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_non_elevation_raster",
+            reason=f"PDS3 SAMPLE_BITS={sample_bits} indicates 8-bit browse/ortho imagery rather than numerical DTM elevation.",
+            sample_bits=sample_bits,
+            sample_type=sample_type_raw or None,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    # 2. Validate SCALING_FACTOR and OFFSET
+    raw_scale = img_obj.get("SCALING_FACTOR", pds_dict.get("SCALING_FACTOR", 1.0))
+    raw_offset = img_obj.get("OFFSET", pds_dict.get("OFFSET", 0.0))
+    try:
+        scaling_factor = float(raw_scale) if raw_scale is not None else 1.0
+        offset = float(raw_offset) if raw_offset is not None else 0.0
+    except (TypeError, ValueError):
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_corrupt_raster",
+            reason=f"Invalid non-numeric PDS3 SCALING_FACTOR='{raw_scale}' or OFFSET='{raw_offset}'.",
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    if not math.isfinite(scaling_factor) or scaling_factor <= 0.0 or not math.isfinite(offset):
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_corrupt_raster",
+            reason=(
+                f"PDS3 label declares non-finite or non-positive SCALING_FACTOR={scaling_factor} "
+                f"or OFFSET={offset}."
+            ),
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    # 3. Extract CORE_NULL / MISSING_CONSTANT and VALID_MINIMUM / VALID_MAXIMUM
+    raw_missing = img_obj.get(
+        "CORE_NULL",
+        img_obj.get(
+            "MISSING_CONSTANT",
+            pds_dict.get("CORE_NULL", pds_dict.get("MISSING_CONSTANT")),
+        ),
+    )
+    missing_raw_str = _strip_pds_quotes(raw_missing) if raw_missing is not None else None
+    core_null = _decode_pds3_missing_constant(raw_missing, sample_bits=sample_bits)
+
+    valid_min: float | None = None
+    valid_max: float | None = None
+    if img_obj.get("VALID_MINIMUM") is not None:
+        try:
+            valid_min = float(img_obj["VALID_MINIMUM"])
+        except (TypeError, ValueError):
+            pass
+    if img_obj.get("VALID_MAXIMUM") is not None:
+        try:
+            valid_max = float(img_obj["VALID_MAXIMUM"])
+        except (TypeError, ValueError):
+            pass
+
+    # 4. Inspect and parse the PDS3 NOTE declaration
+    raw_note = img_obj.get("NOTE", pds_dict.get("NOTE", ""))
+    note_clean = " ".join(
+        _strip_pds_quotes(raw_note).replace("\\r", " ").replace("\\n", " ").split()
+    )
+    if not note_clean:
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_unknown_vertical_units",
+            reason=(
+                "PDS3 label lacks a required IMAGE.NOTE elevation unit and datum declaration "
+                "(missing PDS3 NOTE is never assumed to be metre-based elevation data)."
+            ),
+            scaling_factor=scaling_factor,
+            offset=offset,
+            sample_bits=sample_bits,
+            sample_type=sample_type_raw or None,
+            core_null=core_null,
+            missing_constant_raw=missing_raw_str,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    if _PDS3_RADIOMETRIC_NOTE_RE.search(note_clean):
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_non_elevation_raster",
+            reason=(
+                f"PDS3 IMAGE.NOTE declares radiometric/orthoimage values rather than elevation: "
+                f"'{note_clean[:140]}'."
+            ),
+            note_text=note_clean,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    if any(
+        earth_tok in note_clean.lower()
+        for earth_tok in ("wgs84", "wgs 84", "egm96", "egm2008", "navd88", "earth")
+    ):
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_invalid_crs",
+            reason=f"PDS3 IMAGE.NOTE declares Earth or non-Mars coordinate reference system: '{note_clean[:140]}'.",
+            note_text=note_clean,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    m_note = _PDS3_ELEVATION_NOTE_RE.search(note_clean)
+    if not m_note:
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_unknown_vertical_units",
+            reason=(
+                f"PDS3 IMAGE.NOTE does not match the recognized HiRISE DTM elevation-unit and datum "
+                f"declaration semantics: '{note_clean[:140]}'."
+            ),
+            note_text=note_clean,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    unit_token = m_note.group("unit").strip()
+    datum_clause = " ".join(m_note.group("datum").strip().split())
+
+    canonical_unit, unit_scale, unit_code = normalize_vertical_unit_token(unit_token)
+    if canonical_unit is None or unit_scale is None:
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code=unit_code,
+            reason=(
+                f"PDS3 IMAGE.NOTE declares unsupported or unrecognized vertical unit '{unit_token}' "
+                f"({unit_code})."
+            ),
+            note_text=note_clean,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    # Validate the declared vertical reference datum in the NOTE clause
+    datum_lower = datum_clause.lower()
+    if any(earth_tok in datum_lower for earth_tok in ("wgs84", "wgs 84", "egm96", "egm2008", "navd88", "earth", "sea level")):
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_invalid_crs",
+            reason=f"PDS3 IMAGE.NOTE declares non-Mars vertical datum '{datum_clause}'.",
+            note_text=note_clean,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    if (
+        "martian equipotential surface" in datum_lower
+        and "mars 2000 datum" in datum_lower
+    ):
+        resolved_datum = _PDS3_MARS2000_CANONICAL_DATUM
+    elif "mars 2000 datum" in datum_lower:
+        resolved_datum = "Mars 2000 Datum"
+    elif "martian equipotential surface" in datum_lower:
+        resolved_datum = "Mars 2000 Datum (Martian Equipotential Surface)"
+    elif "mola" in datum_lower and ("areoid" in datum_lower or "aeroid" in datum_lower):
+        resolved_datum = "Mars Areoid (MOLA 0m reference datum)"
+    else:
+        return PDS3DTMParseResult(
+            has_pds3_label=True,
+            is_valid_dtm=False,
+            status_code="rejected_unknown_vertical_units",
+            reason=(
+                f"PDS3 IMAGE.NOTE does not establish a recognized Mars vertical datum "
+                f"(found 'above {datum_clause}')."
+            ),
+            note_text=note_clean,
+            product_id=product_id,
+            data_set_id=data_set_id,
+            source_product_ids=src_ids,
+        )
+
+    status_out = "converted" if (abs(unit_scale - 1.0) > 1e-12 or abs(scaling_factor - 1.0) > 1e-12 or abs(offset) > 1e-12) else "valid"
+    reason_out = (
+        f"Verified PDS3 HiRISE DTM label NOTE declaring elevations in '{unit_token}' above "
+        f"'{resolved_datum}' (SCALING_FACTOR={scaling_factor:g}, OFFSET={offset:g})."
+    )
+
+    return PDS3DTMParseResult(
+        has_pds3_label=True,
+        is_valid_dtm=True,
+        status_code=status_out,
+        reason=reason_out,
+        vertical_units="meters",
+        unit_scale_to_meters=float(unit_scale),
+        vertical_datum=resolved_datum,
+        scaling_factor=scaling_factor,
+        offset=offset,
+        sample_bits=sample_bits,
+        sample_type=sample_type_raw or None,
+        core_null=core_null,
+        missing_constant_raw=missing_raw_str,
+        note_text=note_clean,
+        product_id=product_id,
+        data_set_id=data_set_id,
+        source_product_ids=src_ids,
+        producer_institution_name=producer_inst,
+        valid_minimum=valid_min,
+        valid_maximum=valid_max,
+    )
+
+
 def inspect_vertical_unit_declarations(
     band_unit: str | None,
     band_tags: dict[str, Any] | None,
     dataset_tags: dict[str, Any] | None,
+    pds3_dict: dict[str, Any] | None = None,
 ) -> tuple[bool, str, str, float, str]:
     """
     Positively validates vertical elevation units across Rasterio band units (`src.units`),
-    GeoTIFF band tags (`src.tags(1)`), and dataset tags (`src.tags()`).
+    GeoTIFF band tags (`src.tags(1)`), dataset tags (`src.tags()`), and embedded PDS3 DTM
+    label declarations (`json:PDS`).
 
     Returns:
         (is_valid, status_code, reason, scale_to_meters, resolved_unit_label)
@@ -233,13 +708,15 @@ def inspect_vertical_unit_declarations(
             if key in d_upper and d_upper[key] != "":
                 declarations.append((f"dataset.tag[{key}]", d_upper[key]))
 
-    if not declarations:
+    pds3_res = parse_pds3_hirise_dtm_label(pds3_dict) if pds3_dict else None
+
+    if not declarations and (pds3_res is None or not pds3_res.has_pds3_label):
         return (
             False,
             "rejected_unknown_vertical_units",
             (
-                "Raster lacks explicit vertical elevation unit metadata in band units or GeoTIFF tags "
-                "(expected explicit metre units; missing or unknown units are rejected)."
+                "Raster lacks explicit vertical elevation unit metadata in band units, GeoTIFF tags, "
+                "or PDS3 DTM label (expected explicit metre units; missing or unknown units are rejected)."
             ),
             1.0,
             "Unknown / Unspecified",
@@ -261,6 +738,24 @@ def inspect_vertical_unit_declarations(
             )
         resolved_scales.append((src_label, raw_val, float(scale), code))
 
+    if pds3_res is not None and pds3_res.has_pds3_label:
+        if not pds3_res.is_valid_dtm:
+            return (
+                False,
+                pds3_res.status_code,
+                pds3_res.reason,
+                1.0,
+                "Unknown / Unspecified",
+            )
+        resolved_scales.append(
+            (
+                "pds3_label.IMAGE.NOTE",
+                pds3_res.vertical_units,
+                float(pds3_res.unit_scale_to_meters),
+                pds3_res.status_code,
+            )
+        )
+
     first_scale = resolved_scales[0][2]
     for src_label, raw_val, scale, _ in resolved_scales[1:]:
         if abs(scale - first_scale) > 1e-12:
@@ -274,6 +769,15 @@ def inspect_vertical_unit_declarations(
                 1.0,
                 "Ambiguous / Conflicting",
             )
+
+    if pds3_res is not None and pds3_res.is_valid_dtm:
+        return (
+            True,
+            pds3_res.status_code,
+            pds3_res.reason,
+            float(pds3_res.unit_scale_to_meters),
+            "meters",
+        )
 
     primary_src, primary_raw, final_scale, final_code = resolved_scales[0]
     if final_code == "converted":
@@ -333,10 +837,12 @@ class RasterData:
         self._init_nodata_mask()
 
     def _init_nodata_mask(self):
-        mask = np.isnan(self.data)
+        mask = np.isnan(self.data) | ~np.isfinite(self.data)
         if self.metadata.nodata_value is not None:
-            mask = mask | (np.isclose(self.data, self.metadata.nodata_value, atol=1e-3))
-        # Standard Mars PDS nodata sentinels
+            mask = mask | (
+                np.isclose(self.data, self.metadata.nodata_value, rtol=1e-6, atol=1e-3)
+            )
+        # Standard Mars PDS nodata sentinels (including 16#FF7FFFFB# ~ -3.4028227e+38)
         mask = mask | (self.data < -9000.0) | (self.data > 1e30)
         self.nodata_mask = mask
 
@@ -532,7 +1038,7 @@ def load_raster_file(file_path: str) -> RasterData:
         )
         return RasterData(data_f32, meta)
 
-    # GeoTIFF loading via Rasterio
+    # GeoTIFF / PDS3 IMG loading via Rasterio
     if HAS_RASTERIO:
         try:
             with rasterio.open(file_path) as src:
@@ -556,42 +1062,134 @@ def load_raster_file(file_path: str) -> RasterData:
                 ):
                     is_metric = True
 
-                # Extract vertical datum and vertical unit declarations from band + dataset tags
+                # Extract vertical datum and vertical unit declarations from band + dataset tags + PDS3 label
                 tags = dict(src.tags())
                 band_tags = dict(src.tags(1)) if src.count >= 1 else {}
                 band_unit = src.units[0] if (src.units and len(src.units) > 0) else None
+                pds3_dict = extract_pds3_label_dict(src)
+                pds3_res = parse_pds3_hirise_dtm_label(pds3_dict) if pds3_dict else None
+
                 unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = (
-                    inspect_vertical_unit_declarations(band_unit, band_tags, tags)
+                    inspect_vertical_unit_declarations(band_unit, band_tags, tags, pds3_dict=pds3_dict)
                 )
-                merged_tags = dict(tags)
+                merged_tags = {
+                    str(k): _strip_pds_quotes(v) if isinstance(v, str) else str(v)
+                    for k, v in tags.items()
+                }
                 for bk, bv in band_tags.items():
                     if bk not in merged_tags:
-                        merged_tags[bk] = bv
+                        merged_tags[bk] = _strip_pds_quotes(bv) if isinstance(bv, str) else str(bv)
                 if band_unit is not None and str(band_unit).strip():
                     merged_tags["_BAND_1_UNIT"] = str(band_unit).strip()
                 merged_tags["_VERTICAL_UNIT_VALID"] = "true" if unit_ok else "false"
                 merged_tags["_VERTICAL_UNIT_STATUS"] = unit_status
                 merged_tags["_VERTICAL_UNIT_REASON"] = unit_reason
                 merged_tags["_VERTICAL_UNIT_SCALE"] = str(unit_scale)
+                merged_tags["_RASTER_DRIVER"] = str(src.driver or "")
 
-                vert_datum = merged_tags.get(
-                    "VERTICAL_DATUM",
-                    merged_tags.get(
-                        "DATUM",
-                        "Unknown / Unspecified (datum tag not declared in raster metadata)",
-                    ),
-                )
+                # Capture PDS3 label metadata and check for vertical datum conflicts
+                explicit_tag_datum = (
+                    merged_tags.get("VERTICAL_DATUM") or merged_tags.get("DATUM") or ""
+                ).strip()
+                if pds3_res is not None and pds3_res.has_pds3_label:
+                    merged_tags["_HAS_PDS3_LABEL"] = "true"
+                    if pds3_res.product_id:
+                        merged_tags["PRODUCT_ID"] = pds3_res.product_id
+                        merged_tags["PDS3_PRODUCT_ID"] = pds3_res.product_id
+                    if pds3_res.data_set_id:
+                        merged_tags["DATA_SET_ID"] = pds3_res.data_set_id
+                    if pds3_res.source_product_ids:
+                        merged_tags["SOURCE_PRODUCT_ID"] = ",".join(pds3_res.source_product_ids)
+                    if pds3_res.producer_institution_name:
+                        merged_tags["PRODUCER_INSTITUTION_NAME"] = pds3_res.producer_institution_name
+                    if pds3_res.note_text:
+                        merged_tags["PDS3_NOTE"] = pds3_res.note_text
+                    if pds3_res.sample_type:
+                        merged_tags["PDS3_SAMPLE_TYPE"] = pds3_res.sample_type
+                    if pds3_res.sample_bits is not None:
+                        merged_tags["PDS3_SAMPLE_BITS"] = str(pds3_res.sample_bits)
+                    merged_tags["PDS3_SCALING_FACTOR"] = str(pds3_res.scaling_factor)
+                    merged_tags["PDS3_OFFSET"] = str(pds3_res.offset)
+                    if pds3_res.missing_constant_raw is not None:
+                        merged_tags["PDS3_MISSING_CONSTANT"] = pds3_res.missing_constant_raw
+                    if pds3_res.core_null is not None:
+                        merged_tags["PDS3_CORE_NULL"] = str(pds3_res.core_null)
+
+                    if pds3_res.is_valid_dtm:
+                        if (
+                            explicit_tag_datum
+                            and explicit_tag_datum.upper() != pds3_res.vertical_datum.upper()
+                            and "MARS 2000" not in explicit_tag_datum.upper()
+                            and "EQUIPOTENTIAL" not in explicit_tag_datum.upper()
+                        ):
+                            unit_ok = False
+                            unit_status = "rejected_unknown_vertical_units"
+                            unit_reason = (
+                                f"Conflicting vertical datum declarations between tag "
+                                f"VERTICAL_DATUM='{explicit_tag_datum}' and PDS3 NOTE datum "
+                                f"'{pds3_res.vertical_datum}'."
+                            )
+                            merged_tags["_VERTICAL_UNIT_VALID"] = "false"
+                            merged_tags["_VERTICAL_UNIT_STATUS"] = unit_status
+                            merged_tags["_VERTICAL_UNIT_REASON"] = unit_reason
+                            vert_datum = "Ambiguous / Conflicting"
+                        else:
+                            vert_datum = pds3_res.vertical_datum
+                            merged_tags["VERTICAL_DATUM"] = vert_datum
+                    else:
+                        vert_datum = explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
+                else:
+                    vert_datum = explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
+
+                nodata_val: float | None = float(src.nodata) if src.nodata is not None else None
+                if nodata_val is None and pds3_res is not None and pds3_res.core_null is not None:
+                    nodata_val = float(pds3_res.core_null)
 
                 data_f32 = data.astype(np.float32).copy()
-                if unit_ok and abs(unit_scale - 1.0) > 1e-12:
-                    raw_nd = np.isnan(data_f32) | (
-                        np.isclose(data_f32, float(src.nodata), atol=1e-3)
-                        if src.nodata is not None
-                        else np.zeros_like(data_f32, dtype=bool)
-                    )
-                    data_f32[~raw_nd] *= float(unit_scale)
-                    data_f32[raw_nd] = np.nan
-                    merged_tags["VERTICAL_UNIT_CONVERSION"] = unit_reason
+
+                # Determine valid vs NoData mask BEFORE applying PDS3 SCALING_FACTOR / OFFSET or metric unit conversion
+                unit_s = (
+                    float(unit_scale)
+                    if (unit_ok and unit_scale is not None and unit_scale > 0)
+                    else 1.0
+                )
+                raw_sentinel_min = -9000.0 / unit_s
+                raw_nd = (
+                    np.isnan(data_f32)
+                    | ~np.isfinite(data_f32)
+                    | (data_f32 < raw_sentinel_min)
+                    | (data_f32 > 1e30)
+                )
+                if nodata_val is not None:
+                    raw_nd = raw_nd | np.isclose(data_f32, nodata_val, rtol=1e-6, atol=1e-3)
+                if pds3_res is not None and pds3_res.core_null is not None:
+                    raw_nd = raw_nd | np.isclose(data_f32, float(pds3_res.core_null), rtol=1e-6, atol=1e-3)
+
+                pds_scale = float(pds3_res.scaling_factor) if (pds3_res and pds3_res.is_valid_dtm) else 1.0
+                pds_offset = float(pds3_res.offset) if (pds3_res and pds3_res.is_valid_dtm) else 0.0
+                needs_pds_transform = abs(pds_scale - 1.0) > 1e-12 or abs(pds_offset) > 1e-12
+                needs_unit_scale = unit_ok and abs(unit_scale - 1.0) > 1e-12
+
+                if unit_ok and (needs_pds_transform or needs_unit_scale):
+                    valid_idx = ~raw_nd
+                    if needs_pds_transform:
+                        # Official HiRISE PDS3 equation: elevation_in_label_units = (stored_value * SCALING_FACTOR) + OFFSET
+                        data_f32[valid_idx] = (data_f32[valid_idx] * pds_scale) + pds_offset
+                    if needs_unit_scale:
+                        data_f32[valid_idx] *= float(unit_scale)
+                    # Preserve original NoData values on invalid cells
+                    if nodata_val is not None:
+                        data_f32[raw_nd] = float(nodata_val)
+                    else:
+                        data_f32[raw_nd] = np.nan
+                    conv_parts: list[str] = []
+                    if needs_pds_transform:
+                        conv_parts.append(
+                            f"Applied PDS3 DTM transformation (elevation = raw * {pds_scale:g} + {pds_offset:g})"
+                        )
+                    if needs_unit_scale:
+                        conv_parts.append(f"scaled to meters (*{unit_scale:g})")
+                    merged_tags["VERTICAL_UNIT_CONVERSION"] = "; ".join(conv_parts) + f" ({unit_reason})"
 
                 if is_metric:
                     # Projected coordinates in meters!
@@ -649,7 +1247,7 @@ def load_raster_file(file_path: str) -> RasterData:
                             transform.e,
                             transform.f,
                         ),
-                        nodata_value=src.nodata,
+                        nodata_value=nodata_val,
                         vertical_datum=vert_datum,
                         vertical_units=resolved_v_unit,
                         metadata_tags=merged_tags,
@@ -694,7 +1292,7 @@ def load_raster_file(file_path: str) -> RasterData:
                             transform.e,
                             transform.f,
                         ),
-                        nodata_value=src.nodata,
+                        nodata_value=nodata_val,
                         vertical_datum=vert_datum,
                         vertical_units=resolved_v_unit,
                         metadata_tags=merged_tags,

@@ -73,6 +73,40 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
         ),
     },
     {
+        "id": "DTEEC_045994_1985_046060_1985_U01",
+        "product_name": "HiRISE Jezero Crater Western Delta Digital Terrain Model (DTEEC_045994_1985_046060_1985_U01)",
+        "mission_instruments": "NASA Mars Reconnaissance Orbiter (MRO) HiRISE (Stereo Pair: ESP_045994_1985 / ESP_046060_1985)",
+        "publisher": "USGS Astrogeology Science Center / University of Arizona / NASA PDS",
+        "landing_page": "https://www.uahirise.org/dtm/dtm.php?ID=ESP_045994_1985",
+        "upstream_url": "https://www.uahirise.org/PDS/DTM/ESP/ORB_045900_045999/ESP_045994_1985_ESP_046060_1985/DTEEC_045994_1985_046060_1985_U01.IMG",
+        "pds_doi": "https://doi.org/10.17189/1519501",
+        "spatial_coverage": "Jezero Western Delta & Mars 2020 Candidate Landing Site (18.3053°N - 18.5484°N, 77.3834°E - 77.5011°E)",
+        "resolution_meters": 1.01,
+        "resolution_units": "meters/pixel (MAP_SCALE = 1.0096633 m/px; 58684.05 px/deg)",
+        "coordinate_system": "Mars 2000 Equirectangular (clon=77.44°E, clat=15.0°N, R_local=3,394,839.81m)",
+        "projection": "Equirectangular",
+        "vertical_datum": "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)",
+        "nodata_value": -3.4028226550889045e38,
+        "is_numerical_elevation": True,
+        "contains_imagery_only": False,
+        "format": "IMG (PDS3 32-bit PC_REAL) / GeoTIFF",
+        "sha256": None,
+        "authoritative_product_ids": [
+            "DTEEC_045994_1985_046060_1985_U01",
+            "ESP_045994_1985",
+            "ESP_046060_1985",
+        ],
+        "acquisition_date": "2016 - 2017 (Released 2017-07-27)",
+        "license_and_reuse": "Public Domain (NASA PDS / UArizona HiRISE open data)",
+        "download_method": "UArizona HiRISE PDS DTM Archive (MRO-M-HIRISE-5-DTM-V1.0)",
+        "file_size_mb": 363.2,
+        "suitability": "Ultra-high resolution local corridor validation (~1.01 m/px) for Jezero Western Delta routes.",
+        "limitations": (
+            "Localized spatial footprint (~6.7 km x 14.4 km; 6673 x 14266 px) with irregular diagonal stereo swath "
+            "edges containing NoData padding; does not cover the broader Jezero crater floor or rim."
+        ),
+    },
+    {
         "id": "dem_hirise_jezero_delta_1m",
         "product_name": "HiRISE Jezero Crater Western Delta Digital Terrain Model (DTM)",
         "mission_instruments": "NASA Mars Reconnaissance Orbiter (MRO) HiRISE",
@@ -84,6 +118,7 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
         "resolution_units": "meters/pixel",
         "coordinate_system": "Mars 2000 Equirectangular (clon=77.0°E, clat=0.0°)",
         "projection": "Equirectangular",
+        "vertical_datum": "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)",
         "is_numerical_elevation": True,
         "contains_imagery_only": False,
         "format": "IMG (PDS3) / GeoTIFF",
@@ -279,7 +314,33 @@ def verify_manifest_provenance(
                 return True, "authoritative_manifest_sha256_match", item
 
     # 1b. Direct manifest MD5 match over loaded file bytes
-    if file_path and Path(file_path).exists():
+    # Only compute the full-file MD5 if at least one catalog entry defines an applicable
+    # `upstream_md5` and `file_path` is not a distinctly named PDS3/HiRISE product that
+    # lacks a catalogued MD5 digest (avoiding redundant 381+ MB full-file reads).
+    norm_tags = {str(k).upper(): str(v).strip().strip('"') for k, v in metadata_tags.items()}
+    declared_prod_id = (
+        norm_tags.get("PRODUCT_ID")
+        or norm_tags.get("OFFICIAL_PRODUCT_ID")
+        or ""
+    ).upper()
+    has_applicable_md5_candidate = False
+    for item in DATA_CATALOG_MANIFEST:
+        up_md5 = item.get("upstream_md5")
+        if not up_md5:
+            continue
+        item_ids = {str(item.get("id", "")).upper()} | {
+            str(x).upper() for x in item.get("authoritative_product_ids", [])
+        }
+        # If the raster explicitly declares a known catalog PRODUCT_ID (e.g. DTEEC_...) that is NOT
+        # this item, or is a PDS3 .IMG file when this item is a GeoTIFF without PDS3 format, skip MD5 hashing.
+        if declared_prod_id and declared_prod_id not in item_ids:
+            continue
+        if file_path and file_path.lower().endswith(".img") and "IMG" not in str(item.get("format", "")).upper():
+            continue
+        has_applicable_md5_candidate = True
+        break
+
+    if has_applicable_md5_candidate and file_path and Path(file_path).exists():
         try:
             file_md5 = _compute_file_digest(file_path, "md5")
             for item in DATA_CATALOG_MANIFEST:
@@ -354,13 +415,13 @@ def verify_manifest_provenance(
                 return False, "unverified_sidecar_source_not_authenticated", None
 
     # 3. Check metadata tags for metadata consistency (NEVER authenticating alone)
-    norm_tags = {str(k).upper(): str(v).strip() for k, v in metadata_tags.items()}
     tag_candidates = [
         norm_tags.get("PRODUCT_ID", ""),
         norm_tags.get("DATASET_ID", ""),
         norm_tags.get("PDS_DOI", ""),
         norm_tags.get("OFFICIAL_PRODUCT_ID", ""),
         norm_tags.get("SOURCE_PRODUCT_ID", ""),
+        norm_tags.get("PDS3_PRODUCT_ID", ""),
     ]
 
     for item in DATA_CATALOG_MANIFEST:

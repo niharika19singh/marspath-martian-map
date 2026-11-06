@@ -27,28 +27,48 @@ This document details the scientific datasets evaluated and supported for **MARS
   - **Blending & Thermal-Modelling Origin:** USGS notes this dataset was originally constructed to derive global thermal inertia (for THEMIS) where smooth regional transitions were prioritized over local topographic accuracy. Blending HRSC stereo models with MOLA laser altimetry introduces seam artifacts, registration offsets, and smoothing inconsistencies across transition boundaries.
 
 ### B. HiRISE Digital Terrain Model (DTM) — Jezero Western Delta (Optional Local High-Resolution Source)
-- **Catalog Product ID:** `dem_hirise_jezero_delta_1m`
-- **Reference Stereo Pair:** `HiRISE DTM ESP_037803_1985 / ESP_037869_1985`
+- **Catalog Product IDs:**
+  - `dem_hirise_jezero_delta_1m` (Reference entry for local Jezero Western Delta DTMs)
+  - `DTEEC_045994_1985_046060_1985_U01` (Official NASA/JPL/UArizona HiRISE PDS3 DTM covering Jezero Crater Western Delta)
+- **Supported Formats:**
+  - Standard Cloud-Optimized or localized GeoTIFF (`.tif`, `.tiff`)
+  - Official NASA/JPL/UArizona PDS3 DTM (`.IMG` image file with detached `.LBL` or attached PDS3 ASCII label header)
+- **Reference Stereo Pairs:**
+  - `HiRISE DTM ESP_045994_1985 / ESP_046060_1985` (`DTEEC_045994_1985_046060_1985_U01`, 381 MB, ~1.01 m/px)
+  - `HiRISE DTM ESP_037803_1985 / ESP_037869_1985` (`DTEEC_037803_1985_037869_1985_U01`)
 - **Instrument:** NASA Mars Reconnaissance Orbiter (MRO) High Resolution Imaging Science Experiment (HiRISE).
-- **Publisher:** University of Arizona / NASA PDS Geosciences Node.
-- **Official URL:** `https://www.uahirise.org/dtm/dtm.php?ID=ESP_037803_1985`
-- **Spatial Coverage:** `18.35°N` to `18.46°N`, `77.38°E` to `77.47°E` (~6 km × 18 km localized corridor covering the Jezero Western Delta front and scarp).
+- **Publisher:** University of Arizona Lunar and Planetary Laboratory / NASA PDS Geosciences Node / USGS Astrogeology.
+- **Official URLs:**
+  - `https://www.uahirise.org/dtm/dtm.php?ID=ESP_045994_1985`
+  - `https://www.uahirise.org/dtm/dtm.php?ID=ESP_037803_1985`
+- **Spatial Coverage:** `18.30°N` to `18.55°N`, `77.38°E` to `77.50°E` (~6.7 km × 14.4 km localized corridor covering the Jezero Western Delta front, fan deposits, and scarp).
 - **Resolution:** ~1.0 meter/pixel numerical elevation (`0.15 m/px` to `25.0 m/px` supported local high-resolution range).
+- **PDS3 Label Semantics, Unit & Datum Parsing:**
+  - `extract_pds3_label_dict` and `parse_pds3_hirise_dtm_label` extract standard PDS3 label metadata objects (`IMAGE`, `IMAGE_MAP_PROJECTION`).
+  - Validates `IMAGE.NOTE` against official UArizona / USGS elevation semantics: `"Pixel values in this file represent elevations in meters above the martian equipotential surface (Mars 2000 Datum) defined by Smith, et al. (2001)."`.
+  - Recognizes Mars vertical datum variants including `Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)`, `Mars Areoid (MOLA 0m reference datum)`, and `Martian Equipotential Surface`.
+  - Rejects non-elevation browse/radiometric products (`status_code: "rejected_non_elevation_raster"`), non-metric or unsupported units (`"rejected_unsupported_vertical_units"`), non-Mars target names or Earth datums (`"rejected_invalid_crs"`), and missing NOTE declarations (`"rejected_unknown_vertical_units"`).
+- **PDS3 Transformation & NoData Preservation:**
+  - Evaluates official PDS3 conversion formula: `elevation_meters = (stored_value * SCALING_FACTOR) + OFFSET`.
+  - Decodes PDS3 `MISSING_CONSTANT` (such as `16#FF7FFFFB#` representing $-3.4028227 \times 10^{38}$) and `CORE_NULL` sentinels before scaling, preserving NoData cells strictly without converting them to $0.0\text{ m}$.
+  - Supports 32-bit floating point (`PC_REAL`, `IEEE_REAL`) and 16-bit integer (`MSB_INTEGER`, `LSB_INTEGER`, `PC_INTEGER`) DTM encodings.
 - **Explicit Vertical Elevation-Unit Validation:**
-  - `HiRISERasterProvider` inspects Rasterio band units (`src.units[0]`), band tags (`src.tags(1)`), and dataset tags (`src.tags()`) for `VERTICAL_UNIT`, `VERTICAL_UNITS`, `ELEVATION_UNIT`, `ELEVATION_UNITS`, `Z_UNIT`, `Z_UNITS`, `UNIT_TYPE`, `UNITTYPE`, `UNIT`, `UNITS`.
+  - `HiRISERasterProvider` inspects Rasterio band units (`src.units[0]`), band tags (`src.tags(1)`), dataset tags (`src.tags()`), and PDS3 label fields for `VERTICAL_UNIT`, `VERTICAL_UNITS`, `ELEVATION_UNIT`, `ELEVATION_UNITS`, `Z_UNIT`, `Z_UNITS`, `UNIT_TYPE`, `UNITTYPE`, `UNIT`, `UNITS`.
   - Metres (`"m"`, `"meter"`, `"meters"`, `"metre"`, `"metres"`) are accepted only when explicitly declared. Explicit metric linear units (`"cm"`, `"mm"`, `"km"`) are converted to meters on valid non-NoData pixels with documented conversion metadata (`VERTICAL_UNIT_CONVERSION`).
   - Missing, unknown, ambiguous, or conflicting vertical units are rejected with `rejected_unknown_vertical_units`; unsupported imperial/angular units (`"feet"`, `"degrees"`) are rejected with `rejected_unsupported_vertical_units`; radiometric/imagery units (`"dn"`, `"reflectance"`, `"radiance"`, `"albedo"`) are rejected with `rejected_non_elevation_raster`. Numeric value plausibility or unauthenticated product tags are never used to infer vertical units.
-- **Process-Level Resource Management & Cache Invalidation Policy:**
+- **Process-Level Resource Management & Fast Hashing:**
   - Validation results, read-only `RasterData` (`writeable = False`), full-file SHA-256 digests, raster statistics, and provenance dictionaries are cached in a thread-safe (`threading.RLock()`), bounded (`MAX_CACHE_ENTRIES = 2`) process-level `OrderedDict` keyed by file identity (`(realpath, st_size, st_mtime_ns, st_ctime_ns, st_ino, sample_crc32)`).
+  - Avoids redundant full-file MD5 hashing passes when no catalog candidate contains an MD5 checksum for the product, computing only SHA-256 for local integrity verification.
   - Across repeated `RouteService`, `DataCatalogService`, and `HiRISERasterProvider` requests, an unchanged local HiRISE file is loaded **once** and hashed **once** per process (~250 MB float32 + bool mask memory footprint for a $7{,}000 \times 7{,}000$ DTM). If the file on disk is modified or replaced, stale entries for that path are immediately evicted and recomputed.
 - **Configuration & Provisioning:**
-  - Controlled via `MARSPATH_USE_HIRISE_DEM=true|false` (default `false`) and `MARSPATH_HIRISE_DEM_PATH=backend/app/data/rasters/hirise_jezero_delta_dtm.tif`.
+  - Controlled via `MARSPATH_USE_HIRISE_DEM=true|false` (default `false`) and `MARSPATH_HIRISE_DEM_PATH` (accepting either `.tif` or `.IMG` paths).
   - Optional: when `MARSPATH_USE_HIRISE_DEM=false` or when a route extends outside the HiRISE footprint, MARSPath automatically uses the regional MOLA–HRSC 200 m/px DEM without failing startup.
-- **Honest Provenance & Unverified Local Status:**
-  - Unless an authoritative upstream SHA-256 or MD5 checksum is independently verified against `DATA_CATALOG_MANIFEST`, a locally supplied HiRISE GeoTIFF is classified as `valid_numeric_raster_unverified_source` (`data_mode = "real_unverified_source"`, `source_checksum_verified = false`, `official_product_id = null`, `evidence_passport.quality_tier = "unverified"`).
+- **Honest Provenance & Product Identity Integrity:**
+  - Preserves exact product identity (e.g. `DTEEC_045994_1985_046060_1985_U01` is never misattributed as `ESP_037803_1985` merely due to spatial overlap).
+  - Unless an authoritative upstream SHA-256 or MD5 checksum is independently verified against `DATA_CATALOG_MANIFEST`, a locally supplied HiRISE product is classified as `valid_numeric_raster_unverified_source` (`data_mode = "real_unverified_source"`, `source_checksum_verified = false`, `official_product_id = null`, `evidence_passport.quality_tier = "unverified"`).
   - MARSPath **never** fabricates HiRISE checksums, URLs, or `verified_source` status for unauthenticated local HiRISE files.
 - **Vertical Datum & Stereo DTM Caveats:**
-  - HiRISE stereo DTMs are typically controlled to MOLA altimetry profiles or local stereo bundle adjustments; unless an explicit Mars vertical datum is embedded in the GeoTIFF tags and verified, the vertical datum is reported as `"Unspecified / Unverified Local Mars Vertical Reference"` and explicitly disclosed in `source_limitations`.
+  - HiRISE stereo DTMs are controlled to Mars equipotential surfaces / MOLA altimetry profiles; the verified vertical reference datum is preserved and displayed in the Evidence Passport.
   - Stereo correlation can contain local interpolation artifacts over featureless sand, steep shadows, or scarp overhangs, and even ~1 m/px DTMs do **not** resolve sub-meter rocks, sharp wheel-scale hazards, or soil bearing capacity (`obstacle_detection_capable = false`).
 
 ---
