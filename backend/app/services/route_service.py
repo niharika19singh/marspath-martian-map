@@ -37,6 +37,7 @@ from backend.app.schemas.routes import (
 )
 from backend.app.services.evidence_service import EvidenceService
 from backend.app.services.risk_service import RiskService
+from backend.app.services.robustness_service import RobustnessService
 
 logger = logging.getLogger("marspath.services.route_service")
 
@@ -50,8 +51,9 @@ class RouteService:
         # 1. Validate CRS
         validate_crs(request.crs_identifier)
 
-        # 2. Validate Constraints
+        # 2. Validate Constraints & Optional Robustness Config
         validate_constraints(request.constraints)
+        RobustnessService.validate_config(request.robustness_config)
 
         # 3. Retrieve Raster
         master_raster = self.provider.get_dem_raster()
@@ -146,6 +148,8 @@ class RouteService:
         search_start = time.perf_counter()
         total_nodes_expanded = 0
         routes: list[RouteAlternative] = []
+        baseline_route_nodes: dict[str, list[tuple[int, int]]] = {}
+        waypoint_pixels: list[tuple[int, int]] = []
 
         # 10. Route Search Execution
         if request.science_waypoints:
@@ -154,7 +158,6 @@ class RouteService:
                 "Executing multi-leg route via %d user science waypoints.",
                 len(request.science_waypoints),
             )
-            waypoint_pixels: list[tuple[int, int]] = []
 
             for idx, wp in enumerate(request.science_waypoints):
                 w_col, w_row = geo_to_pixel(
@@ -203,6 +206,7 @@ class RouteService:
                 mode=request.mode,
             )
 
+            baseline_route_nodes["route_primary_waypoint_guided"] = list(full_path)
             primary_route = RouteAlternative(
                 route_id="route_primary_waypoint_guided",
                 name=f"Primary Route via {len(request.science_waypoints)} Science Waypoint(s)",
@@ -232,6 +236,7 @@ class RouteService:
                     science_targets=science_pois,
                     master_meta=meta,
                     provenance=provenance,
+                    route_nodes_out=baseline_route_nodes,
                 )
                 total_nodes_expanded += alt_nodes
                 for a in alts:
@@ -334,6 +339,7 @@ class RouteService:
                     provenance=provenance,
                     mode=request.mode,
                 )
+                baseline_route_nodes["route_science_primary"] = list(best_detour_nodes)
                 sci_route = RouteAlternative(
                     route_id="route_science_primary",
                     name=f"Science-First Detour via {candidate_poi.name}",
@@ -371,6 +377,7 @@ class RouteService:
                         provenance=provenance,
                         mode=request.mode,
                     )
+                    baseline_route_nodes["route_direct_baseline"] = list(direct_nodes)
                     dir_route = RouteAlternative(
                         route_id="route_direct_baseline",
                         name="Direct Balanced Path (No Detour)",
@@ -398,6 +405,7 @@ class RouteService:
                     science_targets=science_pois,
                     master_meta=meta,
                     provenance=provenance,
+                    route_nodes_out=baseline_route_nodes,
                 )
                 total_nodes_expanded += alt_nodes
         else:
@@ -412,8 +420,28 @@ class RouteService:
                 science_targets=science_pois,
                 master_meta=meta,
                 provenance=provenance,
+                route_nodes_out=baseline_route_nodes,
             )
             total_nodes_expanded += alt_nodes
+
+        # 10b. Optional Route Robustness Stress Testing
+        robustness_assessment = RobustnessService.evaluate_route_robustness(
+            config=request.robustness_config,
+            cropped_elevation=cropped_elev,
+            cropped_meta=cropped_meta,
+            dx_meters=dx_meters,
+            dy_meters=dy_meters,
+            start_px=(s_row, s_col),
+            dest_px=(d_row, d_col),
+            requested_mode=request.mode,
+            constraints=request.constraints,
+            baseline_routes=routes,
+            baseline_route_nodes=baseline_route_nodes,
+            waypoint_pixels=waypoint_pixels,
+            provenance=provenance,
+            is_synthetic=is_syn,
+            max_cells=self.settings.MAX_GRID_CELLS,
+        )
 
         # 11. Compile provenance & limitations
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
@@ -469,4 +497,5 @@ class RouteService:
             routes=routes,
             stats=stats,
             limitations=limitations,
+            robustness_assessment=robustness_assessment,
         )

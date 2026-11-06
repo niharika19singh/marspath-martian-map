@@ -107,8 +107,59 @@ def test_openapi_exposes_evidence_passport_schemas():
         "ResolutionAssessment",
         "RouteSegment",
         "EvidenceQualityTier",
+        "RobustnessConfig",
+        "RouteRobustnessAssessment",
+        "BaselineRouteRobustness",
+        "RobustnessScenarioResult",
+        "ScenarioBaselineRouteResult",
+        "UncertaintyAssumptions",
     ]:
         assert model_name in schemas, f"Missing OpenAPI schema: {model_name}"
+
+
+def test_route_plan_with_robustness_stress_testing():
+    payload = {
+        "start": {"lon": 77.40, "lat": 18.39},
+        "destination": {"lon": 77.44, "lat": 18.42},
+        "crs_identifier": "IAU2000:49900",
+        "mode": "balanced",
+        "num_alternatives": 2,
+        "robustness_config": {
+            "enabled": True,
+            "vertical_sigma_m": 1.5,
+            "correlation_length_m": 400.0,
+            "scenario_count": 3,
+            "seed": 42,
+            "cost_regret_threshold_fraction": 0.05,
+        },
+    }
+    response = client.post("/api/v1/routes/plan", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["robustness_assessment"] is not None
+    rob = data["robustness_assessment"]
+    assert rob["enabled"] is True
+    assert rob["model_name"] == "spatially_correlated_gaussian_elevation_perturbation"
+    assert rob["requested_scenario_count"] == 3
+    assert rob["completed_scenario_count"] + rob["failed_scenario_count"] == 3
+    assert len(rob["scenario_results"]) == 3
+    assert len(rob["baseline_route_assessments"]) == len(data["routes"])
+    assert (
+        rob["scientific_disclaimer"]
+        == "Results describe route stability under the specified hypothetical terrain perturbation model. They do not establish the actual probability of rover failure or mission success."
+    )
+
+
+def test_route_plan_robustness_enabled_without_parameters_rejected():
+    payload = {
+        "start": {"lon": 77.40, "lat": 18.39},
+        "destination": {"lon": 77.44, "lat": 18.42},
+        "robustness_config": {
+            "enabled": True,
+        },
+    }
+    response = client.post("/api/v1/routes/plan", json=payload)
+    assert response.status_code == 422
 
 
 def test_route_plan_unsupported_crs():

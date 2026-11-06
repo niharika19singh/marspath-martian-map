@@ -350,6 +350,7 @@ def generate_route_alternatives(
     science_targets: list[ScienceTarget] | None = None,
     master_meta: RasterMetadata | None = None,
     provenance: dict[str, Any] | None = None,
+    route_nodes_out: dict[str, list[tuple[int, int]]] | None = None,
 ) -> tuple[list[RouteAlternative], int]:
     """
     Computes 1 to 3 distinct candidate routes and attaches a structured
@@ -381,6 +382,9 @@ def generate_route_alternatives(
         provenance=effective_prov,
         mode=requested_mode,
     )
+
+    if route_nodes_out is not None:
+        route_nodes_out["route_primary_opt"] = list(primary_nodes)
 
     results.append(
         RouteAlternative(
@@ -437,6 +441,8 @@ def generate_route_alternatives(
                 mode=requested_mode,
                 penalized_edges=penalized_edges,
             )
+            if route_nodes_out is not None:
+                route_nodes_out["route_alt_corridor"] = list(alt_nodes)
             results.append(
                 RouteAlternative(
                     route_id="route_alt_corridor",
@@ -502,6 +508,8 @@ def generate_route_alternatives(
                     provenance=effective_prov,
                     mode=alt_mode,
                 )
+                if route_nodes_out is not None:
+                    route_nodes_out["route_safety_backup"] = list(safety_nodes)
                 results.append(
                     RouteAlternative(
                         route_id="route_safety_backup",

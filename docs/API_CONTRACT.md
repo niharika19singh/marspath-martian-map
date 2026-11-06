@@ -448,6 +448,58 @@ These two measurements are computed independently from the active cropped raster
 
 ---
 
+## 🧪 Route Robustness Stress Testing (`robustness_config` & `robustness_assessment`)
+
+MARSPath supports optional deterministic terrain perturbation stress testing via `robustness_config` on `POST /api/v1/routes/plan`.
+
+> **Scientific Integrity Requirement:** The default USGS HRSC/MOLA blended DEM (`Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2`) does **not** establish a validated per-pixel vertical error standard deviation or spatial correlation length in its provenance metadata. Therefore, MARSPath never invents DEM uncertainty parameters. When `robustness_config.enabled` is `true`, the caller must explicitly provide `vertical_sigma_m` ($> 0$) and `correlation_length_m` ($> 0$) as hypothetical stress-test assumptions; omitting either parameter returns `422 Unprocessable Entity`. When `robustness_config` is omitted or `enabled: false`, zero perturbation scenarios are generated and `robustness_assessment` is `null`.
+
+### Optional Request Block (`robustness_config`)
+```json
+{
+  "robustness_config": {
+    "enabled": true,
+    "vertical_sigma_m": 1.5,
+    "correlation_length_m": 400.0,
+    "scenario_count": 5,
+    "seed": 42,
+    "cost_regret_threshold_fraction": 0.05
+  }
+}
+```
+- `enabled` (`bool`, default `false`): Enables deterministic perturbation stress testing.
+- `vertical_sigma_m` (`float > 0`, required when `enabled: true`): Assumed $1\sigma$ vertical elevation perturbation amplitude in meters over valid non-nodata cells.
+- `correlation_length_m` (`float > 0`, required when `enabled: true`): Assumed Gaussian spatial correlation length scale $L_c$ in meters.
+- `scenario_count` (`int`, bounded `3..20`, default `5`): Number of independent perturbation scenarios to evaluate.
+- `seed` (`int`, default `42`): Master deterministic seed used to derive per-scenario seeds via `numpy.random.SeedSequence`.
+- `cost_regret_threshold_fraction` (`float >= 0.0`, default `0.05`): Comparative reporting criterion for relative cost regret. **This is a comparative routing efficiency criterion, NOT a physical rover safety threshold.**
+
+### Perturbation Model & Route Comparison Metrics
+1. **Spatially Correlated Gaussian Elevation Perturbation (`spatially_correlated_gaussian_elevation_perturbation`):**
+   - For each scenario $k$, a zero-mean unit-variance Gaussian field $W_k \sim \mathcal{N}(0, 1)$ is generated using `scenario_seed` (with nodata cells zeroed prior to convolution) and convolved with a 2D separable Gaussian filter with pixel standard deviations:
+     $$\sigma_x = \frac{L_c}{\Delta x}, \quad \sigma_y = \frac{L_c}{\Delta y}$$
+     where $\Delta x$ (`actual_dx_meters`) and $\Delta y$ (`actual_dy_meters`) are the actual physical cell dimensions in meters.
+   - The filtered field is centered to zero mean and scaled to standard deviation `vertical_sigma_m` strictly over valid non-nodata cells, then added to a copy of the cropped elevation array while preserving the original nodata mask unchanged.
+   - Slope (`compute_slope_degrees`), roughness (`compute_roughness_index`), traversability (`build_traversability_mask`), the 8-connected `TerrainGridGraph`, and `astar_search` are recomputed from scratch for each scenario.
+2. **Baseline Route Feasibility (`baseline_route_feasibility_fraction`):**
+   - Checks whether every grid cell and step along the baseline route remains traversable in the scenario, strictly enforcing the **diagonal corner-cutting constraint** (a diagonal move is infeasible if either orthogonal neighbor is untraversable).
+3. **Jaccard Route Overlap (`jaccard_overlap_fraction`, `mean_route_overlap_fraction`, `minimum_route_overlap_fraction`):**
+   - Computed over discrete `(row, col)` grid-cell identities:
+     $$\text{Jaccard Overlap} = \frac{|N_{\text{baseline}} \cap N_{\text{scenario}}|}{|N_{\text{baseline}} \cup N_{\text{scenario}}|}$$
+4. **Relative Cost Regret (`cost_regret_fraction`, `mean_cost_regret_fraction`, `maximum_cost_regret_fraction`):**
+   - Computed only when the baseline route is feasible in the scenario and `scenario_optimal_cost` is valid:
+     $$\text{cost\_regret\_fraction} = \frac{C_{\text{baseline in scenario}} - C_{\text{scenario optimal}}}{C_{\text{scenario optimal}}}$$
+     Tiny negative values ($-10^{-9} \le \text{regret} < 0$) from floating-point rounding are clamped to `0.0`.
+5. **Route Retention (`baseline_route_retention_fraction`):**
+   - Fraction of **evaluated (completed) scenarios** (`completed_scenario_count`) in which the baseline route remained traversable, had a valid scenario cost, and satisfied `cost_regret_fraction <= cost_regret_threshold_fraction`.
+   - Failed scenarios (`failed_untraversable_endpoint`, `failed_unreachable`, `failed_computational_bound`, `failed_error`) are reported transparently in `scenario_results` and are never treated as positive stability evidence.
+6. **Separation of Evidence Quality vs. Route Stability:**
+   - `evidence_passport.quality_tier` measures the authenticity, completeness, and resolution of the source DEM.
+   - `robustness_assessment` measures geometric and cost sensitivity of the route to hypothetical elevation perturbations. Neither metric is a calibrated probability of rover survival or mission success:
+     > *"Results describe route stability under the specified hypothetical terrain perturbation model. They do not establish the actual probability of rover failure or mission success."*
+
+---
+
 ## ⚠️ Error Responses
 
 | Code | Cause | Sample Response |

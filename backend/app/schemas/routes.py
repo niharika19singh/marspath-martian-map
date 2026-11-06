@@ -1,7 +1,8 @@
+import math
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo, MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode, RouteConstraints
@@ -149,6 +150,105 @@ class ResolutionAssessment(BaseModel):
     )
 
 
+class RobustnessConfig(BaseModel):
+    """
+    Optional configuration for deterministic route robustness stress testing under
+    hypothetical spatially correlated Gaussian elevation perturbations.
+
+    NOTE: The default USGS HRSC/MOLA blended DEM does not publish a validated per-cell
+    vertical error standard deviation or spatial correlation length in its metadata.
+    Therefore, when `enabled` is True, `vertical_sigma_m` and `correlation_length_m`
+    must be explicitly supplied by the caller as hypothetical stress-test assumptions.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Whether deterministic terrain perturbation stress testing is enabled",
+    )
+    vertical_sigma_m: float | None = Field(
+        default=None,
+        description=(
+            "Assumed one-standard-deviation vertical perturbation amplitude in meters "
+            "(strictly positive float required when enabled=True; never invented automatically)"
+        ),
+    )
+    correlation_length_m: float | None = Field(
+        default=None,
+        description=(
+            "Gaussian spatial correlation length scale in meters "
+            "(strictly positive float required when enabled=True; never invented automatically)"
+        ),
+    )
+    scenario_count: int = Field(
+        default=5,
+        ge=3,
+        le=20,
+        description="Number of independently generated perturbation scenarios (bounded between 3 and 20)",
+    )
+    seed: int = Field(
+        default=42,
+        description="Deterministic integer random seed for reproducible scenario generation",
+    )
+    cost_regret_threshold_fraction: float = Field(
+        default=0.05,
+        ge=0.0,
+        description=(
+            "Configurable non-negative relative cost-regret reporting threshold fraction "
+            "(default 0.05). Reporting criterion only, NOT a physical safety threshold."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_required_assumptions_when_enabled(self) -> "RobustnessConfig":
+        if self.enabled:
+            if (
+                self.vertical_sigma_m is None
+                or isinstance(self.vertical_sigma_m, bool)
+                or not math.isfinite(self.vertical_sigma_m)
+                or self.vertical_sigma_m <= 0.0
+            ):
+                raise ValueError(
+                    "vertical_sigma_m must be explicitly provided as a positive number when "
+                    "robustness_config.enabled is True. The backend does not invent unverified "
+                    "USGS DEM vertical uncertainty parameters."
+                )
+            if (
+                self.correlation_length_m is None
+                or isinstance(self.correlation_length_m, bool)
+                or not math.isfinite(self.correlation_length_m)
+                or self.correlation_length_m <= 0.0
+            ):
+                raise ValueError(
+                    "correlation_length_m must be explicitly provided as a positive number when "
+                    "robustness_config.enabled is True. The backend does not invent unverified "
+                    "USGS DEM spatial correlation parameters."
+                )
+        else:
+            if self.vertical_sigma_m is not None and (
+                isinstance(self.vertical_sigma_m, bool)
+                or not math.isfinite(self.vertical_sigma_m)
+                or self.vertical_sigma_m <= 0.0
+            ):
+                raise ValueError("vertical_sigma_m must be a positive finite float when provided.")
+            if self.correlation_length_m is not None and (
+                isinstance(self.correlation_length_m, bool)
+                or not math.isfinite(self.correlation_length_m)
+                or self.correlation_length_m <= 0.0
+            ):
+                raise ValueError(
+                    "correlation_length_m must be a positive finite float when provided."
+                )
+        if (
+            isinstance(self.cost_regret_threshold_fraction, bool)
+            or not math.isfinite(self.cost_regret_threshold_fraction)
+            or self.cost_regret_threshold_fraction < 0.0
+        ):
+            raise ValueError(
+                "cost_regret_threshold_fraction must be a non-negative finite float."
+            )
+        return self
+
+
 class RoutePlanRequest(BaseModel):
     """Payload for requesting an optimized Martian route."""
 
@@ -177,6 +277,13 @@ class RoutePlanRequest(BaseModel):
         ge=1,
         le=3,
         description="Number of distinct alternative routes to compute (1-3)",
+    )
+    robustness_config: RobustnessConfig | None = Field(
+        default=None,
+        description=(
+            "Optional configuration for deterministic route robustness stress testing under "
+            "hypothetical terrain perturbations. Disabled when omitted or enabled=False."
+        ),
     )
 
 
@@ -444,6 +551,291 @@ class ComputationStats(BaseModel):
     cell_size_meters: float = Field(..., description="Physical cell width/height in meters")
 
 
+class UncertaintyAssumptions(BaseModel):
+    """Explicit hypothetical terrain perturbation assumptions used in robustness stress testing."""
+
+    vertical_sigma_m: float = Field(
+        ...,
+        description="Assumed one-standard-deviation vertical perturbation amplitude in meters over valid cells",
+    )
+    correlation_length_m: float = Field(
+        ...,
+        description="Assumed Gaussian spatial correlation length scale in meters",
+    )
+    pixel_sigma_x: float = Field(
+        ...,
+        description="Gaussian filter kernel standard deviation along columns (correlation_length_m / actual_dx_meters)",
+    )
+    pixel_sigma_y: float = Field(
+        ...,
+        description="Gaussian filter kernel standard deviation along rows (correlation_length_m / actual_dy_meters)",
+    )
+    actual_dx_meters: float = Field(
+        ...,
+        description="Actual zonal pixel width in meters used to derive pixel_sigma_x",
+    )
+    actual_dy_meters: float = Field(
+        ...,
+        description="Actual meridional pixel height in meters used to derive pixel_sigma_y",
+    )
+    cost_regret_threshold_fraction: float = Field(
+        ...,
+        description="Configured relative cost-regret reporting threshold fraction",
+    )
+    cost_regret_threshold_interpretation: str = Field(
+        default=(
+            "Reporting criterion for comparing baseline route cost against scenario-optimal route cost; "
+            "NOT a physical rover safety threshold or survival boundary."
+        ),
+        description="Explicit clarification that the regret threshold is a comparative reporting criterion",
+    )
+    filter_kernel_definition: str = Field(
+        default=(
+            "2D separable Gaussian convolution K(dr, dc) proportional to "
+            "exp(-dr^2 / (2 * pixel_sigma_y^2) - dc^2 / (2 * pixel_sigma_x^2)), "
+            "where pixel_sigma_y = correlation_length_m / actual_dy_meters and "
+            "pixel_sigma_x = correlation_length_m / actual_dx_meters, followed by zero-mean "
+            "and vertical_sigma_m standard-deviation normalization strictly over valid non-nodata cells."
+        ),
+        description="Mathematical definition of the spatial filter and normalization",
+    )
+    parameters_are_user_assumed_not_measured_dem_error: bool = Field(
+        default=True,
+        description="True because perturbation parameters are user-supplied stress-test assumptions, not empirically measured USGS DEM errors",
+    )
+    source_uncertainty_metadata_available: bool = Field(
+        default=False,
+        description="False when the active DEM metadata does not publish a validated per-cell vertical error sigma or spatial correlation scale",
+    )
+    assumption_disclosure: str = Field(
+        default=(
+            "The USGS HRSC/MOLA blended DEM does not publish a validated per-pixel vertical error "
+            "distribution or spatial correlation length in its provenance metadata. The vertical_sigma_m "
+            "and correlation_length_m values are hypothetical user-specified stress-test assumptions."
+        ),
+        description="Explicit disclosure of the origin of uncertainty parameters",
+    )
+
+
+class ScenarioBaselineRouteResult(BaseModel):
+    """Evaluation of a single baseline route alternative under a single perturbed terrain scenario."""
+
+    route_id: str = Field(..., description="Identifier of the evaluated baseline route")
+    feasible: bool = Field(
+        ...,
+        description=(
+            "True only if every node and step along the baseline route remains traversable in "
+            "the perturbed scenario, including diagonal corner-cutting constraints"
+        ),
+    )
+    infeasibility_reason: str | None = Field(
+        default=None,
+        description="Diagnostic explanation if the baseline route failed scenario traversability or corner-cutting checks",
+    )
+    baseline_node_count: int = Field(
+        ..., description="Number of distinct grid nodes in the baseline route"
+    )
+    scenario_optimal_node_count: int = Field(
+        default=0,
+        description="Number of distinct grid nodes in the scenario-optimal route (0 if scenario search failed)",
+    )
+    shared_node_count: int = Field(
+        default=0,
+        description="Number of grid nodes shared in the intersection of baseline and scenario-optimal routes",
+    )
+    jaccard_overlap_fraction: float | None = Field(
+        default=None,
+        description=(
+            "Jaccard route overlap |intersection(baseline_nodes, scenario_nodes)| / "
+            "|union(baseline_nodes, scenario_nodes)| over grid cell identities, or None if scenario search failed"
+        ),
+    )
+    baseline_cost_in_scenario: float | None = Field(
+        default=None,
+        description="Total cost of traversing the baseline route on the perturbed scenario graph when feasible, or None when infeasible",
+    )
+    scenario_optimal_cost: float | None = Field(
+        default=None,
+        description="Optimal A* route cost on the perturbed scenario graph, or None if scenario search failed",
+    )
+    cost_regret_fraction: float | None = Field(
+        default=None,
+        description=(
+            "(baseline_cost_in_scenario - scenario_optimal_cost) / scenario_optimal_cost "
+            "when baseline route is feasible and scenario optimal cost is valid, else None"
+        ),
+    )
+    within_regret_threshold: bool = Field(
+        default=False,
+        description="True when baseline route is feasible, has valid scenario cost, and cost_regret_fraction <= cost_regret_threshold_fraction",
+    )
+    exceeds_regret_threshold: bool = Field(
+        default=False,
+        description="True when baseline route is feasible with valid cost regret strictly exceeding cost_regret_threshold_fraction",
+    )
+
+
+class RobustnessScenarioResult(BaseModel):
+    """Outcome of a single deterministic terrain perturbation scenario."""
+
+    scenario_index: int = Field(..., description="Zero-based index of the perturbation scenario")
+    scenario_seed: int = Field(
+        ..., description="Deterministic integer seed used to generate this scenario's random field"
+    )
+    scenario_status: str = Field(
+        ...,
+        description=(
+            "Scenario execution status: 'completed', 'failed_untraversable_endpoint', "
+            "'failed_unreachable', 'failed_computational_bound', or 'failed_error'"
+        ),
+    )
+    realized_perturbation_std_m: float | None = Field(
+        default=None,
+        description="Measured standard deviation of the elevation perturbation across valid raster cells in meters",
+    )
+    scenario_optimal_cost: float | None = Field(
+        default=None,
+        description="Optimal A* traversal cost in the perturbed scenario, or None if scenario search failed",
+    )
+    scenario_nodes_expanded: int = Field(
+        default=0,
+        description="Number of priority queue states expanded by A* in this scenario",
+    )
+    scenario_route_length_meters: float | None = Field(
+        default=None,
+        description="3D surface length of the scenario-optimal route in meters, or None if scenario search failed",
+    )
+    baseline_route_results: list[ScenarioBaselineRouteResult] = Field(
+        default_factory=list,
+        description="Per-route comparison results for each baseline route alternative in this scenario",
+    )
+    error_reason: str | None = Field(
+        default=None,
+        description="Detailed failure reason when scenario_status is not 'completed', else None",
+    )
+
+
+class BaselineRouteRobustness(BaseModel):
+    """Aggregate stability metrics for a baseline route across evaluated perturbation scenarios."""
+
+    route_id: str = Field(..., description="Identifier of the baseline route alternative")
+    evaluated_scenario_count: int = Field(
+        default=0,
+        description="Number of completed scenarios against which route retention and overlap were evaluated",
+    )
+    scenario_feasible_count: int = Field(
+        ..., description="Number of scenarios in which the baseline route remained fully traversable"
+    )
+    scenario_infeasible_count: int = Field(
+        ...,
+        description="Number of scenarios in which at least one baseline route node or diagonal step failed traversability",
+    )
+    baseline_route_feasibility_fraction: float = Field(
+        ...,
+        description="Fraction of evaluated scenarios in which the baseline route remained traversable [0.0 - 1.0]",
+    )
+    mean_route_overlap_fraction: float | None = Field(
+        default=None,
+        description="Mean Jaccard grid-cell overlap between baseline and scenario-optimal routes across completed scenarios",
+    )
+    minimum_route_overlap_fraction: float | None = Field(
+        default=None,
+        description="Minimum Jaccard grid-cell overlap between baseline and scenario-optimal routes across completed scenarios",
+    )
+    mean_cost_regret_fraction: float | None = Field(
+        default=None,
+        description="Mean relative cost regret across feasible completed scenarios, or None if no feasible completed scenarios exist",
+    )
+    maximum_cost_regret_fraction: float | None = Field(
+        default=None,
+        description="Maximum relative cost regret across feasible completed scenarios, or None if no feasible completed scenarios exist",
+    )
+    within_regret_threshold_count: int = Field(
+        ...,
+        description="Number of evaluated scenarios where the baseline route was feasible, had valid cost, and stayed within the regret threshold",
+    )
+    exceeding_regret_threshold_count: int = Field(
+        default=0,
+        description="Number of feasible evaluated scenarios where the baseline route exceeded the configured cost-regret threshold",
+    )
+    baseline_route_retention_fraction: float = Field(
+        ...,
+        description=(
+            "Fraction of evaluated scenarios in which the baseline route remained traversable, had valid "
+            "scenario cost, and fell within the configured cost-regret threshold. "
+            "Fraction of explicitly tested scenarios ONLY; NOT a probability of mission success."
+        ),
+    )
+    interpretation: str = Field(
+        ...,
+        description="Non-probabilistic engineering summary of route geometry overlap, feasibility, and cost regret",
+    )
+
+
+class RouteRobustnessAssessment(BaseModel):
+    """
+    Deterministic terrain perturbation stress-test assessment for planned routes.
+    Describes route geometric and cost stability under user-specified hypothetical
+    terrain perturbations; never represents a probability of rover survival or mission success.
+    """
+
+    enabled: bool = Field(default=True, description="True when robustness stress testing was executed")
+    model_name: str = Field(
+        default="spatially_correlated_gaussian_elevation_perturbation",
+        description="Identifier of the deterministic terrain perturbation model",
+    )
+    model_description: str = Field(
+        ...,
+        description="Detailed explanation of how spatially correlated Gaussian elevation perturbations are generated and evaluated",
+    )
+    uncertainty_assumptions: UncertaintyAssumptions = Field(
+        ...,
+        description="Explicit user-supplied perturbation assumptions and derived pixel filter scales",
+    )
+    seed: int = Field(..., description="Master deterministic random seed used for scenario generation")
+    requested_scenario_count: int = Field(
+        ..., description="Total number of perturbation scenarios requested"
+    )
+    completed_scenario_count: int = Field(
+        ..., description="Number of perturbation scenarios that completed route optimization"
+    )
+    failed_scenario_count: int = Field(
+        ...,
+        description="Number of perturbation scenarios where route optimization failed (e.g., untraversable endpoint, unreachable corridor, or search bound exceeded)",
+    )
+    baseline_data_mode: str = Field(
+        ...,
+        description="Active data mode of the baseline terrain (e.g., real, real_official_endpoint_unverified_checksum, synthetic_test_fixture)",
+    )
+    baseline_quality_tier: EvidenceQualityTier = Field(
+        ...,
+        description="Evidence quality tier of the primary baseline route (preserved independently of route robustness)",
+    )
+    baseline_is_synthetic: bool = Field(
+        default=False,
+        description="True when stress testing was executed on synthetic procedural terrain rather than a genuine planetary DEM",
+    )
+    baseline_route_assessments: list[BaselineRouteRobustness] = Field(
+        default_factory=list,
+        description="Aggregated robustness metrics for each baseline route alternative",
+    )
+    scenario_results: list[RobustnessScenarioResult] = Field(
+        default_factory=list,
+        description="Per-scenario optimization outcomes and route comparisons",
+    )
+    scientific_disclaimer: str = Field(
+        default=(
+            "Results describe route stability under the specified hypothetical terrain perturbation "
+            "model. They do not establish the actual probability of rover failure or mission success."
+        ),
+        description="Mandatory scientific disclaimer for route robustness stress testing",
+    )
+    known_limitations: list[str] = Field(
+        default_factory=list,
+        description="Explicit scientific and methodological limitations of the robustness assessment",
+    )
+
+
 class RoutePlanResponse(BaseModel):
     """Complete route intelligence response."""
 
@@ -462,6 +854,13 @@ class RoutePlanResponse(BaseModel):
     limitations: list[str] = Field(
         default_factory=list,
         description="Explicit engineering limitations (e.g. resolution limitations, sub-pixel obstacle disclaimer)",
+    )
+    robustness_assessment: RouteRobustnessAssessment | None = Field(
+        default=None,
+        description=(
+            "Optional deterministic terrain perturbation route stability assessment when "
+            "robustness_config.enabled is True; None when disabled or omitted"
+        ),
     )
 
 
