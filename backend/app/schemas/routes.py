@@ -279,17 +279,44 @@ class RouteSummary(BaseModel):
     total_distance_meters: float = Field(
         ..., description="Total ground path distance in physical meters"
     )
-    elevation_gain_meters: float = Field(..., description="Cumulative ascent along path in meters")
-    elevation_loss_meters: float = Field(..., description="Cumulative descent along path in meters")
-    min_elevation_meters: float = Field(..., description="Lowest topographic elevation encountered")
-    max_elevation_meters: float = Field(
-        ..., description="Highest topographic elevation encountered"
+    elevation_gain_meters: float | None = Field(
+        default=None,
+        description="Cumulative ascent along valid path elevation transitions in meters, or None if no valid elevation transitions exist",
     )
-    max_slope_deg: float = Field(..., description="Steepest local gradient encountered in degrees")
-    average_slope_deg: float = Field(..., description="Mean slope across all traversed cells")
-    average_roughness: float = Field(..., description="Mean normalized roughness across route")
+    elevation_loss_meters: float | None = Field(
+        default=None,
+        description="Cumulative descent along valid path elevation transitions in meters, or None if no valid elevation transitions exist",
+    )
+    min_elevation_meters: float | None = Field(
+        default=None,
+        description="Lowest valid topographic elevation encountered in meters, or None if no valid elevation observations exist",
+    )
+    max_elevation_meters: float | None = Field(
+        default=None,
+        description="Highest valid topographic elevation encountered in meters, or None if no valid elevation observations exist",
+    )
+    max_slope_deg: float | None = Field(
+        default=None,
+        description="Steepest valid local gradient encountered in degrees, or None if no valid slope observations exist",
+    )
+    average_slope_deg: float | None = Field(
+        default=None,
+        description="Mean slope across valid observed cells, or None if no valid slope observations exist",
+    )
+    average_roughness: float | None = Field(
+        default=None,
+        description="Mean normalized roughness across valid observed cells, or None if no valid roughness observations exist",
+    )
     data_coverage_fraction: float = Field(
         ..., description="Proportion of route passing through valid numeric data [0-1]"
+    )
+    elevation_sample_coverage_fraction: float = Field(
+        default=1.0,
+        description="Proportion of route vertices with valid elevation observations [0.0 - 1.0]",
+    )
+    is_complete_measurement: bool = Field(
+        default=True,
+        description="True only when 100% of route vertices have valid elevation, slope, and roughness observations; False when summary metrics are partial aggregates over observed subsets or None",
     )
     estimated_duration_hours: float = Field(
         ..., description="Estimated traversal time assuming rover motion profile"
@@ -320,7 +347,11 @@ class GeoJSONGeometry(BaseModel):
     type: str = "LineString"
     coordinates: list[list[float]] = Field(
         ...,
-        description="List of [lon, lat, elevation] tuples where lon=East degrees, lat=Planetocentric degrees",
+        description=(
+            "RFC 7946 LineString positions: 3D [lon, lat, elevation] tuples when all route "
+            "vertices have valid elevation observations, or 2D [lon, lat] tuples when any "
+            "route vertex lacks a valid elevation observation (never fabricated 0.0 Z values)"
+        ),
     )
 
 

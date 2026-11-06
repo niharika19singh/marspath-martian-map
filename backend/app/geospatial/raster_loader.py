@@ -137,6 +137,7 @@ def load_raster_file(file_path: str) -> RasterData:
         max_lat = float(loaded["max_lat"])
         nodata_val = float(loaded.get("nodata", -9999.0))
         vert_datum = str(loaded.get("vertical_datum", "Unknown / Unspecified"))
+        npz_crs = str(loaded.get("crs", "Unknown / Unspecified")).strip() or "Unknown / Unspecified"
         tags = {str(k): str(v) for k, v in loaded.items() if k not in ("elevation", "data")}
 
         d_lon = (max_lon - min_lon) / data.shape[1]
@@ -149,7 +150,7 @@ def load_raster_file(file_path: str) -> RasterData:
             width=data.shape[1],
             height=data.shape[0],
             coordinate_type="geographic",
-            crs_str="IAU2000:49900",
+            crs_str=npz_crs,
             units="degrees",
             min_lon=min_lon,
             min_lat=min_lat,
@@ -283,7 +284,7 @@ def load_raster_file(file_path: str) -> RasterData:
                         width=src.width,
                         height=src.height,
                         coordinate_type="geographic",
-                        crs_str=str(crs_obj or "IAU2000:49900"),
+                        crs_str=str(crs_obj).strip() if (crs_obj and str(crs_obj).strip()) else "Unknown / Unspecified",
                         units="degrees",
                         min_lon=min_lon,
                         min_lat=bounds.bottom,

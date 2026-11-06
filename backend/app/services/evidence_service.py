@@ -68,6 +68,36 @@ class EvidenceService:
     """Builds structured `RouteEvidencePassport` objects from active raster and route data."""
 
     @staticmethod
+    def _is_established_mars_crs(crs_identifier: str | None) -> bool:
+        """Returns True only if `crs_identifier` is an established Mars planetary CRS."""
+        if not crs_identifier or not crs_identifier.strip():
+            return False
+        norm = crs_identifier.strip().upper()
+        if norm in ("UNKNOWN", "UNSPECIFIED", "UNKNOWN / UNSPECIFIED", "NONE"):
+            return False
+        return any(
+            token in norm
+            for token in (
+                "IAU2000:49900",
+                "IAU_2000:49900",
+                "IAU_2015:49900",
+                "ESRI:104971",
+                "MARS",
+                "49900",
+                "104971",
+                "3396190",
+            )
+        )
+
+    @staticmethod
+    def _is_known_vertical_datum(vertical_datum: str | None) -> bool:
+        """Returns True only if `vertical_datum` is explicitly declared and not unknown/unspecified."""
+        if not vertical_datum or not vertical_datum.strip():
+            return False
+        norm = vertical_datum.strip().lower()
+        return "unknown" not in norm and "unspecified" not in norm and norm != "none"
+
+    @staticmethod
     def build_source_evidence(
         master_meta: RasterMetadata,
         provenance: dict[str, Any],
@@ -111,8 +141,11 @@ class EvidenceService:
             product_id = provenance.get("official_product_id")
             publisher = provenance.get("data_publisher") or "USGS Astrogeology Science Center"
             official_source_url = provenance.get("official_source_url")
-            local_integrity_verified = provenance.get("local_integrity_verified", True)
-            source_checksum_verified = bool(provenance.get("source_checksum_verified", False))
+            raw_local_integrity = provenance.get("local_integrity_verified")
+            local_integrity_verified = (
+                raw_local_integrity if isinstance(raw_local_integrity, bool) else None
+            )
+            source_checksum_verified = provenance.get("source_checksum_verified") is True
             if product_id == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2":
                 nominal_res = 200.0
             elif product_id == "dem_hirise_jezero_delta_1m":
@@ -127,7 +160,10 @@ class EvidenceService:
             product_id = None
             publisher = provenance.get("data_publisher") or "Unknown / Local Origin"
             official_source_url = None
-            local_integrity_verified = provenance.get("local_integrity_verified")
+            raw_local_integrity = provenance.get("local_integrity_verified")
+            local_integrity_verified = (
+                raw_local_integrity if isinstance(raw_local_integrity, bool) else None
+            )
             source_checksum_verified = False
             nominal_res = None
 
@@ -137,6 +173,11 @@ class EvidenceService:
                 "Operating on deterministic synthetic/procedural terrain model for Jezero Crater. Real NASA/USGS DEM is not loaded.",
                 "Elevation and terrain gradients are mathematically synthesized; unsuitable for operational navigation.",
             ]
+
+        raw_crs = str(master_meta.crs_str or "").strip()
+        crs_identifier = raw_crs if raw_crs else "Unknown / Unspecified"
+        raw_datum = str(master_meta.vertical_datum or "").strip()
+        vertical_datum = raw_datum if raw_datum else "Unknown / Unspecified"
 
         return SourceEvidence(
             dataset_name=dataset_name,
@@ -155,8 +196,8 @@ class EvidenceService:
             nominal_resolution_meters=nominal_res,
             raster_width=int(master_meta.width),
             raster_height=int(master_meta.height),
-            crs_identifier=str(master_meta.crs_str or "IAU2000:49900"),
-            vertical_datum=str(master_meta.vertical_datum or "Unknown / Unspecified"),
+            crs_identifier=crs_identifier,
+            vertical_datum=vertical_datum,
             spatial_coverage=BoundingBox(
                 min_lon=round(float(master_meta.min_lon), 6),
                 min_lat=round(float(master_meta.min_lat), 6),
@@ -282,7 +323,17 @@ class EvidenceService:
         elif not source.source_checksum_verified:
             base_segment_flags.append("source_checksum_unverified")
 
-        if "unknown" in source.vertical_datum.lower() or "unspecified" in source.vertical_datum.lower():
+        if (
+            not source.is_synthetic
+            and source.validation_status != "valid_numeric_raster_unverified_source"
+            and source.local_integrity_verified is not True
+        ):
+            base_segment_flags.append("local_integrity_unverified")
+
+        if not cls._is_established_mars_crs(source.crs_identifier):
+            base_segment_flags.append("unknown_crs")
+
+        if not cls._is_known_vertical_datum(source.vertical_datum):
             base_segment_flags.append("unknown_vertical_datum")
 
         if not resolution.obstacle_detection_capable:
@@ -485,9 +536,8 @@ class EvidenceService:
             )
 
         if (
-            not source.crs_identifier
-            or "unknown" in source.vertical_datum.lower()
-            or "unspecified" in source.vertical_datum.lower()
+            not EvidenceService._is_established_mars_crs(source.crs_identifier)
+            or not EvidenceService._is_known_vertical_datum(source.vertical_datum)
         ):
             low_reasons.append(
                 f"missing or unconfirmed geodetic metadata (CRS='{source.crs_identifier}', "
@@ -507,11 +557,11 @@ class EvidenceService:
                 f"due to material terrain evidence limitations: {'; '.join(low_reasons)}.",
             )
 
-        # 3. MODERATE rules (official source & complete route coverage, but upstream checksum unverified or minor corridor gap)
+        # 3. MODERATE rules (official source & complete route coverage, but upstream checksum/local integrity unverified or minor corridor gap)
         moderate_reasons: list[str] = []
         if (
-            not source.source_checksum_verified
-            or source.validation_status == "official_endpoint_retrieved_checksum_unverified"
+            source.validation_status != "verified_source"
+            or source.source_checksum_verified is not True
         ):
             moderate_reasons.append(
                 "the Jezero Crater sub-window was extracted from the official USGS HTTPS endpoint "
@@ -519,7 +569,13 @@ class EvidenceService:
                 "checksum remains unverified over all source bytes"
             )
 
-        if coverage.corridor_data_coverage_fraction < 1.0:
+        if source.local_integrity_verified is not True:
+            moderate_reasons.append(
+                "local file SHA-256 integrity verification status is missing or unconfirmed "
+                "(local_integrity_verified is None)"
+            )
+
+        if coverage.corridor_data_coverage_fraction < 1.0 or coverage.corridor_invalid_cells > 0:
             moderate_reasons.append(
                 f"the surrounding corridor contains minor nodata cells "
                 f"(corridor coverage={coverage.corridor_data_coverage_fraction:.4f}), though "
@@ -536,11 +592,32 @@ class EvidenceService:
             return (
                 EvidenceQualityTier.MODERATE,
                 f"Assigned 'moderate' tier for official dataset '{source.dataset_name}' "
-                f"({source.product_id}) with 100% valid route observation coverage and verified "
-                f"local file integrity because {'; and '.join(moderate_reasons)}.",
+                f"({source.product_id}) with 100% valid route observation coverage because "
+                f"{'; and '.join(moderate_reasons)}.",
             )
 
-        # 4. HIGH rules (all provenance, checksum, metadata, coverage, and regional resolution criteria met)
+        # 4. Explicit HIGH verification gate: all provenance, checksum, local integrity,
+        # geodetic metadata, coverage, and regional resolution criteria must be satisfied.
+        is_high_eligible = (
+            source.validation_status == "verified_source"
+            and source.source_checksum_verified is True
+            and source.local_integrity_verified is True
+            and EvidenceService._is_established_mars_crs(source.crs_identifier)
+            and EvidenceService._is_known_vertical_datum(source.vertical_datum)
+            and coverage.route_data_coverage_fraction == 1.0
+            and coverage.invalid_route_sample_count == 0
+            and coverage.corridor_data_coverage_fraction == 1.0
+            and coverage.corridor_invalid_cells == 0
+            and coverage.near_nodata_segment_count == 0
+            and resolution.effective_resolution_meters <= 250.0
+        )
+        if not is_high_eligible:
+            return (
+                EvidenceQualityTier.MODERATE,
+                "Assigned 'moderate' tier because one or more mandatory high-tier verification "
+                "requirements were not satisfied.",
+            )
+
         return (
             EvidenceQualityTier.HIGH,
             f"Assigned 'high' regional terrain evidence tier: full upstream source checksum and "
@@ -550,7 +627,8 @@ class EvidenceService:
             f"({coverage.valid_route_sample_count}/{coverage.route_sample_count}) and 100% of "
             f"corridor cells ({coverage.corridor_valid_cells}/{coverage.corridor_total_cells}) "
             f"contain valid observations, and effective resolution "
-            f"({resolution.effective_resolution_meters} m/px) meets regional assessment requirements.",
+            f"({resolution.effective_resolution_meters} m/px) meets regional assessment requirements "
+            f"(<= 250 m/px; obstacle_detection_capable={resolution.obstacle_detection_capable}).",
         )
 
     @classmethod

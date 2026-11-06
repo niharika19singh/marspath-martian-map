@@ -400,7 +400,7 @@ def test_invalid_route_samples_reduce_measured_data_coverage_and_never_become_ze
 
     # Path of 5 nodes passing directly through nodata cell (10, 10)
     path_nodes = [(10, 8), (10, 9), (10, 10), (10, 11), (10, 12)]
-    summary, _, _, _, _ = reconstruct_route_summary(
+    summary, geom, _, _, _ = reconstruct_route_summary(
         path_nodes=path_nodes,
         graph=graph,
         meta=meta,
@@ -408,12 +408,21 @@ def test_invalid_route_samples_reduce_measured_data_coverage_and_never_become_ze
     )
 
     # Nodes (10, 9), (10, 10), (10, 11) have NaN slope/roughness due to nodata dilation;
-    # only (10, 8) and (10, 12) are fully valid (2 / 5 = 0.4)
+    # only (10, 8) and (10, 12) are fully valid (2 / 5 = 0.4), while 4/5 elevations are valid (0.8)
     assert summary.data_coverage_fraction == 0.4
+    assert summary.elevation_sample_coverage_fraction == 0.8
+    assert summary.is_complete_measurement is False
     assert summary.data_coverage_fraction < 1.0
     # Valid elevations are -2500.0; nodata -9999.0 or 0.0 must NOT corrupt min/max elevation
     assert summary.min_elevation_meters == -2500.0
     assert summary.max_elevation_meters == -2500.0
+
+    # Because 1 elevation sample is invalid, geometry must be a 2D RFC 7946 LineString
+    # and NEVER contain a fabricated 0.0 Z coordinate
+    assert geom.type == "LineString"
+    assert len(geom.coordinates) == 5
+    for coord in geom.coordinates:
+        assert len(coord) == 2
 
     passport = EvidenceService.build_route_evidence_passport(
         path_nodes=path_nodes,
@@ -449,6 +458,316 @@ def test_invalid_route_samples_reduce_measured_data_coverage_and_never_become_ze
     assert seg_into_nodata.slope_deg is None
     assert seg_into_nodata.roughness is None
     assert "invalid_or_nodata_segment" in seg_into_nodata.quality_flags
+
+
+def test_geometry_and_summary_never_fabricate_zero_elevations_across_valid_partial_and_all_invalid_routes():
+    """
+    Phase 2.1 Section 1 Regression Suite:
+    1. A route with one invalid elevation sample emits 2D LineString coordinates and partial summary aggregates.
+    2. A route with all elevation samples invalid emits 2D LineString coordinates and None for min/max/gain/loss/slope/roughness.
+    3. A route with fully valid elevations preserves 3D [lon, lat, elev] coordinates and complete summary metrics.
+    4. Neither geometry nor summary ever fabricates 0.0 for missing terrain observations.
+    """
+    rows, cols = 12, 12
+    deg_step = 200.0 / METERS_PER_DEGREE_LATITUDE
+    dx, dy = 200.0, 200.0
+    meta = RasterMetadata(
+        width=cols,
+        height=rows,
+        coordinate_type="geographic",
+        crs_str="IAU2000:49900",
+        units="degrees",
+        min_lon=77.30,
+        min_lat=18.30,
+        max_lon=77.30 + cols * deg_step,
+        max_lat=18.30 + rows * deg_step,
+        deg_per_px_lon=deg_step,
+        deg_per_px_lat=deg_step,
+        meters_per_px_x=dx,
+        meters_per_px_y=dy,
+        affine_transform=(deg_step, 0.0, 77.30, 0.0, -deg_step, 18.30 + rows * deg_step),
+        nodata_value=-9999.0,
+        vertical_datum="Mars_2000_Areoid_MOLA_0m",
+        is_synthetic=False,
+    )
+    path_nodes = [(5, 2), (5, 3), (5, 4), (5, 5), (5, 6)]
+
+    # Case 1: Fully valid elevations (-2540m to -2500m) -> 3D coordinates preserved
+    elev_valid = np.linspace(-2540.0, -2500.0, rows * cols, dtype=np.float32).reshape(rows, cols)
+    nodata_valid = np.zeros((rows, cols), dtype=bool)
+    slopes_valid = compute_slope_degrees(elev_valid, dx, dy, nodata_mask=nodata_valid)
+    rough_valid = compute_roughness_index(elev_valid, kernel_size=3, nodata_mask=nodata_valid)
+    trav_valid = build_traversability_mask(
+        slope_deg=slopes_valid,
+        roughness=rough_valid,
+        nodata_mask=nodata_valid,
+        avoid_unobserved_terrain=False,
+    )
+    graph_valid = TerrainGridGraph(
+        elevation=elev_valid,
+        slope_deg=slopes_valid,
+        roughness=rough_valid,
+        traversable_mask=trav_valid,
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    sum_valid, geom_valid, _, _, _ = reconstruct_route_summary(
+        path_nodes=path_nodes,
+        graph=graph_valid,
+        meta=meta,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert sum_valid.is_complete_measurement is True
+    assert sum_valid.data_coverage_fraction == 1.0
+    assert sum_valid.elevation_sample_coverage_fraction == 1.0
+    assert sum_valid.min_elevation_meters is not None and sum_valid.min_elevation_meters < -2500.0
+    assert sum_valid.max_elevation_meters is not None and sum_valid.max_elevation_meters < -2500.0
+    assert all(len(c) == 3 and c[2] < -2500.0 for c in geom_valid.coordinates)
+
+    # Case 2: One invalid elevation sample at (5, 4) -> 2D LineString, no 0.0 Z value
+    elev_one_bad = elev_valid.copy()
+    elev_one_bad[5, 4] = -9999.0
+    nodata_one_bad = np.zeros((rows, cols), dtype=bool)
+    nodata_one_bad[5, 4] = True
+    slopes_one_bad = compute_slope_degrees(elev_one_bad, dx, dy, nodata_mask=nodata_one_bad)
+    rough_one_bad = compute_roughness_index(elev_one_bad, kernel_size=3, nodata_mask=nodata_one_bad)
+    trav_one_bad = build_traversability_mask(
+        slope_deg=slopes_one_bad,
+        roughness=rough_one_bad,
+        nodata_mask=nodata_one_bad,
+        avoid_unobserved_terrain=False,
+    )
+    graph_one_bad = TerrainGridGraph(
+        elevation=elev_one_bad,
+        slope_deg=slopes_one_bad,
+        roughness=rough_one_bad,
+        traversable_mask=trav_one_bad,
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    sum_one_bad, geom_one_bad, _, _, _ = reconstruct_route_summary(
+        path_nodes=path_nodes,
+        graph=graph_one_bad,
+        meta=meta,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert sum_one_bad.is_complete_measurement is False
+    assert sum_one_bad.elevation_sample_coverage_fraction == 0.8
+    assert sum_one_bad.data_coverage_fraction == 0.4
+    assert sum_one_bad.min_elevation_meters is not None and sum_one_bad.min_elevation_meters < -2500.0
+    assert sum_one_bad.max_elevation_meters is not None and sum_one_bad.max_elevation_meters < -2500.0
+    assert all(len(c) == 2 for c in geom_one_bad.coordinates)
+
+    # Case 3: All elevation samples invalid -> 2D LineString and None for terrain aggregates (never 0.0)
+    elev_all_bad = np.full((rows, cols), -9999.0, dtype=np.float32)
+    nodata_all_bad = np.ones((rows, cols), dtype=bool)
+    slopes_all_bad = compute_slope_degrees(elev_all_bad, dx, dy, nodata_mask=nodata_all_bad)
+    rough_all_bad = compute_roughness_index(elev_all_bad, kernel_size=3, nodata_mask=nodata_all_bad)
+    trav_all_bad = np.ones((rows, cols), dtype=bool)
+    graph_all_bad = TerrainGridGraph(
+        elevation=elev_all_bad,
+        slope_deg=slopes_all_bad,
+        roughness=rough_all_bad,
+        traversable_mask=trav_all_bad,
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    sum_all_bad, geom_all_bad, _, _, _ = reconstruct_route_summary(
+        path_nodes=path_nodes,
+        graph=graph_all_bad,
+        meta=meta,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert sum_all_bad.is_complete_measurement is False
+    assert sum_all_bad.data_coverage_fraction == 0.0
+    assert sum_all_bad.elevation_sample_coverage_fraction == 0.0
+    assert sum_all_bad.min_elevation_meters is None
+    assert sum_all_bad.max_elevation_meters is None
+    assert sum_all_bad.elevation_gain_meters is None
+    assert sum_all_bad.elevation_loss_meters is None
+    assert sum_all_bad.max_slope_deg is None
+    assert sum_all_bad.average_slope_deg is None
+    assert sum_all_bad.average_roughness is None
+    assert sum_all_bad.risk_category == "high"
+    assert all(len(c) == 2 for c in geom_all_bad.coordinates)
+
+
+def test_explicit_high_tier_verification_gates_and_regional_200m_semantics():
+    """
+    Phase 2.1 Section 2 & 3 Regression Suite:
+    1. Verified source with missing local integrity status (`None` or omitted) cannot receive `high`.
+    2. Verified source with missing CRS cannot receive `high` and does not silently default to `IAU2000:49900`.
+    3. Verified source with unknown vertical datum cannot receive `high`.
+    4. A 200 m/px source with independently verified checksum and complete regional evidence receives `high`,
+       with `obstacle_detection_capable` remaining `False`.
+    """
+    rows, cols = 12, 12
+    deg_step = 200.0 / METERS_PER_DEGREE_LATITUDE
+    dx, dy = 189.79, 200.0
+    elev = np.full((rows, cols), -2480.0, dtype=np.float32)
+    nodata_mask = np.zeros((rows, cols), dtype=bool)
+    slopes = compute_slope_degrees(elev, dx, dy, nodata_mask=nodata_mask)
+    rough = compute_roughness_index(elev, kernel_size=3, nodata_mask=nodata_mask)
+    trav = np.ones((rows, cols), dtype=bool)
+    graph = TerrainGridGraph(
+        elevation=elev,
+        slope_deg=slopes,
+        roughness=rough,
+        traversable_mask=trav,
+        dx_meters=dx,
+        dy_meters=dy,
+        mode=OptimizationMode.BALANCED,
+    )
+    base_meta = RasterMetadata(
+        width=cols,
+        height=rows,
+        coordinate_type="geographic",
+        crs_str="IAU2000:49900",
+        units="degrees",
+        min_lon=77.30,
+        min_lat=18.30,
+        max_lon=77.30 + cols * deg_step,
+        max_lat=18.30 + rows * deg_step,
+        deg_per_px_lon=deg_step,
+        deg_per_px_lat=deg_step,
+        meters_per_px_x=dx,
+        meters_per_px_y=dy,
+        affine_transform=(deg_step, 0.0, 77.30, 0.0, -deg_step, 18.30 + rows * deg_step),
+        nodata_value=-32768.0,
+        vertical_datum="Mars_2000_Areoid_MOLA_0m",
+        is_synthetic=False,
+    )
+    base_prov = {
+        "dataset_name": "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2",
+        "official_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+        "official_source_url": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
+        "data_mode": "real",
+        "real_data_validation_status": "verified_source",
+        "provenance_verification_method": "authoritative_manifest_sha256_match",
+        "local_integrity_verified": True,
+        "source_checksum_verified": True,
+        "is_synthetic": False,
+    }
+    path_nodes = [(4, 3), (4, 4), (4, 5), (4, 6)]
+
+    # Gate 4: 200 m/px source with verified checksum + local integrity + Mars CRS + vertical datum + 100% coverage -> HIGH,
+    # while obstacle_detection_capable remains False
+    passport_high = EvidenceService.build_route_evidence_passport(
+        path_nodes=path_nodes,
+        graph=graph,
+        master_meta=base_meta,
+        cropped_meta=base_meta,
+        provenance=base_prov,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert passport_high.quality_tier == EvidenceQualityTier.HIGH
+    assert passport_high.resolution_assessment.effective_resolution_meters == 200.0
+    assert passport_high.resolution_assessment.obstacle_detection_capable is False
+    assert (
+        passport_high.resolution_assessment.suitability_classification
+        == "regional_corridor_assessment_only"
+    )
+
+    # Gate 1: Verified source with missing local_integrity_verified (omitted or None) cannot receive HIGH
+    prov_missing_local_int = dict(base_prov)
+    prov_missing_local_int.pop("local_integrity_verified")
+    passport_no_local_int = EvidenceService.build_route_evidence_passport(
+        path_nodes=path_nodes,
+        graph=graph,
+        master_meta=base_meta,
+        cropped_meta=base_meta,
+        provenance=prov_missing_local_int,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert passport_no_local_int.source.local_integrity_verified is None
+    assert passport_no_local_int.quality_tier == EvidenceQualityTier.MODERATE
+    assert passport_no_local_int.quality_tier != EvidenceQualityTier.HIGH
+    assert "local_integrity_unverified" in passport_no_local_int.quality_flags
+
+    # Gate 2: Verified source with missing CRS cannot receive HIGH and does not silently default to IAU2000:49900
+    meta_missing_crs = RasterMetadata(
+        **{**base_meta.__dict__, "crs_str": ""}
+    )
+    passport_no_crs = EvidenceService.build_route_evidence_passport(
+        path_nodes=path_nodes,
+        graph=graph,
+        master_meta=meta_missing_crs,
+        cropped_meta=meta_missing_crs,
+        provenance=base_prov,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert passport_no_crs.source.crs_identifier == "Unknown / Unspecified"
+    assert passport_no_crs.quality_tier == EvidenceQualityTier.LOW
+    assert passport_no_crs.quality_tier != EvidenceQualityTier.HIGH
+    assert "unknown_crs" in passport_no_crs.quality_flags
+
+    # Also verify end-to-end GeoTIFF with crs=None loaded through MOLAHRSCRasterProvider
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_nocrs:
+        nocrs_path = tmp_nocrs.name
+    try:
+        step = 200.0 / METERS_PER_DEGREE_LATITUDE
+        transform = from_origin(77.20, 18.65, step, step)
+        geotiff_data = np.full((120, 160), -2480.0, dtype=np.float32)
+        with rasterio.open(
+            nocrs_path,
+            "w",
+            driver="GTiff",
+            height=120,
+            width=160,
+            count=1,
+            dtype="float32",
+            crs=None,
+            transform=transform,
+            nodata=-32768.0,
+        ) as dst:
+            dst.update_tags(VERTICAL_DATUM="Mars_2000_Areoid_MOLA_0m")
+            dst.write(geotiff_data, 1)
+        with open(nocrs_path, "rb") as f:
+            nocrs_sha = hashlib.sha256(f.read()).hexdigest()
+        usgs_entry = next(
+            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
+        )
+        orig_sha = usgs_entry.get("sha256")
+        usgs_entry["sha256"] = nocrs_sha
+        try:
+            prov_nocrs = MOLAHRSCRasterProvider(dem_path=nocrs_path)
+            prov_nocrs.use_real_dem = True
+            prov_nocrs.allow_fallback = False
+            resp_nocrs = RouteService(provider=prov_nocrs).plan_route(
+                RoutePlanRequest(
+                    start=MarsCoordinate(lon=77.35, lat=18.35),
+                    destination=MarsCoordinate(lon=77.42, lat=18.42),
+                )
+            )
+            p_nocrs = resp_nocrs.routes[0].evidence_passport
+            assert p_nocrs is not None
+            assert p_nocrs.source.crs_identifier == "Unknown / Unspecified"
+            assert p_nocrs.quality_tier == EvidenceQualityTier.LOW
+            assert "unknown_crs" in p_nocrs.quality_flags
+        finally:
+            usgs_entry["sha256"] = orig_sha
+    finally:
+        if os.path.exists(nocrs_path):
+            os.remove(nocrs_path)
+
+    # Gate 3: Verified source with unknown vertical datum cannot receive HIGH
+    meta_missing_datum = RasterMetadata(
+        **{**base_meta.__dict__, "vertical_datum": "Unknown / Unspecified"}
+    )
+    passport_no_datum = EvidenceService.build_route_evidence_passport(
+        path_nodes=path_nodes,
+        graph=graph,
+        master_meta=meta_missing_datum,
+        cropped_meta=meta_missing_datum,
+        provenance=base_prov,
+        mode=OptimizationMode.BALANCED,
+    )
+    assert passport_no_datum.quality_tier == EvidenceQualityTier.LOW
+    assert passport_no_datum.quality_tier != EvidenceQualityTier.HIGH
+    assert "unknown_vertical_datum" in passport_no_datum.quality_flags
 
 
 def test_waypoint_guided_and_science_first_routes_include_complete_passports():

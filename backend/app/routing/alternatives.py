@@ -61,14 +61,22 @@ def reconstruct_route_summary(
     hazard_exposure_meters = 0.0
 
     valid_sample_count = 0
+    valid_elev_sample_count = 0
     for r_node, c_node in path_nodes:
+        elev_ok = not bool(nodata_mask[r_node, c_node])
+        if elev_ok:
+            valid_elev_sample_count += 1
         if (
-            not bool(nodata_mask[r_node, c_node])
+            elev_ok
             and not math.isnan(float(graph.slope_deg[r_node, c_node]))
             and not math.isnan(float(graph.roughness[r_node, c_node]))
         ):
             valid_sample_count += 1
     measured_coverage_fraction = round(valid_sample_count / max(len(path_nodes), 1), 4)
+    elev_coverage_fraction = round(valid_elev_sample_count / max(len(path_nodes), 1), 4)
+    all_elevations_valid = valid_elev_sample_count == len(path_nodes)
+    is_complete_measurement = valid_sample_count == len(path_nodes)
+    valid_elev_transition_count = 0
 
     prev_r, prev_c = path_nodes[0]
     prev_valid = not bool(nodata_mask[prev_r, prev_c])
@@ -85,9 +93,10 @@ def reconstruct_route_summary(
         meta.deg_per_px_lat,
         pixel_center=True,
     )
-    geojson_coords.append(
-        [round(lon_start, 6), round(lat_start, 6), round(z_prev, 2) if prev_valid else 0.0]
-    )
+    if all_elevations_valid:
+        geojson_coords.append([round(lon_start, 6), round(lat_start, 6), round(z_prev, 2)])
+    else:
+        geojson_coords.append([round(lon_start, 6), round(lat_start, 6)])
 
     for curr_r, curr_c in path_nodes[1:]:
         curr_valid = not bool(nodata_mask[curr_r, curr_c])
@@ -108,6 +117,7 @@ def reconstruct_route_summary(
         total_dist += d3d
 
         if prev_valid and curr_valid:
+            valid_elev_transition_count += 1
             if dz > 0:
                 elev_gain += dz
             else:
@@ -166,17 +176,18 @@ def reconstruct_route_summary(
             meta.deg_per_px_lat,
             pixel_center=True,
         )
-        geojson_coords.append(
-            [round(lon, 6), round(lat, 6), round(z_curr, 2) if curr_valid else 0.0]
-        )
+        if all_elevations_valid:
+            geojson_coords.append([round(lon, 6), round(lat, 6), round(z_curr, 2)])
+        else:
+            geojson_coords.append([round(lon, 6), round(lat, 6)])
 
         prev_r, prev_c = curr_r, curr_c
         prev_valid = curr_valid
         z_prev = z_curr
 
-    avg_slope = float(np.mean(slopes)) if slopes else 0.0
-    max_slope = float(np.max(slopes)) if slopes else 0.0
-    avg_rough = float(np.mean(roughnesses)) if roughnesses else 0.0
+    avg_slope: float | None = round(float(np.mean(slopes)), 2) if slopes else None
+    max_slope: float | None = round(float(np.max(slopes)), 2) if slopes else None
+    avg_rough: float | None = round(float(np.mean(roughnesses)), 3) if roughnesses else None
 
     duration_hrs = total_duration_seconds / 3600.0
     energy_idx = (total_dist * 0.001) + (elev_gain * 0.02)
@@ -194,7 +205,8 @@ def reconstruct_route_summary(
 
             # Compute min distance to any point along route geometry
             min_dist_to_route = float("inf")
-            for p_lon, p_lat, _ in geojson_coords:
+            for pt in geojson_coords:
+                p_lon, p_lat = pt[0], pt[1]
                 dx = (p_lon - t_lon) * m_lon
                 dy = (p_lat - t_lat) * m_lat
                 d = math.sqrt(dx**2 + dy**2)
@@ -209,26 +221,32 @@ def reconstruct_route_summary(
                 science_score += target.scientific_priority * 5.0
 
     hazard_ratio = hazard_exposure_meters / max(total_dist, 1.0)
-    if hazard_ratio >= 0.20 or max_slope >= 18.0:
+    if max_slope is None or measured_coverage_fraction == 0.0:
+        risk_category = "high"
+    elif hazard_ratio >= 0.20 or max_slope >= 18.0:
         risk_category = "high"
     elif hazard_ratio >= 0.05 or max_slope >= 12.0:
         risk_category = "moderate"
     else:
         risk_category = "nominal"
 
-    min_elev = round(float(min(elevations)), 1) if elevations else 0.0
-    max_elev = round(float(max(elevations)), 1) if elevations else 0.0
+    min_elev: float | None = round(float(min(elevations)), 1) if elevations else None
+    max_elev: float | None = round(float(max(elevations)), 1) if elevations else None
+    gain_val: float | None = round(elev_gain, 1) if valid_elev_transition_count > 0 else None
+    loss_val: float | None = round(elev_loss, 1) if valid_elev_transition_count > 0 else None
 
     summary = RouteSummary(
         total_distance_meters=round(total_dist, 1),
-        elevation_gain_meters=round(elev_gain, 1),
-        elevation_loss_meters=round(elev_loss, 1),
+        elevation_gain_meters=gain_val,
+        elevation_loss_meters=loss_val,
         min_elevation_meters=min_elev,
         max_elevation_meters=max_elev,
-        max_slope_deg=round(max_slope, 2),
-        average_slope_deg=round(avg_slope, 2),
-        average_roughness=round(avg_rough, 3),
+        max_slope_deg=max_slope,
+        average_slope_deg=avg_slope,
+        average_roughness=avg_rough,
         data_coverage_fraction=measured_coverage_fraction,
+        elevation_sample_coverage_fraction=elev_coverage_fraction,
+        is_complete_measurement=is_complete_measurement,
         estimated_duration_hours=round(duration_hrs, 2),
         motion_profile="rover_slope_derated_0.15mps",
         energy_index=round(energy_idx, 2),
