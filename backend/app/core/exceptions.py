@@ -73,3 +73,17 @@ class InvalidConstraintError(MarsPathError):
 
     def __init__(self, message: str):
         super().__init__(message, status_code=422)
+
+
+class RoutingTimeoutError(MarsPathError):
+    """Raised when routing computation exceeds the configured timeout."""
+
+    def __init__(self, message: str, timeout_seconds: float, elapsed_seconds: float):
+        super().__init__(
+            message,
+            status_code=504,
+            details={
+                "timeout_seconds": timeout_seconds,
+                "elapsed_seconds": round(elapsed_seconds, 3),
+            },
+        )

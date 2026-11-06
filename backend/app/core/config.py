@@ -1,7 +1,7 @@
 import os
 from functools import lru_cache
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,7 +27,7 @@ if HAS_SETTINGS:
         APP_NAME: str = "MARSPath — Mars Exploration Route Intelligence and Science Planner"
         APP_VERSION: str = "0.1.0"
         HOST: str = "0.0.0.0"
-        PORT: int = 8000
+        PORT: int = Field(default=8000, validation_alias=AliasChoices("PORT", "MARSPATH_PORT"))
         LOG_LEVEL: str = "INFO"
 
         CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://marspath.vercel.app"
@@ -69,7 +69,9 @@ else:
         APP_NAME: str = "MARSPath — Mars Exploration Route Intelligence and Science Planner"
         APP_VERSION: str = "0.1.0"
         HOST: str = Field(default_factory=lambda: os.getenv("MARSPATH_HOST", "0.0.0.0"))
-        PORT: int = Field(default_factory=lambda: int(os.getenv("MARSPATH_PORT", "8000")))
+        PORT: int = Field(
+            default_factory=lambda: int(os.getenv("PORT", os.getenv("MARSPATH_PORT", "8000")))
+        )
         LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("MARSPATH_LOG_LEVEL", "INFO"))
 
         CORS_ORIGINS: str = Field(

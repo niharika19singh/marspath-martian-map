@@ -20,10 +20,25 @@ import datetime
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+# Configure CA bundle for GDAL /vsicurl/ and curl HTTPS requests if certifi is available
+try:
+    import certifi
+
+    _ca_file = certifi.where()
+    if "CURL_CA_BUNDLE" not in os.environ:
+        os.environ["CURL_CA_BUNDLE"] = _ca_file
+    if "GDAL_CA_BUNDLE" not in os.environ:
+        os.environ["GDAL_CA_BUNDLE"] = _ca_file
+    if "SSL_CERT_FILE" not in os.environ:
+        os.environ["SSL_CERT_FILE"] = _ca_file
+except ImportError:
+    pass
 
 from backend.app.data.manifest import DATA_CATALOG_MANIFEST, verify_manifest_provenance
 

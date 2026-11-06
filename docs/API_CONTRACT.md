@@ -550,3 +550,6 @@ MARSPath supports optional deterministic terrain perturbation stress testing via
 | `422 Unprocessable Entity` | Unsupported CRS (e.g. Earth EPSG:4326) | `{"error": "Coordinate Reference System 'EPSG:4326' is not supported. Mars requires planetary CRS."}` |
 | `404 Not Found` | Unreachable destination (cliff/obstacle) | `{"error": "Unreachable destination: No traversable Martian corridor exists..."}` |
 | `413 Payload Too Large` | Mission corridor exceeds cell budget | `{"error": "Computational bounds exceeded: corridor window requires 320,000 cells..."}` |
+| `413 Payload Too Large` | Search radius exceeded (>50 km) | `{"error": "Computational bounds exceeded: Direct distance 52,100.0m between start and destination exceeds configured maximum search radius of 50,000.0m."}` |
+| `504 Gateway Timeout` | Routing search exceeded timeout | `{"error": "Route planning exceeded routing timeout of 10.00s..."}` |
+| `503 Service Unavailable` | Strict real DEM missing with fallback=false | `{"error": "Numerical Martian terrain data unavailable: Real DEM requested but file not found..."}` |

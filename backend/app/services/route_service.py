@@ -5,6 +5,7 @@ import uuid
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import (
     ComputationalBoundExceededError,
+    RoutingTimeoutError,
     UnreachableDestinationError,
 )
 from backend.app.data.providers.base import BaseRasterProvider
@@ -18,6 +19,7 @@ from backend.app.data.providers.mola_hrsc import (
 from backend.app.geospatial.crs import (
     geo_to_pixel,
     get_mars_crs_info,
+    haversine_distance_mars,
     validate_crs,
 )
 from backend.app.geospatial.terrain_metrics import compute_physical_pixel_sizes
@@ -77,6 +79,7 @@ class RouteService:
         RobustnessService.validate_config(request.robustness_config)
 
         # 3. Deterministic Multi-Resolution Terrain Source Selection & Corridor Preparation
+        # (Validates start, destination, and waypoints are within pilot region bounds first)
         selection_outcome = TerrainSourceSelector.select_and_prepare_corridor(
             start=request.start,
             destination=request.destination,
@@ -86,6 +89,26 @@ class RouteService:
             max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
             corridor_padding_meters=self.corridor_padding_meters,
         )
+
+        # 3b. Enforce MAX_SEARCH_RADIUS_METERS on in-bounds mission points
+        max_search_radius = self.settings.MAX_SEARCH_RADIUS_METERS
+        direct_dist_m = haversine_distance_mars(request.start, request.destination)
+        if direct_dist_m > max_search_radius:
+            raise ComputationalBoundExceededError(
+                f"Direct distance {direct_dist_m:.1f}m between start and destination exceeds configured maximum search radius of {max_search_radius:.1f}m.",
+                dimensions=(selection_outcome.corridor_metadata.width, selection_outcome.corridor_metadata.height),
+                max_allowed=int(max_search_radius),
+            )
+        if request.science_waypoints:
+            mission_pts = [request.start] + list(request.science_waypoints) + [request.destination]
+            for idx in range(len(mission_pts) - 1):
+                leg_dist_m = haversine_distance_mars(mission_pts[idx], mission_pts[idx + 1])
+                if leg_dist_m > max_search_radius:
+                    raise ComputationalBoundExceededError(
+                        f"Direct leg distance {leg_dist_m:.1f}m between mission points exceeds configured maximum search radius of {max_search_radius:.1f}m.",
+                        dimensions=(selection_outcome.corridor_metadata.width, selection_outcome.corridor_metadata.height),
+                        max_allowed=int(max_search_radius),
+                    )
 
         master_raster = selection_outcome.master_raster
         meta = master_raster.metadata
@@ -137,6 +160,8 @@ class RouteService:
         science_pois = self.provider.get_science_targets()
         is_syn = bool(cropped_meta.is_synthetic)
         search_start = time.perf_counter()
+        timeout_seconds = float(self.settings.ROUTING_TIMEOUT_SECONDS)
+        deadline = search_start + timeout_seconds if timeout_seconds > 0 else None
         total_nodes_expanded = 0
         routes: list[RouteAlternative] = []
         baseline_route_nodes: dict[str, list[tuple[int, int]]] = {}
@@ -175,7 +200,12 @@ class RouteService:
                 p_from = all_leg_pixels[leg_idx]
                 p_to = all_leg_pixels[leg_idx + 1]
                 leg_nodes, leg_cost, leg_expansions, _ = astar_search(
-                    graph, p_from, p_to, max_expansions=request.constraints.max_search_nodes
+                    graph,
+                    p_from,
+                    p_to,
+                    max_expansions=request.constraints.max_search_nodes,
+                    timeout_seconds=timeout_seconds,
+                    deadline=deadline,
                 )
                 total_nodes_expanded += leg_expansions
                 leg_total_cost += leg_cost
@@ -228,6 +258,8 @@ class RouteService:
                     master_meta=meta,
                     provenance=provenance,
                     route_nodes_out=baseline_route_nodes,
+                    timeout_seconds=timeout_seconds,
+                    deadline=deadline,
                 )
                 total_nodes_expanded += alt_nodes
                 for a in alts:
@@ -243,6 +275,8 @@ class RouteService:
                 (s_row, s_col),
                 (d_row, d_col),
                 max_expansions=request.constraints.max_search_nodes,
+                timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
             total_nodes_expanded += dir_expansions
 
@@ -275,12 +309,22 @@ class RouteService:
                     continue
 
                 try:
-                    # Evaluate start -> poi -> dest honoring configured max expansions
+                    # Evaluate start -> poi -> dest honoring configured max expansions and deadline
                     leg1_nodes, leg1_cost, exp1, _ = astar_search(
-                        graph, (s_row, s_col), (p_row, p_col), max_expansions=max_exp
+                        graph,
+                        (s_row, s_col),
+                        (p_row, p_col),
+                        max_expansions=max_exp,
+                        timeout_seconds=timeout_seconds,
+                        deadline=deadline,
                     )
                     leg2_nodes, leg2_cost, exp2, _ = astar_search(
-                        graph, (p_row, p_col), (d_row, d_col), max_expansions=max_exp
+                        graph,
+                        (p_row, p_col),
+                        (d_row, d_col),
+                        max_expansions=max_exp,
+                        timeout_seconds=timeout_seconds,
+                        deadline=deadline,
                     )
                     total_nodes_expanded += exp1 + exp2
                     detour_cost = leg1_cost + leg2_cost
@@ -306,6 +350,8 @@ class RouteService:
                         best_detour_nodes = leg1_nodes + leg2_nodes[1:]
                         candidate_poi = poi
 
+                except RoutingTimeoutError:
+                    raise
                 except (UnreachableDestinationError, ComputationalBoundExceededError) as re:
                     logger.info("Science target '%s' route evaluation rejected: %s", poi.name, re)
                     rejected_candidates.append({"poi": poi.name, "reason": str(re)})
@@ -397,6 +443,8 @@ class RouteService:
                     master_meta=meta,
                     provenance=provenance,
                     route_nodes_out=baseline_route_nodes,
+                    timeout_seconds=timeout_seconds,
+                    deadline=deadline,
                 )
                 total_nodes_expanded += alt_nodes
         else:
@@ -412,10 +460,19 @@ class RouteService:
                 master_meta=meta,
                 provenance=provenance,
                 route_nodes_out=baseline_route_nodes,
+                timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
             total_nodes_expanded += alt_nodes
 
         # 10b. Optional Route Robustness Stress Testing
+        if deadline is not None and time.perf_counter() > deadline:
+            elapsed = time.perf_counter() - search_start
+            raise RoutingTimeoutError(
+                f"Route planning exceeded routing timeout of {timeout_seconds:.2f}s before robustness evaluation.",
+                timeout_seconds=timeout_seconds,
+                elapsed_seconds=elapsed,
+            )
         robustness_assessment = RobustnessService.evaluate_route_robustness(
             config=request.robustness_config,
             cropped_elevation=cropped_elev,

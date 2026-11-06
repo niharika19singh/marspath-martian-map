@@ -116,8 +116,130 @@ docker run -p 8000:8000 \
 
 ---
 
-## 4. Large Dataset Policy
+## 4. Operational Smoke-Test Procedure
+
+Run these curl commands to verify complete operational readiness after process or container startup:
+
+### Step 1: Health & Scientific Terrain Readiness
+```bash
+curl -s http://localhost:8000/health | jq '{status, environment, data_readiness: {dem_loaded, data_mode, real_data_validation_status, local_integrity_verified, source_checksum_verified, crs, dem_resolution_meters}}'
+```
+**Expected Output (Real MOLA-HRSC Mode):**
+```json
+{
+  "status": "healthy",
+  "environment": "production",
+  "data_readiness": {
+    "dem_loaded": true,
+    "data_mode": "real_official_endpoint_unverified_checksum",
+    "real_data_validation_status": "official_endpoint_retrieved_checksum_unverified",
+    "local_integrity_verified": true,
+    "source_checksum_verified": false,
+    "crs": "IAU2000:49900",
+    "dem_resolution_meters": 200.0
+  }
+}
+```
+
+### Step 2: Layer Catalog
+```bash
+curl -s http://localhost:8000/api/v1/layers | jq '{count, layers: [.layers[].id]}'
+```
+**Expected Output:**
+```json
+{
+  "count": 5,
+  "layers": [
+    "mars_elevation_jezero",
+    "mars_slope_degrees",
+    "mars_roughness_tri",
+    "mars_trek_imagery_basemap",
+    "mars_hirise_delta_dtm"
+  ]
+}
+```
+
+### Step 3: Planetary Data Status
+```bash
+curl -s http://localhost:8000/api/v1/data/status | jq '{active_pilot_region, is_synthetic, data_mode, crs: .crs.identifier, valid_data_fraction}'
+```
+**Expected Output:**
+```json
+{
+  "active_pilot_region": "Jezero Crater, Mars",
+  "is_synthetic": false,
+  "data_mode": "real_official_endpoint_unverified_checksum",
+  "crs": "IAU2000:49900",
+  "valid_data_fraction": 1.0
+}
+```
+
+### Step 4: Route Planning & Evidence Passport
+```bash
+curl -s -X POST http://localhost:8000/api/v1/routes/plan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start": {"lon": 77.40, "lat": 18.39},
+    "destination": {"lon": 77.44, "lat": 18.42},
+    "crs_identifier": "IAU2000:49900",
+    "mode": "balanced",
+    "num_alternatives": 2
+  }' | jq '{status, mission_id, routes_count: (.routes | length), primary_distance: .routes[0].summary.total_distance_meters, passport_tier: .routes[0].evidence_passport.quality_tier}'
+```
+**Expected Output:**
+```json
+{
+  "status": "success",
+  "mission_id": "mission_...",
+  "routes_count": 2,
+  "primary_distance": 2976.1,
+  "passport_tier": "moderate"
+}
+```
+
+### Step 5: CORS Preflight Verification
+```bash
+curl -s -I -X OPTIONS http://localhost:8000/api/v1/routes/plan \
+  -H "Origin: https://marspath.vercel.app" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type"
+```
+**Expected Output:**
+`HTTP/1.1 200 OK` with `access-control-allow-origin: https://marspath.vercel.app` and `access-control-allow-methods`.
+
+---
+
+## 5. Operational Safety Ceilings & Timeout Limits
+
+MARSPath enforces strict computational boundaries to prevent runaway resource consumption:
+
+| Limit Variable | Default Value | Enforcement Mechanism | Failure Response |
+|---|---|---|---|
+| `MARSPATH_MAX_GRID_CELLS` | `250000` | Checked during corridor cropping and block aggregation | `413 ComputationalBoundExceededError` |
+| `MARSPATH_MAX_SEARCH_RADIUS_METERS` | `50000.0` (50 km) | Checked on direct distance between start, destination, and waypoints | `413 ComputationalBoundExceededError` |
+| `MARSPATH_ROUTING_TIMEOUT_SECONDS` | `10.0` | Active deadline checked periodically inside A* node expansions and between alternatives | `504 RoutingTimeoutError` |
+
+---
+
+## 6. Common Startup Failure Modes & Recovery
+
+1. **Missing `libexpat1` in Minimal Debian / Docker Slim Images:**
+   - *Symptom:* `ImportError: libexpat.so.1: cannot open shared object file` on `import rasterio`.
+   - *Resolution:* Added `libexpat1` to `apt-get install` in `backend/Dockerfile`.
+2. **Missing SSL Certificates for GDAL `/vsicurl/` Range Extraction:**
+   - *Symptom:* `[SSL: CERTIFICATE_VERIFY_FAILED]` when connecting to USGS S3 buckets.
+   - *Resolution:* `backend/app/data/ingestion.py` automatically configures `CURL_CA_BUNDLE`, `GDAL_CA_BUNDLE`, and `SSL_CERT_FILE` from `certifi.where()` if present.
+3. **Upstream USGS Endpoint Outage During Startup:**
+   - *Symptom:* Remote range extraction fails or times out during container boot.
+   - *Resilience Policy:* With `MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true` (default), the server stays healthy, transitions to `synthetic_fallback` mode, transparently logs the error, and reports `is_synthetic: true`, `real_dem_loaded: false`, and `blocking_errors` on `/health`.
+4. **Port Binding on Render:**
+   - *Resolution:* `start_render.sh` dynamically binds Uvicorn to `0.0.0.0:${PORT}` where Render injects `PORT` (e.g. `PORT=10000`).
+
+---
+
+## 7. Large Dataset Policy
 
 **NEVER commit raw NASA GeoTIFFs, IMG files, or ISIS3 cubes to Git.**
-- Large rasters and local extracts under `backend/app/data/rasters/` are excluded via `.gitignore`.
+- Large rasters and local extracts under `backend/app/data/rasters/` are excluded via `.gitignore` and `.dockerignore`.
 - Always use `python -m backend.app.data.ingestion` to reproducibly provision the Jezero Crater DEM window.
+

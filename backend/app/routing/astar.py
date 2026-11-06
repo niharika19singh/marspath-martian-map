@@ -2,7 +2,11 @@ import heapq
 import math
 import time
 
-from backend.app.core.exceptions import ComputationalBoundExceededError, UnreachableDestinationError
+from backend.app.core.exceptions import (
+    ComputationalBoundExceededError,
+    RoutingTimeoutError,
+    UnreachableDestinationError,
+)
 from backend.app.routing.graph_builder import TerrainGridGraph
 
 
@@ -22,6 +26,8 @@ def astar_search(
     dest: tuple[int, int],
     max_expansions: int = 150000,
     penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] | None = None,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
 ) -> tuple[list[tuple[int, int]], float, int, float]:
     """
     Runs A* graph search from start to destination on the terrain graph.
@@ -30,6 +36,9 @@ def astar_search(
         (path_nodes, total_cost, nodes_expanded, elapsed_seconds)
     """
     start_time = time.perf_counter()
+    effective_deadline = deadline if deadline is not None else (
+        start_time + timeout_seconds if timeout_seconds is not None else None
+    )
 
     if start == dest:
         return [start], 0.0, 0, 0.0
@@ -65,6 +74,17 @@ def astar_search(
                 dimensions=(graph.cols, graph.rows),
                 max_allowed=max_expansions,
             )
+
+        if effective_deadline is not None and (nodes_expanded % 200 == 0):
+            now = time.perf_counter()
+            if now > effective_deadline:
+                elapsed = now - start_time
+                limit_sec = timeout_seconds if timeout_seconds is not None else (effective_deadline - start_time)
+                raise RoutingTimeoutError(
+                    f"A* search exceeded routing timeout of {limit_sec:.2f}s (elapsed: {elapsed:.2f}s).",
+                    timeout_seconds=limit_sec,
+                    elapsed_seconds=elapsed,
+                )
 
         # Target reached!
         if current == dest:

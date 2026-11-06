@@ -59,5 +59,6 @@ if [ "${MARSPATH_SKIP_UVICORN:-false}" = "true" ]; then
     exit 0
 fi
 
-echo "[MARSPath Startup] Starting Uvicorn server on 0.0.0.0:${PORT}..."
-exec "${PYTHON_BIN}" -m uvicorn backend.app.main:app --host 0.0.0.0 --port "${PORT}"
+UVICORN_LOG_LEVEL=$(echo "${MARSPATH_LOG_LEVEL:-INFO}" | tr '[:upper:]' '[:lower:]')
+echo "[MARSPath Startup] Starting Uvicorn server on 0.0.0.0:${PORT} (log-level: ${UVICORN_LOG_LEVEL})..."
+exec "${PYTHON_BIN}" -m uvicorn backend.app.main:app --host 0.0.0.0 --port "${PORT}" --log-level "${UVICORN_LOG_LEVEL}"

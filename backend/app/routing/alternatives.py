@@ -4,7 +4,11 @@ from typing import Any
 
 import numpy as np
 
-from backend.app.core.exceptions import ComputationalBoundExceededError, UnreachableDestinationError
+from backend.app.core.exceptions import (
+    ComputationalBoundExceededError,
+    RoutingTimeoutError,
+    UnreachableDestinationError,
+)
 from backend.app.geospatial.crs import (
     METERS_PER_DEGREE_LATITUDE,
     meters_per_degree_lon,
@@ -351,6 +355,8 @@ def generate_route_alternatives(
     master_meta: RasterMetadata | None = None,
     provenance: dict[str, Any] | None = None,
     route_nodes_out: dict[str, list[tuple[int, int]]] | None = None,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
 ) -> tuple[list[RouteAlternative], int]:
     """
     Computes 1 to 3 distinct candidate routes and attaches a structured
@@ -368,7 +374,9 @@ def generate_route_alternatives(
     effective_prov = provenance or {}
 
     # 1. Primary route
-    primary_nodes, primary_cost, nodes_1, _ = astar_search(graph, start_px, dest_px)
+    primary_nodes, primary_cost, nodes_1, _ = astar_search(
+        graph, start_px, dest_px, timeout_seconds=timeout_seconds, deadline=deadline
+    )
     total_nodes_expanded += nodes_1
 
     summary_1, geom_1, breakdown_1, visited_1, nearby_1 = reconstruct_route_summary(
@@ -415,7 +423,12 @@ def generate_route_alternatives(
 
     try:
         alt_nodes, alt_cost, nodes_2, _ = astar_search(
-            graph, start_px, dest_px, penalized_edges=penalized_edges
+            graph,
+            start_px,
+            dest_px,
+            penalized_edges=penalized_edges,
+            timeout_seconds=timeout_seconds,
+            deadline=deadline,
         )
         total_nodes_expanded += nodes_2
 
@@ -469,6 +482,8 @@ def generate_route_alternatives(
             results[0].warnings.append(
                 f"Secondary corridor search suppressed: generated path overlapped {int(overlap_pct * 100)}% with primary route."
             )
+    except RoutingTimeoutError:
+        raise
     except (UnreachableDestinationError, ComputationalBoundExceededError) as e:
         logger.info("Secondary alternative search failed: %s", e)
         results[0].warnings.append(f"Secondary corridor search unviable: {e.message}")
@@ -495,7 +510,11 @@ def generate_route_alternatives(
             )
             try:
                 safety_nodes, safety_cost, nodes_3, _ = astar_search(
-                    graph_safety, start_px, dest_px
+                    graph_safety,
+                    start_px,
+                    dest_px,
+                    timeout_seconds=timeout_seconds,
+                    deadline=deadline,
                 )
                 total_nodes_expanded += nodes_3
 
@@ -530,6 +549,8 @@ def generate_route_alternatives(
                         evidence_passport=passport_3,
                     )
                 )
+            except RoutingTimeoutError:
+                raise
             except (UnreachableDestinationError, ComputationalBoundExceededError) as e:
                 logger.info("Safety-first alternative search failed: %s", e)
                 results[0].warnings.append(f"Safety-first alternative unviable: {e.message}")
