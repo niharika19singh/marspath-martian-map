@@ -743,35 +743,59 @@ class TerrainSourceSelector:
             src_elev = hirise_raster.data.astype(np.float32).copy()
             src_elev[hirise_raster.nodata_mask] = np.nan
 
+            # Pass src_nodata=None so IEEE-754 NaN values in src_elev are NOT ignored by
+            # GDAL's warper during bilinear interpolation across NoData boundaries.
             dst_elev = np.full((dst_h, dst_w), np.nan, dtype=np.float32)
             reproject(
                 source=src_elev,
                 destination=dst_elev,
                 src_transform=src_transform,
                 src_crs=src_crs,
-                src_nodata=np.nan,
+                src_nodata=None,
                 dst_transform=dst_transform,
                 dst_crs=dst_crs,
                 dst_nodata=np.nan,
                 resampling=Resampling.bilinear,
             )
 
-            # Also warp the binary nodata mask with bilinear resampling (> 0 means touched by nodata)
-            # so no cell adjacent to NoData gets a blended/interpolated value
+            # Conservatively propagate the binary invalid-data mask (0.0 = valid, 1.0 = invalid/NoData).
+            # CRITICAL: Do NOT set src_nodata=1.0 or dst_nodata=1.0 (which would cause GDAL to ignore
+            # or clamp invalid source pixels!). Instead use src_nodata=-1.0 and dst_nodata=-1.0
+            # (outside {0.0, 1.0}; any unmapped out-of-bounds pixel gets -1.0), combining both
+            # bilinear footprint weighting (> 0 when any contributing kernel neighbor is invalid)
+            # and conservative Resampling.max.
             src_bad = hirise_raster.nodata_mask.astype(np.float32)
-            dst_bad = np.ones((dst_h, dst_w), dtype=np.float32)
+            dst_bad_bilin = np.full((dst_h, dst_w), -1.0, dtype=np.float32)
             reproject(
                 source=src_bad,
-                destination=dst_bad,
+                destination=dst_bad_bilin,
                 src_transform=src_transform,
                 src_crs=src_crs,
-                src_nodata=1.0,
+                src_nodata=-1.0,
                 dst_transform=dst_transform,
                 dst_crs=dst_crs,
-                dst_nodata=1.0,
+                dst_nodata=-1.0,
                 resampling=Resampling.bilinear,
             )
-            dst_elev[dst_bad > 1e-5] = np.nan
+            dst_bad_max = np.full((dst_h, dst_w), -1.0, dtype=np.float32)
+            reproject(
+                source=src_bad,
+                destination=dst_bad_max,
+                src_transform=src_transform,
+                src_crs=src_crs,
+                src_nodata=-1.0,
+                dst_transform=dst_transform,
+                dst_crs=dst_crs,
+                dst_nodata=-1.0,
+                resampling=Resampling.max,
+            )
+            invalid_dst = (
+                (dst_bad_bilin < 0.0)
+                | (dst_bad_bilin > 1e-6)
+                | (dst_bad_max < 0.0)
+                | (dst_bad_max > 1e-6)
+            )
+            dst_elev[invalid_dst] = np.nan
 
             actual_d_lon = (corr_max_lon - corr_min_lon) / dst_w
             actual_d_lat = (corr_max_lat - corr_min_lat) / dst_h

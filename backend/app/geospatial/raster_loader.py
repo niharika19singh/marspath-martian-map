@@ -1,6 +1,8 @@
 import logging
 import os
+import zlib
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -50,8 +52,278 @@ class RasterMetadata:
     affine_transform: tuple[float, float, float, float, float, float]
     nodata_value: float | None
     vertical_datum: str = "Unknown / Unspecified"
+    vertical_units: str = "Unknown / Unspecified"
     metadata_tags: dict[str, str] = field(default_factory=dict)
     is_synthetic: bool = False
+
+
+VERTICAL_UNIT_TAG_KEYS: tuple[str, ...] = (
+    "VERTICAL_UNIT",
+    "VERTICAL_UNITS",
+    "ELEVATION_UNIT",
+    "ELEVATION_UNITS",
+    "Z_UNIT",
+    "Z_UNITS",
+    "UNIT_TYPE",
+    "UNITTYPE",
+    "UNIT",
+    "UNITS",
+)
+
+_EXPLICIT_METRE_TOKENS: frozenset[str] = frozenset(
+    {
+        "m",
+        "meter",
+        "meters",
+        "metre",
+        "metres",
+        "meter (m)",
+        "meters (m)",
+        "metre (m)",
+        "metres (m)",
+        "si_meter",
+        "si_meters",
+        "meters above areoid",
+        "metres above areoid",
+        "m above areoid",
+    }
+)
+
+_CONVERTIBLE_METRIC_VERTICAL_UNITS: dict[str, float] = {
+    "cm": 0.01,
+    "centimeter": 0.01,
+    "centimeters": 0.01,
+    "centimetre": 0.01,
+    "centimetres": 0.01,
+    "mm": 0.001,
+    "millimeter": 0.001,
+    "millimeters": 0.001,
+    "millimetre": 0.001,
+    "millimetres": 0.001,
+    "km": 1000.0,
+    "kilometer": 1000.0,
+    "kilometers": 1000.0,
+    "kilometre": 1000.0,
+    "kilometres": 1000.0,
+}
+
+_NON_ELEVATION_VALUE_UNITS: frozenset[str] = frozenset(
+    {
+        "dn",
+        "digital_number",
+        "digital number",
+        "reflectance",
+        "radiance",
+        "albedo",
+        "kelvin",
+        "celsius",
+        "degc",
+        "db",
+        "decibel",
+        "index",
+        "ratio",
+        "unitless",
+        "dimensionless",
+        "count",
+        "counts",
+        "byte",
+        "bytes",
+        "pixel",
+        "pixels",
+        "uint8",
+        "rgb",
+    }
+)
+
+_UNSUPPORTED_VERTICAL_UNITS: frozenset[str] = frozenset(
+    {
+        "ft",
+        "foot",
+        "feet",
+        "us_survey_foot",
+        "survey_foot",
+        "in",
+        "inch",
+        "inches",
+        "yd",
+        "yard",
+        "yards",
+        "mi",
+        "mile",
+        "miles",
+        "deg",
+        "degree",
+        "degrees",
+        "arcsec",
+        "arcmin",
+        "rad",
+        "radian",
+        "radians",
+    }
+)
+
+_UNKNOWN_UNIT_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "",
+        "none",
+        "null",
+        "unknown",
+        "unspecified",
+        "n/a",
+        "na",
+        "?",
+        "undefined",
+    }
+)
+
+
+def normalize_vertical_unit_token(
+    raw_value: str | None,
+) -> tuple[str | None, float | None, str]:
+    """
+    Normalizes an explicit vertical elevation unit string.
+    Returns (canonical_unit, scale_to_meters, status_code).
+    Never infers units from filenames, product IDs, or numeric magnitudes.
+    """
+    if raw_value is None:
+        return None, None, "rejected_unknown_vertical_units"
+    norm = " ".join(str(raw_value).strip().lower().split())
+    if norm in _UNKNOWN_UNIT_PLACEHOLDERS:
+        return None, None, "rejected_unknown_vertical_units"
+    if norm in _EXPLICIT_METRE_TOKENS:
+        return "meters", 1.0, "valid"
+    if norm in _CONVERTIBLE_METRIC_VERTICAL_UNITS:
+        return "meters", _CONVERTIBLE_METRIC_VERTICAL_UNITS[norm], "converted"
+    if norm in _NON_ELEVATION_VALUE_UNITS or any(
+        tok in norm for tok in ("reflectance", "radiance", "albedo", "digital number")
+    ):
+        return None, None, "rejected_non_elevation_raster"
+    if norm in _UNSUPPORTED_VERTICAL_UNITS or any(
+        tok in norm for tok in ("feet", "foot", "survey_foot", "degree", "radian")
+    ):
+        return None, None, "rejected_unsupported_vertical_units"
+    return None, None, "rejected_unknown_vertical_units"
+
+
+def inspect_vertical_unit_declarations(
+    band_unit: str | None,
+    band_tags: dict[str, Any] | None,
+    dataset_tags: dict[str, Any] | None,
+) -> tuple[bool, str, str, float, str]:
+    """
+    Positively validates vertical elevation units across Rasterio band units (`src.units`),
+    GeoTIFF band tags (`src.tags(1)`), and dataset tags (`src.tags()`).
+
+    Returns:
+        (is_valid, status_code, reason, scale_to_meters, resolved_unit_label)
+    """
+    declarations: list[tuple[str, str]] = []
+    if band_unit is not None and str(band_unit).strip() != "":
+        declarations.append(("band_1.unit", str(band_unit).strip()))
+
+    if band_tags:
+        b_upper = {str(k).upper(): str(v).strip() for k, v in band_tags.items()}
+        for key in VERTICAL_UNIT_TAG_KEYS:
+            if key in b_upper and b_upper[key] != "":
+                declarations.append((f"band_1.tag[{key}]", b_upper[key]))
+
+    if dataset_tags:
+        d_upper = {str(k).upper(): str(v).strip() for k, v in dataset_tags.items()}
+        for key in VERTICAL_UNIT_TAG_KEYS:
+            if key in d_upper and d_upper[key] != "":
+                declarations.append((f"dataset.tag[{key}]", d_upper[key]))
+
+    if not declarations:
+        return (
+            False,
+            "rejected_unknown_vertical_units",
+            (
+                "Raster lacks explicit vertical elevation unit metadata in band units or GeoTIFF tags "
+                "(expected explicit metre units; missing or unknown units are rejected)."
+            ),
+            1.0,
+            "Unknown / Unspecified",
+        )
+
+    resolved_scales: list[tuple[str, str, float, str]] = []
+    for src_label, raw_val in declarations:
+        canonical, scale, code = normalize_vertical_unit_token(raw_val)
+        if canonical is None or scale is None:
+            return (
+                False,
+                code,
+                (
+                    f"Raster declares invalid, unknown, or unsupported vertical unit '{raw_val}' "
+                    f"in {src_label} ({code}; expected explicit metre units)."
+                ),
+                1.0,
+                raw_val,
+            )
+        resolved_scales.append((src_label, raw_val, float(scale), code))
+
+    first_scale = resolved_scales[0][2]
+    for src_label, raw_val, scale, _ in resolved_scales[1:]:
+        if abs(scale - first_scale) > 1e-12:
+            return (
+                False,
+                "rejected_unknown_vertical_units",
+                (
+                    f"Raster contains conflicting vertical unit declarations across metadata fields: "
+                    f"{resolved_scales[0][0]}='{resolved_scales[0][1]}' vs {src_label}='{raw_val}'."
+                ),
+                1.0,
+                "Ambiguous / Conflicting",
+            )
+
+    primary_src, primary_raw, final_scale, final_code = resolved_scales[0]
+    if final_code == "converted":
+        reason = (
+            f"Verified explicit vertical unit '{primary_raw}' in {primary_src}; "
+            f"converted to meters with scale factor {final_scale:g}."
+        )
+    else:
+        reason = f"Verified explicit metre vertical unit '{primary_raw}' in {primary_src}."
+    return True, final_code, reason, final_scale, "meters"
+
+
+def get_file_identity(file_path: str) -> tuple[str, int, int, int, int, int] | None:
+    """
+    Computes a fast, deterministic file identity key combining:
+    - Canonical resolved path (`realpath`)
+    - File size in bytes (`st_size`)
+    - Modification time in nanoseconds (`st_mtime_ns`)
+    - Metadata change time in nanoseconds (`st_ctime_ns`)
+    - Inode number (`st_ino`)
+    - Lightweight 12 KB header/middle/tail CRC32 sample (`zlib.crc32`) so even
+      sub-millisecond same-size in-place file rewrites are detected without
+      reading or hashing the full raster.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return None
+    try:
+        resolved = os.path.realpath(os.path.abspath(file_path))
+        st = os.stat(resolved)
+        size = int(st.st_size)
+        crc = 0
+        if size > 0:
+            with open(resolved, "rb") as f:
+                crc = zlib.crc32(f.read(4096), crc)
+                if size > 8192:
+                    f.seek(size // 2)
+                    crc = zlib.crc32(f.read(4096), crc)
+                if size > 4096:
+                    f.seek(max(0, size - 4096))
+                    crc = zlib.crc32(f.read(4096), crc)
+        return (
+            resolved,
+            size,
+            int(st.st_mtime_ns),
+            int(st.st_ctime_ns),
+            int(st.st_ino),
+            int(crc),
+        )
+    except OSError:
+        return None
 
 
 class RasterData:
@@ -71,6 +343,11 @@ class RasterData:
     @property
     def shape(self) -> tuple[int, int]:
         return self.data.shape
+
+    def mark_readonly(self) -> None:
+        """Marks internal elevation and nodata arrays as read-only so shared cached rasters cannot be mutated."""
+        self.data.flags.writeable = False
+        self.nodata_mask.flags.writeable = False
 
     def get_elevation_at_pixel(self, col: int, row: int) -> float:
         if 0 <= row < self.data.shape[0] and 0 <= col < self.data.shape[1]:
@@ -213,9 +490,28 @@ def load_raster_file(file_path: str) -> RasterData:
         m_x = d_lon * meters_per_degree_lon(center_lat)
         m_y = d_lat * METERS_PER_DEGREE_LATITUDE
 
+        unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = (
+            inspect_vertical_unit_declarations(None, None, tags)
+        )
+        tags["_VERTICAL_UNIT_VALID"] = "true" if unit_ok else "false"
+        tags["_VERTICAL_UNIT_STATUS"] = unit_status
+        tags["_VERTICAL_UNIT_REASON"] = unit_reason
+        tags["_VERTICAL_UNIT_SCALE"] = str(unit_scale)
+
+        data_f32 = data.astype(np.float32).copy()
+        if unit_ok and abs(unit_scale - 1.0) > 1e-12:
+            raw_nd = np.isnan(data_f32) | (
+                np.isclose(data_f32, nodata_val, atol=1e-3)
+                if nodata_val is not None
+                else np.zeros_like(data_f32, dtype=bool)
+            )
+            data_f32[~raw_nd] *= float(unit_scale)
+            data_f32[raw_nd] = np.nan
+            tags["VERTICAL_UNIT_CONVERSION"] = unit_reason
+
         meta = RasterMetadata(
-            width=data.shape[1],
-            height=data.shape[0],
+            width=data_f32.shape[1],
+            height=data_f32.shape[0],
             coordinate_type="geographic",
             crs_str=npz_crs,
             units="degrees",
@@ -230,10 +526,11 @@ def load_raster_file(file_path: str) -> RasterData:
             affine_transform=(d_lon, 0.0, min_lon, 0.0, -d_lat, max_lat),
             nodata_value=nodata_val,
             vertical_datum=vert_datum,
+            vertical_units=resolved_v_unit,
             metadata_tags=tags,
             is_synthetic=False,
         )
-        return RasterData(data, meta)
+        return RasterData(data_f32, meta)
 
     # GeoTIFF loading via Rasterio
     if HAS_RASTERIO:
@@ -259,12 +556,42 @@ def load_raster_file(file_path: str) -> RasterData:
                 ):
                     is_metric = True
 
-                # Extract vertical datum from tags if present
-                tags = src.tags()
-                vert_datum = tags.get(
-                    "VERTICAL_DATUM",
-                    tags.get("DATUM", "Unknown / Unspecified (datum tag not declared in raster metadata)"),
+                # Extract vertical datum and vertical unit declarations from band + dataset tags
+                tags = dict(src.tags())
+                band_tags = dict(src.tags(1)) if src.count >= 1 else {}
+                band_unit = src.units[0] if (src.units and len(src.units) > 0) else None
+                unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = (
+                    inspect_vertical_unit_declarations(band_unit, band_tags, tags)
                 )
+                merged_tags = dict(tags)
+                for bk, bv in band_tags.items():
+                    if bk not in merged_tags:
+                        merged_tags[bk] = bv
+                if band_unit is not None and str(band_unit).strip():
+                    merged_tags["_BAND_1_UNIT"] = str(band_unit).strip()
+                merged_tags["_VERTICAL_UNIT_VALID"] = "true" if unit_ok else "false"
+                merged_tags["_VERTICAL_UNIT_STATUS"] = unit_status
+                merged_tags["_VERTICAL_UNIT_REASON"] = unit_reason
+                merged_tags["_VERTICAL_UNIT_SCALE"] = str(unit_scale)
+
+                vert_datum = merged_tags.get(
+                    "VERTICAL_DATUM",
+                    merged_tags.get(
+                        "DATUM",
+                        "Unknown / Unspecified (datum tag not declared in raster metadata)",
+                    ),
+                )
+
+                data_f32 = data.astype(np.float32).copy()
+                if unit_ok and abs(unit_scale - 1.0) > 1e-12:
+                    raw_nd = np.isnan(data_f32) | (
+                        np.isclose(data_f32, float(src.nodata), atol=1e-3)
+                        if src.nodata is not None
+                        else np.zeros_like(data_f32, dtype=bool)
+                    )
+                    data_f32[~raw_nd] *= float(unit_scale)
+                    data_f32[raw_nd] = np.nan
+                    merged_tags["VERTICAL_UNIT_CONVERSION"] = unit_reason
 
                 if is_metric:
                     # Projected coordinates in meters!
@@ -324,10 +651,11 @@ def load_raster_file(file_path: str) -> RasterData:
                         ),
                         nodata_value=src.nodata,
                         vertical_datum=vert_datum,
-                        metadata_tags=dict(tags),
+                        vertical_units=resolved_v_unit,
+                        metadata_tags=merged_tags,
                         is_synthetic=False,
                     )
-                    return RasterData(data, meta)
+                    return RasterData(data_f32, meta)
                 else:
                     # Geographic in degrees
                     if not (-180.0 <= bounds.left <= 360.0 and -90.0 <= bounds.bottom <= 90.0):
@@ -368,10 +696,11 @@ def load_raster_file(file_path: str) -> RasterData:
                         ),
                         nodata_value=src.nodata,
                         vertical_datum=vert_datum,
-                        metadata_tags=dict(tags),
+                        vertical_units=resolved_v_unit,
+                        metadata_tags=merged_tags,
                         is_synthetic=False,
                     )
-                    return RasterData(data, meta)
+                    return RasterData(data_f32, meta)
         except Exception as e:
             if isinstance(e, MarsPathError):
                 raise

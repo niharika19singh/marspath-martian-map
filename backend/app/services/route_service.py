@@ -8,8 +8,13 @@ from backend.app.core.exceptions import (
     UnreachableDestinationError,
 )
 from backend.app.data.providers.base import BaseRasterProvider
-from backend.app.data.providers.hirise import HiRISERasterProvider
-from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
+from backend.app.data.providers.hirise import (
+    HiRISERasterProvider,
+    get_shared_hirise_provider,
+)
+from backend.app.data.providers.mola_hrsc import (
+    get_shared_mola_provider,
+)
 from backend.app.geospatial.crs import (
     geo_to_pixel,
     get_mars_crs_info,
@@ -51,14 +56,14 @@ class RouteService:
     ):
         self.settings = get_settings()
         if isinstance(provider, HiRISERasterProvider) and hirise_provider is None:
-            self.provider: BaseRasterProvider = MOLAHRSCRasterProvider()
+            self.provider: BaseRasterProvider = get_shared_mola_provider()
             self.hirise_provider: HiRISERasterProvider | None = provider
         else:
-            self.provider = provider or MOLAHRSCRasterProvider()
+            self.provider = provider or get_shared_mola_provider()
             self.hirise_provider = (
                 hirise_provider
                 if hirise_provider is not None
-                else (HiRISERasterProvider() if provider is None else None)
+                else (get_shared_hirise_provider() if provider is None else None)
             )
         self.max_cells = max_cells
         self.corridor_padding_meters = corridor_padding_meters

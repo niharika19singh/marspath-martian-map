@@ -1,6 +1,10 @@
+import copy
 import hashlib
 import logging
 import os
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -11,11 +15,24 @@ from backend.app.data.manifest import verify_manifest_provenance
 from backend.app.data.providers.base import BaseRasterProvider
 from backend.app.data.providers.synthetic import SyntheticTerrainProvider
 from backend.app.geospatial.crs import get_mars_crs_info
-from backend.app.geospatial.raster_loader import RasterData, load_raster_file
+from backend.app.geospatial.raster_loader import (
+    RasterData,
+    get_file_identity,
+    load_raster_file,
+)
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo
 from backend.app.schemas.mission import ScienceTarget
 
 logger = logging.getLogger("marspath.mola_hrsc_provider")
+
+
+@dataclass
+class _MOLACachedEntry:
+    file_identity: tuple[str, int, int, int, int, int]
+    raster: RasterData
+    file_sha256: str | None = None
+    sidecar_identity: tuple[str, int, int, int, int, int] | None = None
+    provenance: dict[str, Any] | None = None
 
 
 class MOLAHRSCRasterProvider(BaseRasterProvider):
@@ -23,7 +40,14 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
     Data provider for NASA/ESA MOLA-HRSC blended numerical elevation models.
     Strictly obeys MARSPATH_USE_REAL_DEM, MARSPATH_DEM_PATH, and synthetic fallback policy.
     Never silently describes synthetic rasters as real NASA data.
+    Uses a thread-safe bounded process cache keyed by file identity.
     """
+
+    MAX_CACHE_ENTRIES = 4
+    _CACHE_LOCK = threading.RLock()
+    _PROCESS_CACHE: OrderedDict[tuple[str, int, int, int, int, int], _MOLACachedEntry] = (
+        OrderedDict()
+    )
 
     def __init__(self, dem_path: str | None = None):
         settings = get_settings()
@@ -31,6 +55,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
         self.use_real_dem = settings.USE_REAL_DEM
         self.allow_fallback = settings.ALLOW_SYNTHETIC_FALLBACK
         self._raster_data: RasterData | None = None
+        self._cached_file_id: tuple[str, int, int, int, int, int] | None = None
         self._fallback_provider: SyntheticTerrainProvider | None = None
         self._fallback_occurred: bool = False
         self._fallback_reason: str = ""
@@ -41,18 +66,29 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
         return self._fallback_provider
 
     def get_dem_raster(self) -> RasterData:
-        if self._raster_data is not None:
-            return self._raster_data
-
         if not self.use_real_dem:
-            # Explicitly operating in synthetic mode
+            if self._raster_data is not None and self._raster_data.metadata.is_synthetic:
+                return self._raster_data
             logger.info("Operating in synthetic test mode (MARSPATH_USE_REAL_DEM=false).")
             self._raster_data = self._get_fallback().get_dem_raster()
+            self._raster_data.mark_readonly()
             return self._raster_data
+
+        file_id = get_file_identity(self.dem_path)
+        if file_id is not None:
+            with self._CACHE_LOCK:
+                cached = self._PROCESS_CACHE.get(file_id)
+                if cached is not None:
+                    self._PROCESS_CACHE.move_to_end(file_id)
+                    self._raster_data = cached.raster
+                    self._cached_file_id = file_id
+                    self._fallback_occurred = False
+                    self._fallback_reason = ""
+                    return cached.raster
 
         # Real DEM was requested
         logger.info("Real DEM requested. Checking path: %s", self.dem_path)
-        if not os.path.exists(self.dem_path):
+        if file_id is None or not os.path.exists(self.dem_path):
             err_detail = ""
             err_file = f"{self.dem_path}.provision_error.json"
             if os.path.exists(err_file):
@@ -75,12 +111,28 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             self._fallback_occurred = True
             self._fallback_reason = msg
             self._raster_data = self._get_fallback().get_dem_raster()
+            self._raster_data.mark_readonly()
             return self._raster_data
 
         try:
             loaded_raster = load_raster_file(self.dem_path)
             self._validate_dem_integrity(loaded_raster)
+            loaded_raster.mark_readonly()
+            with self._CACHE_LOCK:
+                stale = [
+                    k for k in self._PROCESS_CACHE if k[0] == file_id[0] and k != file_id
+                ]
+                for k in stale:
+                    self._PROCESS_CACHE.pop(k, None)
+                self._PROCESS_CACHE[file_id] = _MOLACachedEntry(
+                    file_identity=file_id, raster=loaded_raster
+                )
+                while len(self._PROCESS_CACHE) > self.MAX_CACHE_ENTRIES:
+                    self._PROCESS_CACHE.popitem(last=False)
             self._raster_data = loaded_raster
+            self._cached_file_id = file_id
+            self._fallback_occurred = False
+            self._fallback_reason = ""
             logger.info("Successfully loaded and validated real DEM from %s", self.dem_path)
             return self._raster_data
         except Exception as e:
@@ -91,6 +143,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             self._fallback_occurred = True
             self._fallback_reason = msg
             self._raster_data = self._get_fallback().get_dem_raster()
+            self._raster_data.mark_readonly()
             return self._raster_data
 
     def _validate_dem_integrity(self, raster: RasterData) -> None:
@@ -153,16 +206,30 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
     def get_provenance(self) -> dict[str, Any]:
         raster = self.get_dem_raster()
         if self.use_real_dem and not self._fallback_occurred and not raster.metadata.is_synthetic:
-            # 1. Compute file SHA-256
-            sha256_hash = hashlib.sha256()
-            try:
-                with open(self.dem_path, "rb") as f:
-                    for chunk in iter(lambda: f.read(65536), b""):
-                        sha256_hash.update(chunk)
-                file_sha256 = sha256_hash.hexdigest()
-            except Exception as err:
-                logger.warning("Could not compute SHA-256 for '%s': %s", self.dem_path, err)
-                file_sha256 = "unavailable_read_error"
+            file_id = self._cached_file_id or get_file_identity(self.dem_path)
+            sidecar_id = get_file_identity(f"{self.dem_path}.provenance.json")
+            with self._CACHE_LOCK:
+                entry = self._PROCESS_CACHE.get(file_id) if file_id is not None else None
+                if (
+                    entry is not None
+                    and entry.provenance is not None
+                    and entry.sidecar_identity == sidecar_id
+                ):
+                    return copy.deepcopy(entry.provenance)
+
+                if entry is not None and entry.file_sha256 is not None:
+                    file_sha256 = entry.file_sha256
+                else:
+                    # 1. Compute file SHA-256 once per file identity
+                    sha256_hash = hashlib.sha256()
+                    try:
+                        with open(self.dem_path, "rb") as f:
+                            for chunk in iter(lambda: f.read(65536), b""):
+                                sha256_hash.update(chunk)
+                        file_sha256 = sha256_hash.hexdigest()
+                    except Exception as err:
+                        logger.warning("Could not compute SHA-256 for '%s': %s", self.dem_path, err)
+                        file_sha256 = "unavailable_read_error"
 
             # 2. File format
             ext = os.path.splitext(self.dem_path)[1].lower()
@@ -298,7 +365,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                     "Treated as an unverified local numeric terrain raster; cannot be reported as certified flight-grade planetary data.",
                 ]
 
-            return {
+            prov_out = {
                 "dataset_name": dataset_name,
                 "official_product_id": official_product_id,
                 "official_source_url": official_source_url,
@@ -341,6 +408,12 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 "vertical_datum": raster.metadata.vertical_datum,
                 "provenance_limitations": limitations,
             }
+            with self._CACHE_LOCK:
+                if entry is not None:
+                    entry.file_sha256 = file_sha256
+                    entry.sidecar_identity = sidecar_id
+                    entry.provenance = prov_out
+            return copy.deepcopy(prov_out)
 
         # Operating on synthetic
         provenance = self._get_fallback().get_provenance()
@@ -378,3 +451,23 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
 
     def get_science_targets(self) -> list[ScienceTarget]:
         return self._get_fallback().get_science_targets()
+
+
+_SHARED_MOLA_LOCK = threading.RLock()
+_SHARED_MOLA_INSTANCES: dict[tuple[str, bool, bool], MOLAHRSCRasterProvider] = {}
+
+
+def get_shared_mola_provider(dem_path: str | None = None) -> MOLAHRSCRasterProvider:
+    """
+    Returns a process-shared `MOLAHRSCRasterProvider` instance for the active
+    settings configuration, reusing the bounded file-identity cache across requests.
+    """
+    settings = get_settings()
+    eff_path = dem_path if dem_path is not None else settings.DEM_PATH
+    key = (eff_path, bool(settings.USE_REAL_DEM), bool(settings.ALLOW_SYNTHETIC_FALLBACK))
+    with _SHARED_MOLA_LOCK:
+        inst = _SHARED_MOLA_INSTANCES.get(key)
+        if inst is None:
+            inst = MOLAHRSCRasterProvider(dem_path=eff_path)
+            _SHARED_MOLA_INSTANCES[key] = inst
+        return inst

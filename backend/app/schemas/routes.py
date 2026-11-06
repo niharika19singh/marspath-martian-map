@@ -1007,7 +1007,8 @@ class TerrainSourceSelectionReport(BaseModel):
             "'rejected_aggregated_resolution_no_better_than_regional', 'rejected_invalid_crs', "
             "'rejected_missing_crs', 'rejected_invalid_georeferencing', "
             "'rejected_insufficient_valid_observations', 'rejected_outside_jezero_delta_bounds', "
-            "'rejected_invalid_resolution', 'rejected_non_elevation_raster', or 'not_configured'"
+            "'rejected_invalid_resolution', 'rejected_unknown_vertical_units', "
+            "'rejected_unsupported_vertical_units', 'rejected_non_elevation_raster', or 'not_configured'"
         ),
     )
     hirise_rejection_reason: str | None = Field(

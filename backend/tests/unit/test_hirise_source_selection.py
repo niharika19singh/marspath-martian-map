@@ -32,6 +32,8 @@ def _write_hirise_geotiff(
     crs_str: str | None = "+proj=longlat +R=3396190 +no_defs",
     nodata: float | None = -9999.0,
     tags: dict[str, str] | None = None,
+    band_tags: dict[str, str] | None = None,
+    band_unit: str | None = "m",
     custom_transform: Affine | None = None,
     dtype: str = "float32",
 ) -> None:
@@ -57,6 +59,10 @@ def _write_hirise_geotiff(
         transform=transform,
         nodata=nodata,
     ) as dst:
+        if band_unit is not None:
+            dst.set_band_unit(1, band_unit)
+        if band_tags:
+            dst.update_tags(1, **band_tags)
         if tags:
             dst.update_tags(**tags)
         dst.write(elev.astype(dtype), 1)
@@ -962,6 +968,7 @@ def test_18_projected_mars_crs_hirise_corridor_reprojection_and_pixel_alignment(
             transform=transform,
             nodata=-9999.0,
         ) as dst:
+            dst.set_band_unit(1, "metre")
             dst.write(hi_elev, 1)
 
         mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
@@ -992,5 +999,399 @@ def test_18_projected_mars_crs_hirise_corridor_reprojection_and_pixel_alignment(
         assert resp.routes[0].summary.min_elevation_meters == pytest.approx(-2475.0, abs=0.5)
     finally:
         for p in (mola_path, hi_proj_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def test_19_vertical_elevation_units_positive_validation_and_mola_fallback():
+    """
+    Phase 4.1 Regression Test (1-4):
+    - Missing vertical-unit metadata rejects HiRISE with `rejected_unknown_vertical_units`,
+      even when elevation values (-2485.0) look numerically plausible and an unauthenticated
+      PRODUCT_ID tag is present.
+    - Unknown/ambiguous or conflicting units are rejected (`rejected_unknown_vertical_units`).
+    - Unsupported imperial/angular units ('feet', 'degrees') are rejected (`rejected_unsupported_vertical_units`).
+    - Radiometric/imagery units ('dn', 'reflectance') are rejected (`rejected_non_elevation_raster`).
+    - Explicit metre units ('m', 'meter', 'meters', 'metre', 'metres') in band units, band tags,
+      or dataset tags allow validation to succeed.
+    - Explicit metric units ('cm') convert valid pixels to meters with documented scale factor (0.01)
+      without corrupting NoData pixels.
+    - Unknown units cannot produce a HiRISE route; regional MOLA-HRSC fallback succeeds cleanly.
+    """
+    with (
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_mola,
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_hi,
+    ):
+        mola_path = tmp_mola.name
+        hi_path = tmp_hi.name
+
+    try:
+        _write_mola_geotiff(mola_path)
+        hi_elev = np.full((120, 120), -2485.0, dtype=np.float32)
+
+        # Case 1: Missing vertical unit metadata (even with PRODUCT_ID tag and plausible values)
+        _write_hirise_geotiff(
+            hi_path,
+            hi_elev,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            band_unit=None,
+            tags={"PRODUCT_ID": "dem_hirise_jezero_delta_1m"},
+        )
+        prov_missing = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+        val_missing = prov_missing.validate_hirise_raster()
+        assert val_missing.is_valid is False
+        assert val_missing.status_code == "rejected_unknown_vertical_units"
+
+        # Verify route request falls back to MOLA-HRSC when HiRISE has unknown units
+        mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
+        mola_prov.use_real_dem = True
+        service = RouteService(provider=mola_prov, hirise_provider=prov_missing)
+        resp_fallback = service.plan_route(
+            RoutePlanRequest(
+                start=MarsCoordinate(lon=77.4106, lat=18.4094),
+                destination=MarsCoordinate(lon=77.4114, lat=18.4086),
+            )
+        )
+        assert resp_fallback.status == "success"
+        assert resp_fallback.source_selection is not None
+        assert resp_fallback.source_selection.hirise_selected is False
+        assert resp_fallback.source_selection.hirise_status == "rejected_unknown_vertical_units"
+        assert resp_fallback.source_selection.selected_source_tier == "regional_blended_dem"
+
+        # Case 2: Conflicting band unit ('m') vs dataset tag ('cm') -> rejected_unknown_vertical_units
+        _write_hirise_geotiff(
+            hi_path,
+            hi_elev,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            band_unit="m",
+            tags={"VERTICAL_UNIT": "cm"},
+        )
+        val_conflict = HiRISERasterProvider(dem_path=hi_path, enabled=True).validate_hirise_raster()
+        assert val_conflict.is_valid is False
+        assert val_conflict.status_code == "rejected_unknown_vertical_units"
+
+        # Case 3: Unsupported imperial unit ('feet') -> rejected_unsupported_vertical_units
+        _write_hirise_geotiff(
+            hi_path,
+            hi_elev,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            band_unit=None,
+            tags={"VERTICAL_UNIT": "feet"},
+        )
+        val_feet = HiRISERasterProvider(dem_path=hi_path, enabled=True).validate_hirise_raster()
+        assert val_feet.is_valid is False
+        assert val_feet.status_code == "rejected_unsupported_vertical_units"
+
+        # Case 4: Radiometric unit ('reflectance') -> rejected_non_elevation_raster
+        _write_hirise_geotiff(
+            hi_path,
+            hi_elev,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            band_unit="reflectance",
+        )
+        val_refl = HiRISERasterProvider(dem_path=hi_path, enabled=True).validate_hirise_raster()
+        assert val_refl.is_valid is False
+        assert val_refl.status_code == "rejected_non_elevation_raster"
+
+        # Case 5: Explicit metre unit in dataset tag (with band_unit=None) -> valid
+        _write_hirise_geotiff(
+            hi_path,
+            hi_elev,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            band_unit=None,
+            tags={"ELEVATION_UNITS": "Metres"},
+        )
+        val_metres = HiRISERasterProvider(dem_path=hi_path, enabled=True).validate_hirise_raster()
+        assert val_metres.is_valid is True
+        assert val_metres.status_code == "ready"
+        assert val_metres.raster is not None
+        assert val_metres.raster.metadata.vertical_units == "meters"
+
+        # Case 6: Explicit 'cm' unit converts valid pixels by 0.01 to meters and documents conversion
+        hi_cm = np.full((120, 120), -248500.0, dtype=np.float32)  # -2485.0 m in cm
+        hi_cm[0, 0] = -999999.0
+        _write_hirise_geotiff(
+            hi_path,
+            hi_cm,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            nodata=-999999.0,
+            band_unit="centimeters",
+        )
+        prov_cm = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+        val_cm = prov_cm.validate_hirise_raster()
+        assert val_cm.is_valid is True
+        assert val_cm.raster is not None
+        assert val_cm.raster.nodata_mask[0, 0] == np.True_
+        assert val_cm.raster.data[10, 10] == pytest.approx(-2485.0, abs=0.01)
+        cm_provenance = prov_cm.get_provenance()
+        assert cm_provenance["units"] == "meters"
+        assert any("converted" in lim.lower() for lim in cm_provenance["provenance_limitations"])
+    finally:
+        for p in (mola_path, hi_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def test_20_projected_raster_nodata_hole_conservative_propagation():
+    """
+    Phase 4.1 Regression Test (6-8):
+    - Creates a projected Mars Equirectangular raster with a localized 1x1 NoData hole at (50, 50)
+      and a 2x2 NoData hole at (70:72, 70:72) surrounded by valid -2475.0 m elevation pixels.
+    - Extracts a destination geographic analysis grid whose bilinear resampling footprint
+      straddles the single-pixel NoData hole.
+    - Verifies that all 4 destination pixels whose bilinear interpolation kernel touches the
+      1x1 NoData hole become NaN (whereas the old buggy src_nodata=1.0 left 2 of them interpolated),
+      valid regions away from NoData remain aligned at -2475.0 m, and zero 0.0 values are created.
+    """
+    from backend.app.services.terrain_source_service import TerrainSourceSelector
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_hi_proj:
+        hi_proj_path = tmp_hi_proj.name
+
+    try:
+        crs_proj = (
+            "+proj=eqc +lat_ts=18.405 +lat_0=18.405 +lon_0=77.415 "
+            "+x_0=0 +y_0=0 +R=3396190 +units=m +no_defs"
+        )
+        transform = from_origin(-50.0, 50.0, 1.0, 1.0)
+        hi_elev = np.full((100, 100), -2475.0, dtype=np.float32)
+        # Localized 2x2 NoData hole at rows 49..50, cols 49..50 surrounded by valid -2475.0m pixels
+        hi_elev[49:51, 49:51] = -9999.0
+
+        with rasterio.open(
+            hi_proj_path,
+            "w",
+            driver="GTiff",
+            height=100,
+            width=100,
+            count=1,
+            dtype="float32",
+            crs=crs_proj,
+            transform=transform,
+            nodata=-9999.0,
+        ) as dst:
+            dst.set_band_unit(1, "m")
+            dst.write(hi_elev, 1)
+
+        hi_prov = HiRISERasterProvider(dem_path=hi_proj_path, enabled=True)
+        val = hi_prov.validate_hirise_raster()
+        assert val.is_valid is True
+        assert val.raster is not None
+
+        # Extract a corridor window centered over (77.415, 18.405) where destination pixels
+        # straddle the 2x2 NoData hole (3 rows x 2 cols = 6 destination pixels touch the hole;
+        # the old buggy src_nodata=1.0 only marked 2 and interpolated the other 4!)
+        warped_elev, warped_meta = TerrainSourceSelector._extract_native_hirise_corridor(
+            hirise_raster=val.raster,
+            corr_min_lon=77.4145,
+            corr_min_lat=18.4045,
+            corr_max_lon=77.4155,
+            corr_max_lat=18.4055,
+        )
+
+        # All 6 destination cells touching the 2x2 source NoData hole must be NaN
+        nan_count = int(np.sum(np.isnan(warped_elev)))
+        assert nan_count == 6
+        # Never turn NoData into 0.0
+        assert not np.any(warped_elev == 0.0)
+        # All valid cells away from the hole preserve exact -2475.0m elevation
+        valid_vals = warped_elev[~np.isnan(warped_elev)]
+        assert valid_vals.size > 0
+        assert np.allclose(valid_vals, -2475.0, atol=1e-3)
+        assert warped_meta.crs_str == "IAU2000:49900"
+    finally:
+        if os.path.exists(hi_proj_path):
+            os.remove(hi_proj_path)
+
+
+def test_21_provider_cache_reuse_single_load_single_hash_and_invalidation(monkeypatch):
+    """
+    Phase 4.1 Regression Test (9-11):
+    - Repeated RouteService and DataCatalogService constructions reuse the shared provider/cache.
+    - Across multiple RouteService instances, route plans, get_data_status(), get_layer_list(),
+      and get_provenance() calls on an unchanged file, `load_raster_file` is called ONCE and
+      `_compute_file_sha256` is called ONCE.
+    - Modifying the file on disk invalidates the cached entry by file identity, evicts the stale
+      raster copy, and recomputes validation and SHA-256 exactly once for the new file version.
+    """
+    import backend.app.data.providers.hirise as hirise_mod
+
+    HiRISERasterProvider.clear_process_cache()
+
+    load_calls = 0
+    hash_calls = 0
+    orig_load = hirise_mod.load_raster_file
+    orig_hash = hirise_mod._compute_file_sha256
+
+    def counting_load(path: str):
+        nonlocal load_calls
+        load_calls += 1
+        return orig_load(path)
+
+    def counting_hash(path: str):
+        nonlocal hash_calls
+        hash_calls += 1
+        return orig_hash(path)
+
+    monkeypatch.setattr(hirise_mod, "load_raster_file", counting_load)
+    monkeypatch.setattr(hirise_mod, "_compute_file_sha256", counting_hash)
+
+    with (
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_mola,
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_hi,
+    ):
+        mola_path = tmp_mola.name
+        hi_path = tmp_hi.name
+
+    try:
+        _write_mola_geotiff(mola_path)
+        hi_elev_v1 = np.full((150, 150), -2490.0, dtype=np.float32)
+        _write_hirise_geotiff(
+            hi_path, hi_elev_v1, min_lon=77.410, max_lat=18.410, res_meters=1.0, band_unit="m"
+        )
+
+        # Verify default RouteService() and DataCatalogService() share the same provider instance
+        rs_default_1 = RouteService()
+        rs_default_2 = RouteService()
+        cat_default = DataCatalogService()
+        assert rs_default_1.hirise_provider is rs_default_2.hirise_provider
+        assert rs_default_1.hirise_provider is cat_default.hirise_provider
+        assert rs_default_1.provider is rs_default_2.provider
+
+        mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
+        mola_prov.use_real_dem = True
+
+        req = RoutePlanRequest(
+            start=MarsCoordinate(lon=77.4108, lat=18.4092),
+            destination=MarsCoordinate(lon=77.4116, lat=18.4084),
+        )
+
+        # Execute 3 separate RouteService instances and 2 DataCatalogService instances on hi_path
+        for _ in range(3):
+            hi_p = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+            svc = RouteService(provider=mola_prov, hirise_provider=hi_p)
+            resp = svc.plan_route(req)
+            assert resp.source_selection is not None
+            assert resp.source_selection.hirise_selected is True
+            _ = hi_p.get_provenance()
+
+        for _ in range(2):
+            cat = DataCatalogService(
+                provider=mola_prov,
+                hirise_provider=HiRISERasterProvider(dem_path=hi_path, enabled=True),
+            )
+            _ = cat.get_data_status()
+            _ = cat.get_layer_list()
+
+        # File v1 must have been loaded ONCE and hashed ONCE across all 5 service runs!
+        assert load_calls == 1
+        assert hash_calls == 1
+        assert len(HiRISERasterProvider._PROCESS_CACHE) == 1
+
+        # Now overwrite hi_path with new elevation (-2420.0m) -> cache must invalidate automatically
+        hi_elev_v2 = np.full((150, 150), -2420.0, dtype=np.float32)
+        _write_hirise_geotiff(
+            hi_path, hi_elev_v2, min_lon=77.410, max_lat=18.410, res_meters=1.0, band_unit="m"
+        )
+
+        hi_p_v2 = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+        svc_v2 = RouteService(provider=mola_prov, hirise_provider=hi_p_v2)
+        resp_v2 = svc_v2.plan_route(req)
+        assert resp_v2.routes[0].summary.min_elevation_meters == pytest.approx(-2420.0, abs=0.5)
+        assert load_calls == 2
+        assert hash_calls == 2
+        # Stale entry for the same path was evicted -> still only 1 cached entry in memory
+        assert len(HiRISERasterProvider._PROCESS_CACHE) == 1
+    finally:
+        for p in (mola_path, hi_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def test_22_concurrent_route_requests_never_mutate_shared_source_terrain():
+    """
+    Phase 4.1 Regression Test (12):
+    - Shared cached RasterData arrays are marked read-only (`writeable = False`).
+    - Concurrent route requests (including robustness stress-testing perturbations and
+      block aggregation) cannot mutate the shared source elevation or nodata mask arrays.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    with (
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_mola,
+        tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_hi,
+    ):
+        mola_path = tmp_mola.name
+        hi_path = tmp_hi.name
+
+    try:
+        _write_mola_geotiff(mola_path)
+        r_idx, c_idx = np.meshgrid(np.arange(160), np.arange(160), indexing="ij")
+        hi_elev = (-2490.0 + 0.03 * r_idx + 0.02 * c_idx).astype(np.float32)
+        hi_elev[5, 5] = -9999.0
+        _write_hirise_geotiff(
+            hi_path,
+            hi_elev,
+            min_lon=77.410,
+            max_lat=18.410,
+            res_meters=1.0,
+            nodata=-9999.0,
+            band_unit="m",
+        )
+
+        mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
+        mola_prov.use_real_dem = True
+        hi_prov = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+
+        shared_raster = hi_prov.get_dem_raster()
+        assert shared_raster.data.flags.writeable is False
+        assert shared_raster.nodata_mask.flags.writeable is False
+        snapshot_before = shared_raster.data.copy()
+        mask_before = shared_raster.nodata_mask.copy()
+
+        with pytest.raises(ValueError):
+            shared_raster.data[10, 10] = 0.0
+
+        def _worker(seed_val: int) -> float:
+            svc = RouteService(
+                provider=mola_prov,
+                hirise_provider=HiRISERasterProvider(dem_path=hi_path, enabled=True),
+                max_cells=2500 if seed_val % 2 == 0 else 250000,
+            )
+            req = RoutePlanRequest(
+                start=MarsCoordinate(lon=77.4106, lat=18.4094),
+                destination=MarsCoordinate(lon=77.4114, lat=18.4086),
+                robustness_config=RobustnessConfig(
+                    enabled=True,
+                    vertical_sigma_m=0.25,
+                    correlation_length_m=4.0,
+                    scenario_count=3,
+                    seed=seed_val,
+                ),
+            )
+            res = svc.plan_route(req)
+            return res.routes[0].total_cost
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            costs = list(pool.map(_worker, [11, 22, 33, 44]))
+
+        assert len(costs) == 4
+        assert all(c > 0.0 for c in costs)
+        assert np.array_equal(shared_raster.data, snapshot_before, equal_nan=True)
+        assert np.array_equal(shared_raster.nodata_mask, mask_before)
+    finally:
+        for p in (mola_path, hi_path):
             if os.path.exists(p):
                 os.remove(p)

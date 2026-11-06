@@ -34,6 +34,13 @@ This document details the scientific datasets evaluated and supported for **MARS
 - **Official URL:** `https://www.uahirise.org/dtm/dtm.php?ID=ESP_037803_1985`
 - **Spatial Coverage:** `18.35°N` to `18.46°N`, `77.38°E` to `77.47°E` (~6 km × 18 km localized corridor covering the Jezero Western Delta front and scarp).
 - **Resolution:** ~1.0 meter/pixel numerical elevation (`0.15 m/px` to `25.0 m/px` supported local high-resolution range).
+- **Explicit Vertical Elevation-Unit Validation:**
+  - `HiRISERasterProvider` inspects Rasterio band units (`src.units[0]`), band tags (`src.tags(1)`), and dataset tags (`src.tags()`) for `VERTICAL_UNIT`, `VERTICAL_UNITS`, `ELEVATION_UNIT`, `ELEVATION_UNITS`, `Z_UNIT`, `Z_UNITS`, `UNIT_TYPE`, `UNITTYPE`, `UNIT`, `UNITS`.
+  - Metres (`"m"`, `"meter"`, `"meters"`, `"metre"`, `"metres"`) are accepted only when explicitly declared. Explicit metric linear units (`"cm"`, `"mm"`, `"km"`) are converted to meters on valid non-NoData pixels with documented conversion metadata (`VERTICAL_UNIT_CONVERSION`).
+  - Missing, unknown, ambiguous, or conflicting vertical units are rejected with `rejected_unknown_vertical_units`; unsupported imperial/angular units (`"feet"`, `"degrees"`) are rejected with `rejected_unsupported_vertical_units`; radiometric/imagery units (`"dn"`, `"reflectance"`, `"radiance"`, `"albedo"`) are rejected with `rejected_non_elevation_raster`. Numeric value plausibility or unauthenticated product tags are never used to infer vertical units.
+- **Process-Level Resource Management & Cache Invalidation Policy:**
+  - Validation results, read-only `RasterData` (`writeable = False`), full-file SHA-256 digests, raster statistics, and provenance dictionaries are cached in a thread-safe (`threading.RLock()`), bounded (`MAX_CACHE_ENTRIES = 2`) process-level `OrderedDict` keyed by file identity (`(realpath, st_size, st_mtime_ns, st_ctime_ns, st_ino, sample_crc32)`).
+  - Across repeated `RouteService`, `DataCatalogService`, and `HiRISERasterProvider` requests, an unchanged local HiRISE file is loaded **once** and hashed **once** per process (~250 MB float32 + bool mask memory footprint for a $7{,}000 \times 7{,}000$ DTM). If the file on disk is modified or replaced, stale entries for that path are immediately evicted and recomputed.
 - **Configuration & Provisioning:**
   - Controlled via `MARSPATH_USE_HIRISE_DEM=true|false` (default `false`) and `MARSPATH_HIRISE_DEM_PATH=backend/app/data/rasters/hirise_jezero_delta_dtm.tif`.
   - Optional: when `MARSPATH_USE_HIRISE_DEM=false` or when a route extends outside the HiRISE footprint, MARSPath automatically uses the regional MOLA–HRSC 200 m/px DEM without failing startup.

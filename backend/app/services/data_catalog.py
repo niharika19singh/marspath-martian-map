@@ -3,8 +3,13 @@ from typing import Any
 from backend.app.core.config import get_settings
 from backend.app.data.manifest import DATA_CATALOG_MANIFEST
 from backend.app.data.providers.base import BaseRasterProvider
-from backend.app.data.providers.hirise import HiRISERasterProvider
-from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
+from backend.app.data.providers.hirise import (
+    HiRISERasterProvider,
+    get_shared_hirise_provider,
+)
+from backend.app.data.providers.mola_hrsc import (
+    get_shared_mola_provider,
+)
 from backend.app.geospatial.crs import get_mars_crs_info
 from backend.app.schemas.coordinates import BoundingBox
 from backend.app.schemas.layers import LayerCategory, LayerInfo, LayerListResponse
@@ -22,8 +27,8 @@ class DataCatalogService:
         hirise_provider: HiRISERasterProvider | None = None,
     ):
         self.settings = get_settings()
-        self.provider = provider or MOLAHRSCRasterProvider()
-        self.hirise_provider = hirise_provider or HiRISERasterProvider()
+        self.provider = provider or get_shared_mola_provider()
+        self.hirise_provider = hirise_provider or get_shared_hirise_provider()
 
     @staticmethod
     def _resolve_dem_attribution(is_syn: bool, provenance: dict[str, Any]) -> dict[str, Any]:
