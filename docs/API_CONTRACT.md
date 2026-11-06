@@ -469,31 +469,37 @@ MARSPath supports optional deterministic terrain perturbation stress testing via
 ```
 - `enabled` (`bool`, default `false`): Enables deterministic perturbation stress testing.
 - `vertical_sigma_m` (`float > 0`, required when `enabled: true`): Assumed $1\sigma$ vertical elevation perturbation amplitude in meters over valid non-nodata cells.
-- `correlation_length_m` (`float > 0`, required when `enabled: true`): Assumed Gaussian spatial correlation length scale $L_c$ in meters.
+- `correlation_length_m` (`float > 0`, required when `enabled: true`): Physical standard deviation $L$ (in meters) of the 2D separable Gaussian convolution filter kernel ($\sigma_x = L / \Delta x$, $\sigma_y = L / \Delta y$). Note that convolving white noise with a Gaussian kernel of standard deviation $L$ produces a theoretical infinite-plane Gaussian autocorrelation function $\rho(\Delta x, \Delta y) = \exp(-\Delta x^2 / (4L^2) - \Delta y^2 / (4L^2))$, corresponding to an autocorrelation Gaussian standard deviation of $\sqrt{2}L$ (`theoretical_autocorrelation_sigma_m`) and an $e$-folding distance ($\rho = e^{-1}$) of $2L$ (`theoretical_efolding_distance_m`), subject to finite-grid boundary reflection, nodata masking, and valid-cell sample normalization.
 - `scenario_count` (`int`, bounded `3..20`, default `5`): Number of independent perturbation scenarios to evaluate.
 - `seed` (`int`, default `42`): Master deterministic seed used to derive per-scenario seeds via `numpy.random.SeedSequence`.
 - `cost_regret_threshold_fraction` (`float >= 0.0`, default `0.05`): Comparative reporting criterion for relative cost regret. **This is a comparative routing efficiency criterion, NOT a physical rover safety threshold.**
 
 ### Perturbation Model & Route Comparison Metrics
 1. **Spatially Correlated Gaussian Elevation Perturbation (`spatially_correlated_gaussian_elevation_perturbation`):**
-   - For each scenario $k$, a zero-mean unit-variance Gaussian field $W_k \sim \mathcal{N}(0, 1)$ is generated using `scenario_seed` (with nodata cells zeroed prior to convolution) and convolved with a 2D separable Gaussian filter with pixel standard deviations:
-     $$\sigma_x = \frac{L_c}{\Delta x}, \quad \sigma_y = \frac{L_c}{\Delta y}$$
+   - For each scenario $k$, a zero-mean unit-variance Gaussian field $W_k \sim \mathcal{N}(0, 1)$ is generated using `scenario_seed` (with nodata cells zeroed prior to convolution) and convolved with a 2D separable Gaussian filter kernel whose physical standard deviation is $L =$ `correlation_length_m` and pixel standard deviations are:
+     $$\sigma_x = \frac{L}{\Delta x}, \quad \sigma_y = \frac{L}{\Delta y}$$
      where $\Delta x$ (`actual_dx_meters`) and $\Delta y$ (`actual_dy_meters`) are the actual physical cell dimensions in meters.
+   - `uncertainty_assumptions` explicitly reports both the filter-kernel standard deviation (`correlation_length_m` $= L$) and the resulting theoretical infinite-plane field autocorrelation scales (`theoretical_autocorrelation_sigma_m` $= \sqrt{2}L$, `theoretical_efolding_distance_m` $= 2L$).
    - The filtered field is centered to zero mean and scaled to standard deviation `vertical_sigma_m` strictly over valid non-nodata cells, then added to a copy of the cropped elevation array while preserving the original nodata mask unchanged.
-   - Slope (`compute_slope_degrees`), roughness (`compute_roughness_index`), traversability (`build_traversability_mask`), the 8-connected `TerrainGridGraph`, and `astar_search` are recomputed from scratch for each scenario.
-2. **Baseline Route Feasibility (`baseline_route_feasibility_fraction`):**
-   - Checks whether every grid cell and step along the baseline route remains traversable in the scenario, strictly enforcing the **diagonal corner-cutting constraint** (a diagonal move is infeasible if either orthogonal neighbor is untraversable).
-3. **Jaccard Route Overlap (`jaccard_overlap_fraction`, `mean_route_overlap_fraction`, `minimum_route_overlap_fraction`):**
-   - Computed over discrete `(row, col)` grid-cell identities:
+   - Slope (`compute_slope_degrees`), roughness (`compute_roughness_index`), and mode-specific traversability (`build_traversability_mask`) and `TerrainGridGraph` instances are recomputed from scratch for each scenario.
+2. **Route-Specific Mode & Objective Preservation:**
+   - Each baseline route alternative is evaluated under its own `RouteAlternative.mode` (`route_mode`) using `MODE_WEIGHTS[route_mode]` and `effective_max_slope = min(constraints.max_slope_deg, MODE_WEIGHTS[route_mode].slope_ceiling_deg)`. For example, `route_safety_backup` (`safety_first`) is evaluated under its `14.0°` slope ceiling and `SAFETY_FIRST` cost weights even when the top-level request mode is `balanced` (`20.0°`).
+   - Route-specific required waypoints (`route.waypoints_visited`, reported via `required_waypoint_count`) are preserved during scenario re-optimization: `route_primary_waypoint_guided` re-optimizes leg-by-leg through all requested `science_waypoints`, and `route_science_primary` re-optimizes through its selected science target, while direct routes (`route_direct_baseline`) use the direct start-to-destination scenario optimum.
+   - Scenario terrain-generation status (`terrain_generation_status`) is tracked separately from each route's scenario optimization status (`comparison_status`, `comparison_error_reason`). If one route-specific scenario search fails (e.g., `route_safety_backup` becomes unreachable under its stricter `14.0°` slope ceiling), other routes whose scenario searches succeeded retain their completed comparisons (`scenario_status = "completed_partial"`).
+3. **Baseline Route Feasibility (`baseline_route_feasibility_fraction`):**
+   - Checks whether every grid cell and step along the baseline route remains traversable under that route's own mode graph in the scenario, strictly enforcing the **diagonal corner-cutting constraint** (a diagonal move is infeasible if either orthogonal neighbor is untraversable).
+   - When `evaluated_scenario_count == 0` for a route, `baseline_route_feasibility_fraction` and `baseline_route_retention_fraction` are returned as `null` (`None`), with `scenario_feasible_count = 0` and `scenario_infeasible_count = 0` for the completed-scenario aggregate, while preserving per-scenario statuses and `feasible` checks in `scenario_results`.
+4. **Jaccard Route Overlap (`jaccard_overlap_fraction`, `mean_route_overlap_fraction`, `minimum_route_overlap_fraction`):**
+   - Computed over discrete `(row, col)` grid-cell identities between the baseline route and its route-specific scenario-optimal path:
      $$\text{Jaccard Overlap} = \frac{|N_{\text{baseline}} \cap N_{\text{scenario}}|}{|N_{\text{baseline}} \cup N_{\text{scenario}}|}$$
-4. **Relative Cost Regret (`cost_regret_fraction`, `mean_cost_regret_fraction`, `maximum_cost_regret_fraction`):**
-   - Computed only when the baseline route is feasible in the scenario and `scenario_optimal_cost` is valid:
+5. **Relative Cost Regret (`cost_regret_fraction`, `mean_cost_regret_fraction`, `maximum_cost_regret_fraction`):**
+   - Computed under the route's own mode cost model and waypoint objective whenever the baseline route is feasible in the scenario and the route's `scenario_optimal_cost` is valid:
      $$\text{cost\_regret\_fraction} = \frac{C_{\text{baseline in scenario}} - C_{\text{scenario optimal}}}{C_{\text{scenario optimal}}}$$
      Tiny negative values ($-10^{-9} \le \text{regret} < 0$) from floating-point rounding are clamped to `0.0`.
-5. **Route Retention (`baseline_route_retention_fraction`):**
-   - Fraction of **evaluated (completed) scenarios** (`completed_scenario_count`) in which the baseline route remained traversable, had a valid scenario cost, and satisfied `cost_regret_fraction <= cost_regret_threshold_fraction`.
-   - Failed scenarios (`failed_untraversable_endpoint`, `failed_unreachable`, `failed_computational_bound`, `failed_error`) are reported transparently in `scenario_results` and are never treated as positive stability evidence.
-6. **Separation of Evidence Quality vs. Route Stability:**
+6. **Route Retention (`baseline_route_retention_fraction`):**
+   - Fraction of **evaluated (completed) scenarios** (`evaluated_scenario_count`) for that route in which the baseline route remained traversable, had a valid scenario cost, and satisfied `cost_regret_fraction <= cost_regret_threshold_fraction` (`null` when `evaluated_scenario_count == 0`).
+   - Failed scenarios (`failed_untraversable_endpoint`, `failed_unreachable`, `failed_computational_bound`, `failed_error`) are reported transparently in `scenario_results` and are never treated as positive stability evidence, nor are computational search failures conflated with physical traversability failures.
+7. **Separation of Evidence Quality vs. Route Stability:**
    - `evidence_passport.quality_tier` measures the authenticity, completeness, and resolution of the source DEM.
    - `robustness_assessment` measures geometric and cost sensitivity of the route to hypothetical elevation perturbations. Neither metric is a calibrated probability of rover survival or mission success:
      > *"Results describe route stability under the specified hypothetical terrain perturbation model. They do not establish the actual probability of rover failure or mission success."*

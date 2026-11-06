@@ -12,7 +12,7 @@ from backend.app.geospatial.crs import (
 )
 from backend.app.geospatial.raster_loader import RasterMetadata
 from backend.app.routing.astar import astar_search
-from backend.app.routing.cost_model import calculate_edge_cost
+from backend.app.routing.cost_model import MODE_WEIGHTS, calculate_edge_cost
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode, ScienceTarget
 from backend.app.schemas.routes import GeoJSONGeometry, RouteAlternative, RouteSummary
@@ -482,11 +482,13 @@ def generate_route_alternatives(
     if num_alternatives >= 3 and len(results) < 3:
         if requested_mode != OptimizationMode.SAFETY_FIRST:
             alt_mode = OptimizationMode.SAFETY_FIRST
+            safety_ceiling = MODE_WEIGHTS[alt_mode].slope_ceiling_deg
+            safety_traversable = graph.traversable & (graph.slope_deg <= safety_ceiling)
             graph_safety = TerrainGridGraph(
                 elevation=graph.elevation,
                 slope_deg=graph.slope_deg,
                 roughness=graph.roughness,
-                traversable_mask=graph.traversable,
+                traversable_mask=safety_traversable,
                 dx_meters=graph.dx,
                 dy_meters=graph.dy,
                 mode=alt_mode,

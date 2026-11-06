@@ -7,7 +7,15 @@ Gaussian elevation perturbations applied to a copy of the active mission corrido
 Scientific Integrity Principles:
 - Does NOT invent vertical error standard deviations or spatial correlation scales for USGS DEMs.
 - Requires explicit user-supplied `vertical_sigma_m` and `correlation_length_m` when enabled.
+- Documents that `correlation_length_m` is the physical standard deviation L of the 2D Gaussian
+  convolution filter kernel, distinguishing it from the resulting random field's theoretical
+  infinite-plane autocorrelation standard deviation (sqrt(2) * L) and e-folding distance (2 * L).
 - Preserves original DEM arrays and nodata masks without mutation.
+- Evaluates each baseline route under its own `RouteAlternative.mode` (slope ceiling and cost
+  weights) and its own required waypoint sequence (`waypoints_visited`).
+- Returns `None` (`null`) for aggregate feasibility and retention fractions when zero scenario
+  comparisons complete (`evaluated_scenario_count == 0`), never conflating A* search failures
+  with physical route infeasibility.
 - Separates terrain evidence quality (`evidence_passport.quality_tier`) from route geometric/cost stability.
 - Never reports scenario retention or feasibility fractions as probabilities of rover survival or mission success.
 """
@@ -35,7 +43,7 @@ from backend.app.geospatial.terrain_metrics import (
     compute_slope_degrees,
 )
 from backend.app.routing.astar import astar_search
-from backend.app.routing.cost_model import calculate_edge_cost
+from backend.app.routing.cost_model import MODE_WEIGHTS, calculate_edge_cost
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode, RouteConstraints
 from backend.app.schemas.routes import (
@@ -69,19 +77,40 @@ def derive_scenario_seeds(master_seed: int, scenario_count: int) -> list[int]:
     return [int(s) for s in states]
 
 
+def compute_effective_max_slope(
+    constraints: RouteConstraints,
+    route_mode: OptimizationMode,
+) -> float:
+    """
+    Computes the effective slope ceiling in degrees for `route_mode` as the minimum of
+    `constraints.max_slope_deg` and the mode's slope ceiling defined in `MODE_WEIGHTS`.
+
+    For example, `OptimizationMode.SAFETY_FIRST` enforces a 14.0° ceiling even when the
+    request-level `constraints.max_slope_deg` is 20.0°.
+    """
+    mode_ceiling = MODE_WEIGHTS[route_mode].slope_ceiling_deg
+    return min(float(constraints.max_slope_deg), float(mode_ceiling))
+
+
 def compute_gaussian_filter_pixel_sigmas(
     correlation_length_m: float,
     dx_meters: float,
     dy_meters: float,
 ) -> tuple[float, float]:
     """
-    Converts physical spatial correlation length `correlation_length_m` (in meters) into
-    Gaussian filter standard deviations `(pixel_sigma_x, pixel_sigma_y)` in pixel units
-    using the actual physical cell dimensions `(dx_meters, dy_meters)`.
+    Converts the physical Gaussian convolution filter-kernel standard deviation
+    `correlation_length_m` (L, in meters) into pixel standard deviations
+    `(pixel_sigma_x, pixel_sigma_y)` using actual physical cell dimensions `(dx_meters, dy_meters)`.
 
     Mathematical definition:
         pixel_sigma_x = correlation_length_m / dx_meters  (along columns / zonal axis)
         pixel_sigma_y = correlation_length_m / dy_meters  (along rows / meridional axis)
+
+    Note on filter-kernel scale vs. random-field autocorrelation scale:
+        When an ideal unmasked infinite-plane 2D Gaussian filter with kernel standard deviation L
+        is convolved with white noise, the resulting random field has autocorrelation
+        rho(dx, dy) = exp(-dx^2 / (4 * L^2) - dy^2 / (4 * L^2)), corresponding to an
+        autocorrelation Gaussian standard deviation of sqrt(2) * L and an e-folding distance of 2 * L.
     """
     if correlation_length_m <= 0.0 or not math.isfinite(correlation_length_m):
         raise InvalidConstraintError(
@@ -226,9 +255,13 @@ def compute_cost_regret_fraction(
     floating-point precision; never conceals genuine negative inconsistencies.
     """
     if scenario_optimal_cost <= 0.0 or not math.isfinite(scenario_optimal_cost):
-        raise ValueError(f"scenario_optimal_cost must be positive and finite, got {scenario_optimal_cost}")
+        raise ValueError(
+            f"scenario_optimal_cost must be positive and finite, got {scenario_optimal_cost}"
+        )
     if not math.isfinite(baseline_cost_in_scenario):
-        raise ValueError(f"baseline_cost_in_scenario must be finite, got {baseline_cost_in_scenario}")
+        raise ValueError(
+            f"baseline_cost_in_scenario must be finite, got {baseline_cost_in_scenario}"
+        )
 
     raw_regret = (float(baseline_cost_in_scenario) - float(scenario_optimal_cost)) / float(
         scenario_optimal_cost
@@ -266,7 +299,7 @@ def evaluate_path_on_scenario_graph(
             False,
             None,
             None,
-            f"Start node ({r0}, {c0}) became untraversable in perturbed scenario.",
+            f"Start node ({r0}, {c0}) became untraversable in perturbed scenario (mode={scenario_graph.mode.value}).",
         )
 
     total_cost = 0.0
@@ -289,7 +322,7 @@ def evaluate_path_on_scenario_graph(
                 False,
                 None,
                 None,
-                f"Node ({r2}, {c2}) at step {step_idx + 1} failed scenario traversability constraints.",
+                f"Node ({r2}, {c2}) at step {step_idx + 1} failed scenario traversability constraints (mode={scenario_graph.mode.value}).",
             )
 
         dr = r2 - r1
@@ -371,23 +404,127 @@ def _compute_path_3d_length(
     return total_len
 
 
+def _solve_scenario_objective(
+    scenario_graph: TerrainGridGraph,
+    start_px: tuple[int, int],
+    dest_px: tuple[int, int],
+    required_waypoints: tuple[tuple[int, int], ...],
+    max_expansions: int,
+    scenario_idx: int,
+) -> tuple[str, list[tuple[int, int]], float | None, float | None, int, str | None]:
+    """
+    Runs A* search on `scenario_graph` from `start_px` through `required_waypoints` to `dest_px`.
+
+    Returns:
+        (status, opt_nodes, opt_cost, opt_len_m, nodes_expanded, error_reason)
+    """
+    s_row, s_col = start_px
+    d_row, d_col = dest_px
+    mode_label = scenario_graph.mode.value
+
+    if not scenario_graph.is_in_bounds(s_row, s_col) or not bool(
+        scenario_graph.traversable[s_row, s_col]
+    ):
+        return (
+            "failed_untraversable_endpoint",
+            [],
+            None,
+            None,
+            0,
+            f"Start cell ({s_row}, {s_col}) became untraversable under mode '{mode_label}' in scenario {scenario_idx}.",
+        )
+
+    if not scenario_graph.is_in_bounds(d_row, d_col) or not bool(
+        scenario_graph.traversable[d_row, d_col]
+    ):
+        return (
+            "failed_untraversable_endpoint",
+            [],
+            None,
+            None,
+            0,
+            f"Destination cell ({d_row}, {d_col}) became untraversable under mode '{mode_label}' in scenario {scenario_idx}.",
+        )
+
+    for w_idx, (w_row, w_col) in enumerate(required_waypoints):
+        if not scenario_graph.is_in_bounds(w_row, w_col) or not bool(
+            scenario_graph.traversable[w_row, w_col]
+        ):
+            return (
+                "failed_untraversable_waypoint",
+                [],
+                None,
+                None,
+                0,
+                f"Required waypoint #{w_idx + 1} at ({w_row}, {w_col}) became untraversable under mode '{mode_label}' in scenario {scenario_idx}.",
+            )
+
+    leg_endpoints = [(s_row, s_col)] + list(required_waypoints) + [(d_row, d_col)]
+    full_opt_nodes: list[tuple[int, int]] = []
+    total_opt_cost = 0.0
+    total_expanded = 0
+
+    try:
+        for leg_i in range(len(leg_endpoints) - 1):
+            leg_nodes, leg_cost, leg_exp, _ = astar_search(
+                scenario_graph,
+                leg_endpoints[leg_i],
+                leg_endpoints[leg_i + 1],
+                max_expansions=max_expansions,
+            )
+            total_expanded += leg_exp
+            total_opt_cost += leg_cost
+            if full_opt_nodes:
+                full_opt_nodes.extend(leg_nodes[1:])
+            else:
+                full_opt_nodes.extend(leg_nodes)
+
+        opt_len_m = round(_compute_path_3d_length(full_opt_nodes, scenario_graph), 2)
+        return ("completed", full_opt_nodes, total_opt_cost, opt_len_m, total_expanded, None)
+    except UnreachableDestinationError as ue:
+        return ("failed_unreachable", [], None, None, total_expanded, ue.message)
+    except ComputationalBoundExceededError as ce:
+        return ("failed_computational_bound", [], None, None, total_expanded, ce.message)
+    except Exception as ex:
+        return (
+            "failed_error",
+            [],
+            None,
+            None,
+            total_expanded,
+            f"Unexpected scenario search error: {ex}",
+        )
+
+
 def _build_route_interpretation(
     route_id: str,
     evaluated_count: int,
+    failed_search_count: int,
     feasible_count: int,
-    infeasible_count: int,
+    confirmed_baseline_infeasible_count: int,
     mean_overlap: float | None,
     mean_regret: float | None,
-    retention_fraction: float,
+    retention_fraction: float | None,
     regret_threshold: float,
 ) -> str:
     if evaluated_count == 0:
+        if confirmed_baseline_infeasible_count > 0:
+            return (
+                f"Aggregate stability metrics (feasibility, overlap, cost regret, and retention fractions) "
+                f"for route '{route_id}' are unavailable because 0 scenario comparisons completed route "
+                f"optimization ({confirmed_baseline_infeasible_count} scenario(s) failed baseline path "
+                f"traversability checks; {failed_search_count} scenario search(es) did not complete). "
+                f"{MANDATORY_ROBUSTNESS_DISCLAIMER}"
+            )
         return (
-            f"Route '{route_id}' could not be compared against a scenario-optimal path because "
-            f"0 scenarios completed route optimization ({infeasible_count} scenario(s) failed "
-            "baseline traversability). Results do not establish mission survival probability."
+            f"Aggregate stability metrics (feasibility, overlap, cost regret, and retention fractions) "
+            f"for route '{route_id}' are unavailable because 0 scenario comparisons completed route "
+            f"optimization ({failed_search_count} scenario search(es) did not complete; baseline path "
+            f"traversability was not invalidated by failed A* search). "
+            f"{MANDATORY_ROBUSTNESS_DISCLAIMER}"
         )
 
+    assert retention_fraction is not None
     parts = [
         f"Across {evaluated_count} evaluated perturbation scenario(s), route '{route_id}' "
         f"remained traversable in {feasible_count}/{evaluated_count} scenario(s) "
@@ -395,6 +532,11 @@ def _build_route_interpretation(
         f"<= {regret_threshold * 100:.1f}% relative cost-regret reporting criterion in "
         f"retention fraction {retention_fraction:.2f}."
     ]
+    if failed_search_count > 0:
+        parts.append(
+            f"({failed_search_count} additional scenario search(es) failed to complete and were "
+            "excluded from the evaluated denominator.)"
+        )
     if mean_overlap is not None:
         if mean_overlap >= 0.75:
             parts.append(
@@ -499,6 +641,39 @@ class RobustnessService:
             resolved.append((row, col))
         return resolved
 
+    @staticmethod
+    def _resolve_route_waypoint_pixels(
+        route: RouteAlternative,
+        cropped_meta: RasterMetadata,
+        fallback_waypoint_pixels: list[tuple[int, int]] | None = None,
+    ) -> tuple[tuple[int, int], ...]:
+        """
+        Resolves the ordered sequence of required intermediate `(row, col)` waypoint cells
+        for `route` from `route.waypoints_visited` (covering both explicit `science_waypoints`
+        and automatic `science_first` selected target detours).
+        """
+        if route.waypoints_visited:
+            wp_cells: list[tuple[int, int]] = []
+            for wp in route.waypoints_visited:
+                col, row = geo_to_pixel(
+                    wp.lon,
+                    wp.lat,
+                    cropped_meta.min_lon,
+                    cropped_meta.max_lat,
+                    cropped_meta.deg_per_px_lon,
+                    cropped_meta.deg_per_px_lat,
+                    pixel_center=True,
+                )
+                col = max(0, min(col, cropped_meta.width - 1))
+                row = max(0, min(row, cropped_meta.height - 1))
+                wp_cells.append((row, col))
+            return tuple(wp_cells)
+
+        if route.route_id == "route_primary_waypoint_guided" and fallback_waypoint_pixels:
+            return tuple(fallback_waypoint_pixels)
+
+        return ()
+
     @classmethod
     def evaluate_route_robustness(
         cls,
@@ -552,28 +727,31 @@ class RobustnessService:
             dy_meters=dy_meters,
         )
 
-        # Effective slope limit for traversability mask (consistent with RiskService)
-        effective_max_slope = constraints.max_slope_deg
-        if requested_mode == OptimizationMode.SAFETY_FIRST:
-            effective_max_slope = min(effective_max_slope, 14.0)
-
-        # Resolve discrete (row, col) node paths for each baseline route
+        # Resolve discrete (row, col) node paths and required waypoint objectives for each baseline route
         resolved_paths: dict[str, list[tuple[int, int]]] = {}
+        route_waypoints: dict[str, tuple[tuple[int, int], ...]] = {}
+        distinct_modes: list[OptimizationMode] = []
+
         for route in baseline_routes:
             resolved_paths[route.route_id] = cls._resolve_baseline_route_nodes(
                 route=route,
                 cropped_meta=cropped_meta,
                 baseline_route_nodes=baseline_route_nodes,
             )
+            route_waypoints[route.route_id] = cls._resolve_route_waypoint_pixels(
+                route=route,
+                cropped_meta=cropped_meta,
+                fallback_waypoint_pixels=waypoint_pixels,
+            )
+            if route.mode not in distinct_modes:
+                distinct_modes.append(route.mode)
+        if requested_mode not in distinct_modes:
+            distinct_modes.append(requested_mode)
 
         scenario_seeds = derive_scenario_seeds(config.seed, config.scenario_count)
         scenario_results: list[RobustnessScenarioResult] = []
         completed_count = 0
         failed_count = 0
-
-        s_row, s_col = start_px
-        d_row, d_col = dest_px
-        wp_list = list(waypoint_pixels) if waypoint_pixels else []
 
         for idx, scen_seed in enumerate(scenario_seeds):
             try:
@@ -601,29 +779,38 @@ class RobustnessService:
                     kernel_size=3,
                     nodata_mask=scen_nodata_mask,
                 )
-                scen_traversable = build_traversability_mask(
-                    slope_deg=scen_slope,
-                    roughness=scen_roughness,
-                    max_slope_deg=effective_max_slope,
-                    max_roughness=constraints.max_roughness,
-                    nodata_mask=scen_nodata_mask,
-                    avoid_unobserved_terrain=constraints.avoid_unobserved_terrain,
-                )
-                scen_graph = TerrainGridGraph(
-                    elevation=perturbed_elev,
-                    slope_deg=scen_slope,
-                    roughness=scen_roughness,
-                    traversable_mask=scen_traversable,
-                    dx_meters=dx_meters,
-                    dy_meters=dy_meters,
-                    mode=requested_mode,
-                )
+
+                # Build mode-specific traversability masks and TerrainGridGraphs
+                mode_graphs: dict[OptimizationMode, TerrainGridGraph] = {}
+                for r_mode in distinct_modes:
+                    eff_max_slope = compute_effective_max_slope(constraints, r_mode)
+                    r_trav = build_traversability_mask(
+                        slope_deg=scen_slope,
+                        roughness=scen_roughness,
+                        max_slope_deg=eff_max_slope,
+                        max_roughness=constraints.max_roughness,
+                        nodata_mask=scen_nodata_mask,
+                        avoid_unobserved_terrain=constraints.avoid_unobserved_terrain,
+                    )
+                    mode_graphs[r_mode] = TerrainGridGraph(
+                        elevation=perturbed_elev,
+                        slope_deg=scen_slope,
+                        roughness=scen_roughness,
+                        traversable_mask=r_trav,
+                        dx_meters=dx_meters,
+                        dy_meters=dy_meters,
+                        mode=r_mode,
+                    )
             except Exception as gen_err:
                 logger.warning("Scenario %d terrain generation failed: %s", idx, gen_err)
                 failed_count += 1
                 empty_route_results = [
                     ScenarioBaselineRouteResult(
                         route_id=r.route_id,
+                        route_mode=r.mode,
+                        required_waypoint_count=len(route_waypoints.get(r.route_id, ())),
+                        comparison_status="failed_error",
+                        comparison_error_reason=f"Scenario terrain generation failed: {gen_err}",
                         feasible=False,
                         infeasibility_reason=f"Scenario terrain generation failed: {gen_err}",
                         baseline_node_count=len(set(resolved_paths.get(r.route_id, []))),
@@ -635,6 +822,8 @@ class RobustnessService:
                         cost_regret_fraction=None,
                         within_regret_threshold=False,
                         exceeds_regret_threshold=False,
+                        scenario_nodes_expanded=0,
+                        scenario_route_length_meters=None,
                     )
                     for r in baseline_routes
                 ]
@@ -642,6 +831,7 @@ class RobustnessService:
                     RobustnessScenarioResult(
                         scenario_index=idx,
                         scenario_seed=scen_seed,
+                        terrain_generation_status="failed_error",
                         scenario_status="failed_error",
                         realized_perturbation_std_m=None,
                         scenario_optimal_cost=None,
@@ -653,122 +843,47 @@ class RobustnessService:
                 )
                 continue
 
-            # Pre-evaluate each baseline route's physical feasibility on `scen_graph`
-            per_route_eval: dict[str, tuple[bool, float | None, float | None, str | None]] = {}
-            for route in baseline_routes:
-                r_nodes = resolved_paths.get(route.route_id, [])
-                per_route_eval[route.route_id] = evaluate_path_on_scenario_graph(
-                    path_nodes=r_nodes,
-                    scenario_graph=scen_graph,
-                )
-
-            # Check start/destination/waypoint feasibility and run A* on the scenario graph
-            scen_status = "completed"
-            scen_error: str | None = None
-            scen_opt_nodes: list[tuple[int, int]] = []
-            scen_opt_cost: float | None = None
-            scen_opt_len_m: float | None = None
-            scen_expanded = 0
-
-            # Also track waypoint-guided scenario optimal path if waypoints were requested
-            scen_wp_opt_nodes: list[tuple[int, int]] = []
-            scen_wp_opt_cost: float | None = None
-
-            if not scen_graph.is_in_bounds(s_row, s_col) or not bool(scen_traversable[s_row, s_col]):
-                scen_status = "failed_untraversable_endpoint"
-                scen_error = f"Start cell ({s_row}, {s_col}) became untraversable in scenario {idx}."
-            elif not scen_graph.is_in_bounds(d_row, d_col) or not bool(scen_traversable[d_row, d_col]):
-                scen_status = "failed_untraversable_endpoint"
-                scen_error = (
-                    f"Destination cell ({d_row}, {d_col}) became untraversable in scenario {idx}."
-                )
-            else:
-                try:
-                    if wp_list:
-                        # Check intermediate waypoints first
-                        for w_idx, (w_row, w_col) in enumerate(wp_list):
-                            if not scen_graph.is_in_bounds(w_row, w_col) or not bool(
-                                scen_traversable[w_row, w_col]
-                            ):
-                                raise UnreachableDestinationError(
-                                    f"Science waypoint #{w_idx + 1} at ({w_row}, {w_col}) became untraversable in scenario {idx}.",
-                                    start=(s_row, s_col),
-                                    dest=(d_row, d_col),
-                                )
-                        leg_Sequence = [(s_row, s_col)] + wp_list + [(d_row, d_col)]
-                        wp_path: list[tuple[int, int]] = []
-                        wp_cost = 0.0
-                        for leg_i in range(len(leg_Sequence) - 1):
-                            l_nodes, l_cost, l_exp, _ = astar_search(
-                                scen_graph,
-                                leg_Sequence[leg_i],
-                                leg_Sequence[leg_i + 1],
-                                max_expansions=constraints.max_search_nodes,
-                            )
-                            scen_expanded += l_exp
-                            wp_cost += l_cost
-                            if wp_path:
-                                wp_path.extend(l_nodes[1:])
-                            else:
-                                wp_path.extend(l_nodes)
-                        scen_wp_opt_nodes = wp_path
-                        scen_wp_opt_cost = wp_cost
-
-                    # Direct start -> dest optimal route on scenario graph
-                    if wp_list and len(baseline_routes) == 1 and baseline_routes[0].route_id == "route_primary_waypoint_guided":
-                        scen_opt_nodes = scen_wp_opt_nodes
-                        scen_opt_cost = scen_wp_opt_cost
-                    else:
-                        opt_nodes, opt_cost, opt_exp, _ = astar_search(
-                            scen_graph,
-                            (s_row, s_col),
-                            (d_row, d_col),
-                            max_expansions=constraints.max_search_nodes,
-                        )
-                        scen_expanded += opt_exp
-                        scen_opt_nodes = opt_nodes
-                        scen_opt_cost = opt_cost
-
-                    assert scen_opt_cost is not None
-                    scen_opt_len_m = round(_compute_path_3d_length(scen_opt_nodes, scen_graph), 2)
-                except UnreachableDestinationError as ue:
-                    if wp_list and "waypoint" in str(ue.message).lower():
-                        scen_status = "failed_untraversable_endpoint"
-                    else:
-                        scen_status = "failed_unreachable"
-                    scen_error = ue.message
-                except ComputationalBoundExceededError as ce:
-                    scen_status = "failed_computational_bound"
-                    scen_error = ce.message
-                except Exception as ex:
-                    scen_status = "failed_error"
-                    scen_error = f"Unexpected scenario search error: {ex}"
-
-            if scen_status == "completed" and scen_opt_cost is not None:
-                completed_count += 1
-            else:
-                failed_count += 1
-
+            # Evaluate each baseline route under its own mode graph and its own waypoint objective
+            objective_cache: dict[
+                tuple[OptimizationMode, tuple[tuple[int, int], ...]],
+                tuple[str, list[tuple[int, int]], float | None, float | None, int, str | None],
+            ] = {}
+            scen_total_expanded = 0
             route_scen_results: list[ScenarioBaselineRouteResult] = []
+
             for route in baseline_routes:
+                r_mode = route.mode
+                r_graph = mode_graphs[r_mode]
                 r_nodes = resolved_paths.get(route.route_id, [])
-                is_feas, base_scen_cost, _, infeas_reason = per_route_eval[route.route_id]
+                r_wps = route_waypoints.get(route.route_id, ())
 
-                # Match waypoint-guided route against waypoint-guided scenario optimal path when applicable
-                if (
-                    route.route_id == "route_primary_waypoint_guided"
-                    and scen_wp_opt_cost is not None
-                    and scen_wp_opt_nodes
-                ):
-                    ref_opt_nodes = scen_wp_opt_nodes
-                    ref_opt_cost: float | None = scen_wp_opt_cost
+                # 1. Evaluate physical feasibility and scenario cost of the baseline path on its mode graph
+                is_feas, base_scen_cost, _, infeas_reason = evaluate_path_on_scenario_graph(
+                    path_nodes=r_nodes,
+                    scenario_graph=r_graph,
+                )
+
+                # 2. Solve or reuse the route-specific scenario-optimal path for (r_mode, r_wps)
+                obj_key = (r_mode, r_wps)
+                if obj_key not in objective_cache:
+                    obj_res = _solve_scenario_objective(
+                        scenario_graph=r_graph,
+                        start_px=start_px,
+                        dest_px=dest_px,
+                        required_waypoints=r_wps,
+                        max_expansions=constraints.max_search_nodes,
+                        scenario_idx=idx,
+                    )
+                    objective_cache[obj_key] = obj_res
+                    scen_total_expanded += obj_res[4]
                 else:
-                    ref_opt_nodes = scen_opt_nodes
-                    ref_opt_cost = scen_opt_cost
+                    obj_res = objective_cache[obj_key]
 
-                if scen_status == "completed" and ref_opt_cost is not None and ref_opt_nodes:
+                comp_status, opt_nodes, opt_cost, opt_len_m, obj_expanded, comp_err = obj_res
+
+                if comp_status == "completed" and opt_cost is not None and opt_nodes:
                     base_cnt, scen_cnt, shared_cnt, jaccard = compute_jaccard_route_overlap(
-                        r_nodes, ref_opt_nodes
+                        r_nodes, opt_nodes
                     )
                     jaccard_val: float | None = round(jaccard, 4)
                 else:
@@ -778,13 +893,13 @@ class RobustnessService:
                     jaccard_val = None
 
                 if (
-                    scen_status == "completed"
+                    comp_status == "completed"
                     and is_feas
                     and base_scen_cost is not None
-                    and ref_opt_cost is not None
-                    and ref_opt_cost > 0.0
+                    and opt_cost is not None
+                    and opt_cost > 0.0
                 ):
-                    regret = compute_cost_regret_fraction(base_scen_cost, ref_opt_cost)
+                    regret = compute_cost_regret_fraction(base_scen_cost, opt_cost)
                     regret_rounded: float | None = round(regret, 6)
                     within_thresh = regret <= (config.cost_regret_threshold_fraction + 1e-12)
                     exceeds_thresh = not within_thresh
@@ -796,6 +911,10 @@ class RobustnessService:
                 route_scen_results.append(
                     ScenarioBaselineRouteResult(
                         route_id=route.route_id,
+                        route_mode=r_mode,
+                        required_waypoint_count=len(r_wps),
+                        comparison_status=comp_status,
+                        comparison_error_reason=comp_err,
                         feasible=is_feas,
                         infeasibility_reason=infeas_reason,
                         baseline_node_count=base_cnt,
@@ -806,30 +925,74 @@ class RobustnessService:
                             round(base_scen_cost, 2) if base_scen_cost is not None else None
                         ),
                         scenario_optimal_cost=(
-                            round(ref_opt_cost, 2)
-                            if (scen_status == "completed" and ref_opt_cost is not None)
+                            round(opt_cost, 2)
+                            if (comp_status == "completed" and opt_cost is not None)
                             else None
                         ),
                         cost_regret_fraction=regret_rounded,
                         within_regret_threshold=within_thresh,
                         exceeds_regret_threshold=exceeds_thresh,
+                        scenario_nodes_expanded=obj_expanded,
+                        scenario_route_length_meters=(
+                            opt_len_m if comp_status == "completed" else None
+                        ),
                     )
                 )
+
+            # Determine scenario-level status while preserving per-route statuses
+            completed_routes_in_scen = [
+                r_res for r_res in route_scen_results if r_res.comparison_status == "completed"
+            ]
+            failed_routes_in_scen = [
+                r_res for r_res in route_scen_results if r_res.comparison_status != "completed"
+            ]
+
+            if len(completed_routes_in_scen) == len(route_scen_results) and route_scen_results:
+                scen_status = "completed"
+                scen_error: str | None = None
+                completed_count += 1
+            elif completed_routes_in_scen:
+                scen_status = "completed_partial"
+                scen_error = "; ".join(
+                    f"{r_res.route_id}: {r_res.comparison_error_reason}"
+                    for r_res in failed_routes_in_scen
+                    if r_res.comparison_error_reason
+                )
+                completed_count += 1
+            else:
+                scen_status = (
+                    route_scen_results[0].comparison_status
+                    if route_scen_results
+                    else "failed_error"
+                )
+                scen_error = (
+                    route_scen_results[0].comparison_error_reason
+                    if route_scen_results
+                    else "No baseline routes available for scenario comparison."
+                )
+                failed_count += 1
+
+            primary_ref = (
+                route_scen_results[0]
+                if (route_scen_results and route_scen_results[0].comparison_status == "completed")
+                else (completed_routes_in_scen[0] if completed_routes_in_scen else None)
+            )
 
             scenario_results.append(
                 RobustnessScenarioResult(
                     scenario_index=idx,
                     scenario_seed=scen_seed,
+                    terrain_generation_status="completed",
                     scenario_status=scen_status,
                     realized_perturbation_std_m=round(realized_std, 4),
                     scenario_optimal_cost=(
-                        round(scen_opt_cost, 2)
-                        if (scen_status == "completed" and scen_opt_cost is not None)
-                        else None
+                        primary_ref.scenario_optimal_cost if primary_ref is not None else None
                     ),
-                    scenario_nodes_expanded=scen_expanded,
+                    scenario_nodes_expanded=scen_total_expanded,
                     scenario_route_length_meters=(
-                        scen_opt_len_m if scen_status == "completed" else None
+                        primary_ref.scenario_route_length_meters
+                        if primary_ref is not None
+                        else None
                     ),
                     baseline_route_results=route_scen_results,
                     error_reason=scen_error,
@@ -840,21 +1003,30 @@ class RobustnessService:
         baseline_assessments: list[BaselineRouteRobustness] = []
         for route in baseline_routes:
             r_id = route.route_id
+            r_wps = route_waypoints.get(r_id, ())
             completed_route_outcomes: list[ScenarioBaselineRouteResult] = []
             all_route_outcomes: list[ScenarioBaselineRouteResult] = []
+            confirmed_baseline_infeasible_count = 0
 
             for s_res in scenario_results:
                 for b_res in s_res.baseline_route_results:
                     if b_res.route_id == r_id:
                         all_route_outcomes.append(b_res)
-                        if s_res.scenario_status == "completed":
+                        if (
+                            s_res.terrain_generation_status == "completed"
+                            and not b_res.feasible
+                        ):
+                            confirmed_baseline_infeasible_count += 1
+                        if b_res.comparison_status == "completed":
                             completed_route_outcomes.append(b_res)
 
             eval_count = len(completed_route_outcomes)
+            route_failed_count = len(all_route_outcomes) - eval_count
+
             if eval_count > 0:
                 feas_count = sum(1 for o in completed_route_outcomes if o.feasible)
                 infeas_count = eval_count - feas_count
-                feas_fraction = round(feas_count / eval_count, 4)
+                feas_fraction: float | None = round(feas_count / eval_count, 4)
 
                 overlaps = [
                     o.jaccard_overlap_fraction
@@ -882,24 +1054,27 @@ class RobustnessService:
 
                 within_cnt = sum(1 for o in completed_route_outcomes if o.within_regret_threshold)
                 exceed_cnt = sum(1 for o in completed_route_outcomes if o.exceeds_regret_threshold)
-                retention_fraction = round(within_cnt / eval_count, 4)
+                retention_fraction: float | None = round(within_cnt / eval_count, 4)
             else:
+                # Zero completed scenarios: do not fabricate 0.0 fractions when denominator is 0,
+                # and do not count A* search failures as physical traversability failures.
                 feas_count = 0
-                infeas_count = sum(1 for o in all_route_outcomes if not o.feasible)
-                feas_fraction = 0.0
+                infeas_count = 0
+                feas_fraction = None
                 mean_overlap = None
                 min_overlap = None
                 mean_regret = None
                 max_regret = None
                 within_cnt = 0
                 exceed_cnt = 0
-                retention_fraction = 0.0
+                retention_fraction = None
 
             interp = _build_route_interpretation(
                 route_id=r_id,
                 evaluated_count=eval_count,
+                failed_search_count=route_failed_count,
                 feasible_count=feas_count,
-                infeasible_count=infeas_count,
+                confirmed_baseline_infeasible_count=confirmed_baseline_infeasible_count,
                 mean_overlap=mean_overlap,
                 mean_regret=mean_regret,
                 retention_fraction=retention_fraction,
@@ -909,7 +1084,10 @@ class RobustnessService:
             baseline_assessments.append(
                 BaselineRouteRobustness(
                     route_id=r_id,
+                    route_mode=route.mode,
+                    required_waypoint_count=len(r_wps),
                     evaluated_scenario_count=eval_count,
+                    failed_scenario_count=route_failed_count,
                     scenario_feasible_count=feas_count,
                     scenario_infeasible_count=infeas_count,
                     baseline_route_feasibility_fraction=feas_fraction,
@@ -938,8 +1116,13 @@ class RobustnessService:
             )
         )
 
+        L_kernel = float(config.correlation_length_m)
+        autocorr_sigma_m = math.sqrt(2.0) * L_kernel
+        efolding_dist_m = 2.0 * L_kernel
+
         known_limitations = [
             "The active MOLA-HRSC DEM does not establish a validated per-pixel vertical error standard deviation or spatial correlation length in its provenance metadata; vertical_sigma_m and correlation_length_m are user-supplied hypothetical stress-test assumptions.",
+            f"correlation_length_m ({L_kernel:.1f}m) specifies the physical standard deviation L of the 2D Gaussian convolution filter kernel. For an ideal unmasked infinite-plane Gaussian filter applied to white noise, the resulting field autocorrelation is rho(dx, dy) = exp(-dx^2 / (4*L^2) - dy^2 / (4*L^2)), with autocorrelation Gaussian standard deviation sqrt(2)*L = {autocorr_sigma_m:.1f}m and e-folding distance 2*L = {efolding_dist_m:.1f}m; finite-grid boundaries, nodata masking, and valid-cell normalization modify empirical finite-window correlations.",
             "Scenario feasibility, overlap, and retention fractions are deterministic frequencies across the finite set of evaluated scenarios conditional on user-specified assumptions; they are NOT calibrated probabilities of rover survival or mission success.",
             f"Cost-regret threshold ({config.cost_regret_threshold_fraction:.4f}) is a comparative routing efficiency criterion, not a physical rover safety threshold.",
             f"Perturbations are evaluated at grid scale ({round(dx_meters, 2)}m x {round(dy_meters, 2)}m) and do not resolve metre-scale boulders, regolith cohesion hazards, or sub-pixel obstacles.",
@@ -948,18 +1131,20 @@ class RobustnessService:
             known_limitations.append(
                 "Baseline terrain is synthetic or unverified (`quality_tier: unverified`). Perturbation stress testing evaluates geometric stability on synthetic/unverified elevations and does not validate genuine Martian topography."
             )
-        if failed_count > 0:
+        if failed_count > 0 or any(b.failed_scenario_count > 0 for b in baseline_assessments):
             known_limitations.append(
-                f"{failed_count} of {config.scenario_count} requested scenario(s) failed to complete scenario-optimal route search and are reported in scenario_results without being treated as positive stability evidence."
+                "One or more scenario route optimizations did not complete and are reported in scenario_results and failed_scenario_count without being treated as positive stability evidence or false traversability failures."
             )
 
         assumptions = UncertaintyAssumptions(
             vertical_sigma_m=round(float(config.vertical_sigma_m), 4),
-            correlation_length_m=round(float(config.correlation_length_m), 4),
+            correlation_length_m=round(L_kernel, 4),
             pixel_sigma_x=round(sigma_x, 4),
             pixel_sigma_y=round(sigma_y, 4),
             actual_dx_meters=round(dx_meters, 3),
             actual_dy_meters=round(dy_meters, 3),
+            theoretical_autocorrelation_sigma_m=round(autocorr_sigma_m, 4),
+            theoretical_efolding_distance_m=round(efolding_dist_m, 4),
             cost_regret_threshold_fraction=round(
                 float(config.cost_regret_threshold_fraction), 6
             ),
@@ -970,10 +1155,11 @@ class RobustnessService:
             model_name="spatially_correlated_gaussian_elevation_perturbation",
             model_description=(
                 "Zero-mean Gaussian random fields convolved with a 2D separable Gaussian filter "
-                f"(sigma_x={sigma_x:.3f} px, sigma_y={sigma_y:.3f} px derived from correlation_length_m="
-                f"{config.correlation_length_m:.1f}m and physical cell sizes dx={dx_meters:.2f}m, "
-                f"dy={dy_meters:.2f}m), normalized over valid non-nodata cells to "
-                f"vertical_sigma_m={config.vertical_sigma_m:.2f}m."
+                f"of kernel standard deviation L={L_kernel:.1f}m (sigma_x={sigma_x:.3f} px, "
+                f"sigma_y={sigma_y:.3f} px derived from physical cell sizes dx={dx_meters:.2f}m, "
+                f"dy={dy_meters:.2f}m; theoretical infinite-plane field autocorrelation Gaussian "
+                f"sigma sqrt(2)*L={autocorr_sigma_m:.1f}m, e-folding distance 2*L={efolding_dist_m:.1f}m), "
+                f"normalized over valid non-nodata cells to vertical_sigma_m={config.vertical_sigma_m:.2f}m."
             ),
             uncertainty_assumptions=assumptions,
             seed=config.seed,

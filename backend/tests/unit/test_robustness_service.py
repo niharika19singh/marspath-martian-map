@@ -660,13 +660,22 @@ def test_16_failed_scenario_results_represented_honestly(
         assert s_res.scenario_status == "failed_computational_bound"
         assert s_res.scenario_optimal_cost is None
         assert s_res.error_reason is not None
+        # Baseline route itself remained physically traversable even though A* search failed
+        assert s_res.baseline_route_results[0].feasible is True
+        assert s_res.baseline_route_results[0].comparison_status == "failed_computational_bound"
 
     z_rob = zero_valid.baseline_route_assessments[0]
     assert z_rob.evaluated_scenario_count == 0
-    assert z_rob.baseline_route_retention_fraction == 0.0
-    assert z_rob.baseline_route_feasibility_fraction == 0.0
+    assert z_rob.failed_scenario_count == 3
+    assert z_rob.scenario_feasible_count == 0
+    assert z_rob.scenario_infeasible_count == 0
+    assert z_rob.baseline_route_retention_fraction is None
+    assert z_rob.baseline_route_feasibility_fraction is None
     assert z_rob.mean_route_overlap_fraction is None
     assert z_rob.mean_cost_regret_fraction is None
+    assert "unavailable because 0 scenario comparisons completed" in z_rob.interpretation.lower()
+    assert "not invalidated by failed a* search" in z_rob.interpretation.lower()
+    assert "0/3 completed scenarios" not in z_rob.interpretation.lower()
 
 
 def test_17_no_uncertainty_parameters_invented_when_disabled_or_omitted():
@@ -852,3 +861,411 @@ def test_21_untraversable_endpoint_and_cell_budget_enforcement():
     for s_res in assessment.scenario_results:
         assert s_res.scenario_status == "failed_untraversable_endpoint"
         assert s_res.baseline_route_results[0].feasible is False
+        assert s_res.baseline_route_results[0].comparison_status == "failed_untraversable_endpoint"
+
+    rob_ep = assessment.baseline_route_assessments[0]
+    assert rob_ep.evaluated_scenario_count == 0
+    assert rob_ep.failed_scenario_count == 3
+    assert rob_ep.scenario_feasible_count == 0
+    assert rob_ep.scenario_infeasible_count == 0
+    assert rob_ep.baseline_route_feasibility_fraction is None
+    assert rob_ep.baseline_route_retention_fraction is None
+    assert "unavailable because 0 scenario comparisons completed" in rob_ep.interpretation.lower()
+    assert "3 scenario(s) failed baseline path traversability checks" in rob_ep.interpretation.lower()
+
+
+def test_22_balanced_request_safety_backup_uses_14deg_ceiling_and_safety_weights():
+    """Phase 3.1 Regression 1 & 2: A balanced request with route_safety_backup evaluates backup under 14 deg ceiling and SAFETY_FIRST weights."""
+    meta = _make_cropped_meta(20, 20)
+    elev = np.full((20, 20), -2500.0, dtype=np.float32)
+    slope = np.zeros_like(elev)
+    rough = np.zeros_like(elev)
+    trav = np.ones_like(elev, dtype=bool)
+    graph = TerrainGridGraph(
+        elevation=elev,
+        slope_deg=slope,
+        roughness=rough,
+        traversable_mask=trav,
+        dx_meters=20.0,
+        dy_meters=20.0,
+        mode=OptimizationMode.BALANCED,
+    )
+    node_map: dict[str, list[tuple[int, int]]] = {}
+    routes, _ = generate_route_alternatives(
+        graph=graph,
+        meta=meta,
+        start_px=(10, 2),
+        dest_px=(10, 17),
+        requested_mode=OptimizationMode.BALANCED,
+        num_alternatives=3,
+        route_nodes_out=node_map,
+    )
+    route_ids = [r.route_id for r in routes]
+    assert "route_primary_opt" in route_ids
+    assert "route_safety_backup" in route_ids
+
+    # Construct a scenario terrain with a ~16.0 degree slope along the baseline path (row 10, cols 6..11)
+    # Using dx=20m, dy=20m: dz=5.75m per cell gives arctan(5.75/20) = 16.04 deg (>14.0 deg SAFETY_FIRST, <=20.0 deg BALANCED),
+    # while 3x3 roughness is ~4.7m (well within default max_roughness=15.0).
+    # Taper ridge smoothly in rows 5..7 so rows 0..4 remain flat (0 deg) for the SAFETY_FIRST northern detour.
+    col_profile = np.zeros(20, dtype=np.float32)
+    col_profile[6] = 5.75
+    col_profile[7] = 11.50
+    col_profile[8] = 17.25
+    col_profile[9] = 11.50
+    col_profile[10] = 5.75
+
+    elev_16deg = elev.copy()
+    for r in range(20):
+        if r <= 4:
+            w = 0.0
+        elif r == 5:
+            w = 0.25
+        elif r == 6:
+            w = 0.50
+        elif r == 7:
+            w = 0.75
+        else:
+            w = 1.0
+        elev_16deg[r, :] = -2500.0 + w * col_profile
+
+    cfg = RobustnessConfig(
+        enabled=True,
+        vertical_sigma_m=1e-4,
+        correlation_length_m=40.0,
+        scenario_count=3,
+        seed=42,
+        cost_regret_threshold_fraction=0.05,
+    )
+    assessment = RobustnessService.evaluate_route_robustness(
+        config=cfg,
+        cropped_elevation=elev_16deg,
+        cropped_meta=meta,
+        dx_meters=20.0,
+        dy_meters=20.0,
+        start_px=(10, 2),
+        dest_px=(10, 17),
+        requested_mode=OptimizationMode.BALANCED,
+        constraints=RouteConstraints(max_slope_deg=20.0),
+        baseline_routes=routes,
+        baseline_route_nodes=node_map,
+        is_synthetic=True,
+    )
+    assert assessment is not None
+    by_id = {b.route_id: b for b in assessment.baseline_route_assessments}
+
+    primary_rob = by_id["route_primary_opt"]
+    safety_rob = by_id["route_safety_backup"]
+
+    assert primary_rob.route_mode == OptimizationMode.BALANCED
+    assert safety_rob.route_mode == OptimizationMode.SAFETY_FIRST
+
+    # Under 16 deg slope:
+    # - route_primary_opt (balanced, 20 deg ceiling) remains feasible (3/3)
+    # - route_safety_backup (safety_first, 14 deg ceiling) is rejected as infeasible (0/3)
+    assert primary_rob.evaluated_scenario_count == 3
+    assert primary_rob.scenario_feasible_count == 3
+    assert primary_rob.baseline_route_feasibility_fraction == 1.0
+
+    assert safety_rob.evaluated_scenario_count == 3
+    assert safety_rob.scenario_feasible_count == 0
+    assert safety_rob.scenario_infeasible_count == 3
+    assert safety_rob.baseline_route_feasibility_fraction == 0.0
+    assert safety_rob.baseline_route_retention_fraction == 0.0
+
+    # Also verify on gently sloped terrain (<10 deg) that SAFETY_FIRST uses higher slope/roughness cost weights than BALANCED
+    elev_gentle = elev.copy()
+    for c in range(20):
+        elev_gentle[:, c] = -2500.0 + c * 1.5  # ~4.3 deg slope everywhere (with dx=20m)
+    assessment_gentle = RobustnessService.evaluate_route_robustness(
+        config=cfg,
+        cropped_elevation=elev_gentle,
+        cropped_meta=meta,
+        dx_meters=20.0,
+        dy_meters=20.0,
+        start_px=(10, 2),
+        dest_px=(10, 17),
+        requested_mode=OptimizationMode.BALANCED,
+        constraints=RouteConstraints(max_slope_deg=20.0),
+        baseline_routes=routes,
+        baseline_route_nodes=node_map,
+        is_synthetic=True,
+    )
+    assert assessment_gentle is not None
+    scen0 = assessment_gentle.scenario_results[0]
+    res_by_id = {r.route_id: r for r in scen0.baseline_route_results}
+    prim_s0 = res_by_id["route_primary_opt"]
+    safe_s0 = res_by_id["route_safety_backup"]
+    assert prim_s0.feasible is True and safe_s0.feasible is True
+    assert prim_s0.scenario_optimal_cost is not None
+    assert safe_s0.scenario_optimal_cost is not None
+    # SAFETY_FIRST has slope_weight=12.0 vs BALANCED slope_weight=5.0, so scenario_optimal_cost is strictly higher
+    assert safe_s0.scenario_optimal_cost > prim_s0.scenario_optimal_cost
+    assert math.isclose(safe_s0.cost_regret_fraction or 0.0, 0.0, abs_tol=1e-6)
+
+
+def test_23_automatic_science_first_detour_preserves_selected_science_waypoint():
+    """Phase 3.1 Regression 3 & 6: An automatic science_first detour (route_science_primary) continues to visit its selected science target in scenario re-optimization."""
+    provider = SyntheticTerrainProvider()
+    service = RouteService(provider=provider)
+
+    # Choose start and destination near a known Jezero Crater POI so route_science_primary detours to it
+    req = RoutePlanRequest(
+        start=MarsCoordinate(lon=77.40, lat=18.39),
+        destination=MarsCoordinate(lon=77.48, lat=18.45),
+        mode=OptimizationMode.SCIENCE_FIRST,
+        num_alternatives=2,
+        robustness_config=RobustnessConfig(
+            enabled=True,
+            vertical_sigma_m=0.5,
+            correlation_length_m=400.0,
+            scenario_count=3,
+            seed=42,
+            cost_regret_threshold_fraction=0.05,
+        ),
+    )
+    resp = service.plan_route(req)
+    assert resp.robustness_assessment is not None
+    rob = resp.robustness_assessment
+
+    routes_by_id = {r.route_id: r for r in resp.routes}
+    assert "route_science_primary" in routes_by_id
+    assert "route_direct_baseline" in routes_by_id
+    assert len(routes_by_id["route_science_primary"].waypoints_visited) == 1
+    assert len(routes_by_id["route_direct_baseline"].waypoints_visited) == 0
+
+    rob_by_id = {b.route_id: b for b in rob.baseline_route_assessments}
+    sci_rob = rob_by_id["route_science_primary"]
+    dir_rob = rob_by_id["route_direct_baseline"]
+
+    assert sci_rob.required_waypoint_count == 1
+    assert dir_rob.required_waypoint_count == 0
+    assert sci_rob.evaluated_scenario_count == 3
+    assert dir_rob.evaluated_scenario_count == 3
+
+    for s_res in rob.scenario_results:
+        r_map = {r.route_id: r for r in s_res.baseline_route_results}
+        sci_s = r_map["route_science_primary"]
+        dir_s = r_map["route_direct_baseline"]
+        assert sci_s.required_waypoint_count == 1
+        assert dir_s.required_waypoint_count == 0
+        assert sci_s.scenario_optimal_cost is not None
+        assert dir_s.scenario_optimal_cost is not None
+        # The waypoint-constrained scenario optimum must cost more than the direct shortcut
+        assert sci_s.scenario_optimal_cost > dir_s.scenario_optimal_cost
+        assert sci_s.cost_regret_fraction is not None and sci_s.cost_regret_fraction >= 0.0
+        assert dir_s.cost_regret_fraction is not None and dir_s.cost_regret_fraction >= 0.0
+        # Under small perturbation, science route overlaps strongly with its waypoint-preserving scenario optimum
+        assert sci_s.jaccard_overlap_fraction is not None and sci_s.jaccard_overlap_fraction > 0.5
+
+
+def test_24_explicit_science_waypoints_preserved_in_scenario_reoptimization():
+    """Phase 3.1 Regression 4 & 6: An explicitly waypoint-guided route (route_primary_waypoint_guided) preserves all required science_waypoints."""
+    provider = SyntheticTerrainProvider()
+    service = RouteService(provider=provider)
+
+    req = RoutePlanRequest(
+        start=MarsCoordinate(lon=77.40, lat=18.39),
+        destination=MarsCoordinate(lon=77.48, lat=18.45),
+        mode=OptimizationMode.BALANCED,
+        num_alternatives=2,
+        science_waypoints=[
+            MarsCoordinate(lon=77.42, lat=18.44),
+            MarsCoordinate(lon=77.46, lat=18.40),
+        ],
+        robustness_config=RobustnessConfig(
+            enabled=True,
+            vertical_sigma_m=1e-4,
+            correlation_length_m=400.0,
+            scenario_count=3,
+            seed=42,
+            cost_regret_threshold_fraction=0.05,
+        ),
+    )
+    resp = service.plan_route(req)
+    assert resp.robustness_assessment is not None
+    rob = resp.robustness_assessment
+
+    routes_by_id = {r.route_id: r for r in resp.routes}
+    assert "route_primary_waypoint_guided" in routes_by_id
+    assert "route_primary_opt" in routes_by_id
+    assert len(routes_by_id["route_primary_waypoint_guided"].waypoints_visited) == 2
+    assert len(routes_by_id["route_primary_opt"].waypoints_visited) == 0
+
+    rob_by_id = {b.route_id: b for b in rob.baseline_route_assessments}
+    wp_rob = rob_by_id["route_primary_waypoint_guided"]
+    dir_rob = rob_by_id["route_primary_opt"]
+
+    assert wp_rob.required_waypoint_count == 2
+    assert dir_rob.required_waypoint_count == 0
+    assert wp_rob.evaluated_scenario_count == 3
+    assert wp_rob.baseline_route_retention_fraction == 1.0
+    assert wp_rob.mean_route_overlap_fraction is not None and math.isclose(
+        wp_rob.mean_route_overlap_fraction, 1.0, abs_tol=1e-6
+    )
+    assert wp_rob.mean_cost_regret_fraction is not None and math.isclose(
+        wp_rob.mean_cost_regret_fraction, 0.0, abs_tol=1e-6
+    )
+
+    for s_res in rob.scenario_results:
+        r_map = {r.route_id: r for r in s_res.baseline_route_results}
+        wp_s = r_map["route_primary_waypoint_guided"]
+        dir_s = r_map["route_primary_opt"]
+        assert wp_s.required_waypoint_count == 2
+        assert dir_s.required_waypoint_count == 0
+        assert wp_s.scenario_optimal_cost is not None
+        assert dir_s.scenario_optimal_cost is not None
+        # Multi-waypoint scenario optimum must cost strictly more than the direct shortcut
+        assert wp_s.scenario_optimal_cost > dir_s.scenario_optimal_cost
+        assert wp_s.cost_regret_fraction is not None and wp_s.cost_regret_fraction >= 0.0
+
+
+def test_25_per_route_search_failure_isolation_does_not_erase_other_routes():
+    """Phase 3.1 Regression 5: One route-specific search failure does not erase successful comparisons for other routes in the same request."""
+    meta = _make_cropped_meta(20, 20)
+    elev = np.full((20, 20), -2500.0, dtype=np.float32)
+    slope = np.zeros_like(elev)
+    rough = np.zeros_like(elev)
+    trav = np.ones_like(elev, dtype=bool)
+    graph = TerrainGridGraph(
+        elevation=elev,
+        slope_deg=slope,
+        roughness=rough,
+        traversable_mask=trav,
+        dx_meters=20.0,
+        dy_meters=20.0,
+        mode=OptimizationMode.BALANCED,
+    )
+    node_map: dict[str, list[tuple[int, int]]] = {}
+    routes, _ = generate_route_alternatives(
+        graph=graph,
+        meta=meta,
+        start_px=(10, 2),
+        dest_px=(10, 17),
+        requested_mode=OptimizationMode.BALANCED,
+        num_alternatives=3,
+        route_nodes_out=node_map,
+    )
+
+    # Full-height 16.04 deg ramp across all rows (cols 6..10, dx=20m) so SAFETY_FIRST (14 deg ceiling) is completely blocked
+    # across the entire grid (`failed_unreachable`), whereas BALANCED (20 deg ceiling) succeeds in every scenario.
+    col_profile = np.zeros(20, dtype=np.float32)
+    col_profile[6] = 5.75
+    col_profile[7] = 11.50
+    col_profile[8] = 17.25
+    col_profile[9] = 11.50
+    col_profile[10] = 5.75
+
+    elev_full_16deg = elev.copy()
+    for r in range(20):
+        elev_full_16deg[r, :] = -2500.0 + col_profile
+
+    cfg = RobustnessConfig(
+        enabled=True,
+        vertical_sigma_m=1e-4,
+        correlation_length_m=40.0,
+        scenario_count=3,
+        seed=42,
+        cost_regret_threshold_fraction=0.05,
+    )
+    assessment = RobustnessService.evaluate_route_robustness(
+        config=cfg,
+        cropped_elevation=elev_full_16deg,
+        cropped_meta=meta,
+        dx_meters=20.0,
+        dy_meters=20.0,
+        start_px=(10, 2),
+        dest_px=(10, 17),
+        requested_mode=OptimizationMode.BALANCED,
+        constraints=RouteConstraints(max_slope_deg=20.0),
+        baseline_routes=routes,
+        baseline_route_nodes=node_map,
+        is_synthetic=True,
+    )
+    assert assessment is not None
+    assert assessment.completed_scenario_count == 3
+    for s_res in assessment.scenario_results:
+        assert s_res.terrain_generation_status == "completed"
+        assert s_res.scenario_status == "completed_partial"
+        r_map = {r.route_id: r for r in s_res.baseline_route_results}
+        assert r_map["route_primary_opt"].comparison_status == "completed"
+        assert r_map["route_primary_opt"].feasible is True
+        assert r_map["route_safety_backup"].comparison_status == "failed_unreachable"
+        assert r_map["route_safety_backup"].comparison_error_reason is not None
+        assert r_map["route_safety_backup"].feasible is False
+
+    rob_by_id = {b.route_id: b for b in assessment.baseline_route_assessments}
+    prim_rob = rob_by_id["route_primary_opt"]
+    safe_rob = rob_by_id["route_safety_backup"]
+
+    assert prim_rob.evaluated_scenario_count == 3
+    assert prim_rob.failed_scenario_count == 0
+    assert prim_rob.baseline_route_feasibility_fraction == 1.0
+    assert prim_rob.baseline_route_retention_fraction == 1.0
+
+    assert safe_rob.evaluated_scenario_count == 0
+    assert safe_rob.failed_scenario_count == 3
+    assert safe_rob.scenario_feasible_count == 0
+    assert safe_rob.scenario_infeasible_count == 0
+    assert safe_rob.baseline_route_feasibility_fraction is None
+    assert safe_rob.baseline_route_retention_fraction is None
+
+
+def test_26_gaussian_filter_scale_vs_autocorrelation_scale_documented_and_reported():
+    """Phase 3.1 Section 3: Filter-kernel scale L vs resulting field autocorrelation scale (sqrt(2)*L and 2*L) are explicitly reported."""
+    meta = _make_cropped_meta(16, 16)
+    elev16 = np.full((16, 16), -2500.0, dtype=np.float32)
+    slope16 = np.zeros_like(elev16)
+    rough16 = np.zeros_like(elev16)
+    trav16 = np.ones_like(elev16, dtype=bool)
+    graph16 = TerrainGridGraph(
+        elevation=elev16,
+        slope_deg=slope16,
+        roughness=rough16,
+        traversable_mask=trav16,
+        dx_meters=200.0,
+        dy_meters=200.0,
+        mode=OptimizationMode.BALANCED,
+    )
+    node_map: dict[str, list[tuple[int, int]]] = {}
+    routes16, _ = generate_route_alternatives(
+        graph=graph16,
+        meta=meta,
+        start_px=(2, 2),
+        dest_px=(2, 12),
+        requested_mode=OptimizationMode.BALANCED,
+        num_alternatives=1,
+        route_nodes_out=node_map,
+    )
+    L = 400.0
+    cfg = RobustnessConfig(
+        enabled=True,
+        vertical_sigma_m=1.5,
+        correlation_length_m=L,
+        scenario_count=3,
+        seed=42,
+    )
+    assessment = RobustnessService.evaluate_route_robustness(
+        config=cfg,
+        cropped_elevation=elev16,
+        cropped_meta=meta,
+        dx_meters=200.0,
+        dy_meters=200.0,
+        start_px=(2, 2),
+        dest_px=(2, 12),
+        requested_mode=OptimizationMode.BALANCED,
+        constraints=RouteConstraints(),
+        baseline_routes=routes16,
+        baseline_route_nodes=node_map,
+        is_synthetic=True,
+    )
+    assert assessment is not None
+    ua = assessment.uncertainty_assumptions
+    assert ua.correlation_length_m == L
+    assert math.isclose(ua.theoretical_autocorrelation_sigma_m, math.sqrt(2.0) * L, rel_tol=1e-4)
+    assert math.isclose(ua.theoretical_efolding_distance_m, 2.0 * L, rel_tol=1e-4)
+    assert "4 * L^2" in ua.correlation_scale_interpretation
+    assert "sqrt(2) * L" in ua.correlation_scale_interpretation
+    assert "2 * L" in ua.correlation_scale_interpretation
+
+

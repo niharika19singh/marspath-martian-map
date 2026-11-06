@@ -175,8 +175,12 @@ class RobustnessConfig(BaseModel):
     correlation_length_m: float | None = Field(
         default=None,
         description=(
-            "Gaussian spatial correlation length scale in meters "
-            "(strictly positive float required when enabled=True; never invented automatically)"
+            "Physical standard deviation L (in meters) of the 2D Gaussian convolution filter kernel "
+            "(strictly positive float required when enabled=True; never invented automatically). "
+            "For an ideal unmasked infinite-plane Gaussian filter applied to white noise, a filter "
+            "kernel standard deviation L produces a random field with autocorrelation "
+            "rho(dx, dy) = exp(-dx^2 / (4 * L^2) - dy^2 / (4 * L^2)), corresponding to an "
+            "autocorrelation Gaussian standard deviation of sqrt(2) * L and an e-folding distance of 2 * L."
         ),
     )
     scenario_count: int = Field(
@@ -560,7 +564,10 @@ class UncertaintyAssumptions(BaseModel):
     )
     correlation_length_m: float = Field(
         ...,
-        description="Assumed Gaussian spatial correlation length scale in meters",
+        description=(
+            "Physical standard deviation L (in meters) of the 2D separable Gaussian convolution "
+            "filter kernel used to smooth white noise"
+        ),
     )
     pixel_sigma_x: float = Field(
         ...,
@@ -578,6 +585,32 @@ class UncertaintyAssumptions(BaseModel):
         ...,
         description="Actual meridional pixel height in meters used to derive pixel_sigma_y",
     )
+    theoretical_autocorrelation_sigma_m: float = Field(
+        ...,
+        description=(
+            "Theoretical infinite-plane Gaussian autocorrelation standard deviation sqrt(2) * L "
+            "in meters resulting from convolving white noise with a Gaussian kernel of standard deviation L"
+        ),
+    )
+    theoretical_efolding_distance_m: float = Field(
+        ...,
+        description=(
+            "Theoretical infinite-plane e-folding autocorrelation distance 2 * L in meters "
+            "(lag distance where rho(d) = exp(-d^2 / (4 * L^2)) decays to 1/e)"
+        ),
+    )
+    correlation_scale_interpretation: str = Field(
+        default=(
+            "correlation_length_m specifies the physical standard deviation L of the 2D Gaussian "
+            "convolution filter kernel (pixel_sigma_x = L / dx, pixel_sigma_y = L / dy). For an ideal "
+            "unmasked infinite-plane Gaussian filter applied to white noise, the resulting normalized "
+            "random field has autocorrelation rho(dx, dy) = exp(-dx^2 / (4 * L^2) - dy^2 / (4 * L^2)), "
+            "yielding an autocorrelation Gaussian standard deviation of sqrt(2) * L and an e-folding "
+            "correlation distance of 2 * L. Finite-grid boundary conditions (mode='nearest'), nodata "
+            "masking, and valid-cell sample normalization modify empirical finite-window correlations."
+        ),
+        description="Explicit distinction between Gaussian filter-kernel standard deviation L and resulting random-field autocorrelation scale",
+    )
     cost_regret_threshold_fraction: float = Field(
         ...,
         description="Configured relative cost-regret reporting threshold fraction",
@@ -591,13 +624,14 @@ class UncertaintyAssumptions(BaseModel):
     )
     filter_kernel_definition: str = Field(
         default=(
-            "2D separable Gaussian convolution K(dr, dc) proportional to "
-            "exp(-dr^2 / (2 * pixel_sigma_y^2) - dc^2 / (2 * pixel_sigma_x^2)), "
-            "where pixel_sigma_y = correlation_length_m / actual_dy_meters and "
-            "pixel_sigma_x = correlation_length_m / actual_dx_meters, followed by zero-mean "
-            "and vertical_sigma_m standard-deviation normalization strictly over valid non-nodata cells."
+            "2D separable Gaussian convolution kernel K(dr, dc) proportional to "
+            "exp(-dr^2 / (2 * pixel_sigma_y^2) - dc^2 / (2 * pixel_sigma_x^2)) with filter-kernel "
+            "standard deviation L = correlation_length_m (pixel_sigma_y = L / actual_dy_meters, "
+            "pixel_sigma_x = L / actual_dx_meters), producing theoretical infinite-plane field "
+            "autocorrelation rho(dx, dy) = exp(-dx^2 / (4 * L^2) - dy^2 / (4 * L^2)), followed by "
+            "zero-mean and vertical_sigma_m standard-deviation normalization strictly over valid non-nodata cells."
         ),
-        description="Mathematical definition of the spatial filter and normalization",
+        description="Mathematical definition of the spatial filter kernel, theoretical autocorrelation, and valid-cell normalization",
     )
     parameters_are_user_assumed_not_measured_dem_error: bool = Field(
         default=True,
@@ -621,11 +655,31 @@ class ScenarioBaselineRouteResult(BaseModel):
     """Evaluation of a single baseline route alternative under a single perturbed terrain scenario."""
 
     route_id: str = Field(..., description="Identifier of the evaluated baseline route")
+    route_mode: OptimizationMode = Field(
+        default=OptimizationMode.BALANCED,
+        description="Route-specific optimization mode (slope ceiling and cost weights) preserved during scenario evaluation",
+    )
+    required_waypoint_count: int = Field(
+        default=0,
+        description="Number of required intermediate waypoints preserved in this route's scenario-optimal comparison objective",
+    )
+    comparison_status: str = Field(
+        default="completed",
+        description=(
+            "Route-specific scenario optimization status: 'completed', 'failed_untraversable_endpoint', "
+            "'failed_untraversable_waypoint', 'failed_unreachable', 'failed_computational_bound', or 'failed_error'"
+        ),
+    )
+    comparison_error_reason: str | None = Field(
+        default=None,
+        description="Failure reason when this route's scenario-optimal search did not complete, else None",
+    )
     feasible: bool = Field(
         ...,
         description=(
-            "True only if every node and step along the baseline route remains traversable in "
-            "the perturbed scenario, including diagonal corner-cutting constraints"
+            "True only if every node and step along the baseline route remains traversable under "
+            "this route's mode slope ceiling and constraints in the perturbed scenario, including "
+            "diagonal corner-cutting constraints"
         ),
     )
     infeasibility_reason: str | None = Field(
@@ -637,32 +691,32 @@ class ScenarioBaselineRouteResult(BaseModel):
     )
     scenario_optimal_node_count: int = Field(
         default=0,
-        description="Number of distinct grid nodes in the scenario-optimal route (0 if scenario search failed)",
+        description="Number of distinct grid nodes in the route-specific scenario-optimal path (0 if route scenario search failed)",
     )
     shared_node_count: int = Field(
         default=0,
-        description="Number of grid nodes shared in the intersection of baseline and scenario-optimal routes",
+        description="Number of grid nodes shared in the intersection of baseline and route-specific scenario-optimal paths",
     )
     jaccard_overlap_fraction: float | None = Field(
         default=None,
         description=(
             "Jaccard route overlap |intersection(baseline_nodes, scenario_nodes)| / "
-            "|union(baseline_nodes, scenario_nodes)| over grid cell identities, or None if scenario search failed"
+            "|union(baseline_nodes, scenario_nodes)| over grid cell identities, or None if route scenario search failed"
         ),
     )
     baseline_cost_in_scenario: float | None = Field(
         default=None,
-        description="Total cost of traversing the baseline route on the perturbed scenario graph when feasible, or None when infeasible",
+        description="Total cost of traversing the baseline route on its route-mode scenario graph when feasible, or None when infeasible",
     )
     scenario_optimal_cost: float | None = Field(
         default=None,
-        description="Optimal A* route cost on the perturbed scenario graph, or None if scenario search failed",
+        description="Optimal A* route cost for this route's mode and waypoint objective in the scenario, or None if route scenario search failed",
     )
     cost_regret_fraction: float | None = Field(
         default=None,
         description=(
             "(baseline_cost_in_scenario - scenario_optimal_cost) / scenario_optimal_cost "
-            "when baseline route is feasible and scenario optimal cost is valid, else None"
+            "when baseline route is feasible and route-specific scenario optimal cost is valid, else None"
         ),
     )
     within_regret_threshold: bool = Field(
@@ -673,6 +727,14 @@ class ScenarioBaselineRouteResult(BaseModel):
         default=False,
         description="True when baseline route is feasible with valid cost regret strictly exceeding cost_regret_threshold_fraction",
     )
+    scenario_nodes_expanded: int = Field(
+        default=0,
+        description="Number of priority queue states expanded by A* for this route's objective in this scenario",
+    )
+    scenario_route_length_meters: float | None = Field(
+        default=None,
+        description="3D surface length of this route's scenario-optimal path in meters, or None if route scenario search failed",
+    )
 
 
 class RobustnessScenarioResult(BaseModel):
@@ -682,10 +744,15 @@ class RobustnessScenarioResult(BaseModel):
     scenario_seed: int = Field(
         ..., description="Deterministic integer seed used to generate this scenario's random field"
     )
+    terrain_generation_status: str = Field(
+        default="completed",
+        description="Status of scenario terrain generation and metric calculation ('completed' or 'failed_error')",
+    )
     scenario_status: str = Field(
         ...,
         description=(
-            "Scenario execution status: 'completed', 'failed_untraversable_endpoint', "
+            "Scenario execution status: 'completed', 'completed_partial', "
+            "'failed_untraversable_endpoint', 'failed_untraversable_waypoint', "
             "'failed_unreachable', 'failed_computational_bound', or 'failed_error'"
         ),
     )
@@ -695,19 +762,19 @@ class RobustnessScenarioResult(BaseModel):
     )
     scenario_optimal_cost: float | None = Field(
         default=None,
-        description="Optimal A* traversal cost in the perturbed scenario, or None if scenario search failed",
+        description="Optimal A* traversal cost for the primary route objective in the perturbed scenario, or None if search failed",
     )
     scenario_nodes_expanded: int = Field(
         default=0,
-        description="Number of priority queue states expanded by A* in this scenario",
+        description="Total priority queue states expanded across unique route objectives in this scenario",
     )
     scenario_route_length_meters: float | None = Field(
         default=None,
-        description="3D surface length of the scenario-optimal route in meters, or None if scenario search failed",
+        description="3D surface length of the primary scenario-optimal route in meters, or None if search failed",
     )
     baseline_route_results: list[ScenarioBaselineRouteResult] = Field(
         default_factory=list,
-        description="Per-route comparison results for each baseline route alternative in this scenario",
+        description="Per-route comparison results for each baseline route alternative under its own mode and waypoint objective",
     )
     error_reason: str | None = Field(
         default=None,
@@ -719,28 +786,44 @@ class BaselineRouteRobustness(BaseModel):
     """Aggregate stability metrics for a baseline route across evaluated perturbation scenarios."""
 
     route_id: str = Field(..., description="Identifier of the baseline route alternative")
+    route_mode: OptimizationMode = Field(
+        default=OptimizationMode.BALANCED,
+        description="Route-specific optimization mode used to evaluate traversability and edge costs",
+    )
+    required_waypoint_count: int = Field(
+        default=0,
+        description="Number of required intermediate waypoints preserved in this route's scenario comparisons",
+    )
     evaluated_scenario_count: int = Field(
         default=0,
-        description="Number of completed scenarios against which route retention and overlap were evaluated",
+        description="Number of completed scenario comparisons for this route against which feasibility, retention, and overlap were evaluated",
+    )
+    failed_scenario_count: int = Field(
+        default=0,
+        description="Number of scenarios in which this route's scenario-optimal search did not complete",
     )
     scenario_feasible_count: int = Field(
-        ..., description="Number of scenarios in which the baseline route remained fully traversable"
+        default=0,
+        description="Number of completed scenario comparisons in which the baseline route remained fully traversable (0 when evaluated_scenario_count == 0)",
     )
     scenario_infeasible_count: int = Field(
-        ...,
-        description="Number of scenarios in which at least one baseline route node or diagonal step failed traversability",
+        default=0,
+        description="Number of completed scenario comparisons in which at least one baseline route node or diagonal step failed traversability (0 when evaluated_scenario_count == 0)",
     )
-    baseline_route_feasibility_fraction: float = Field(
-        ...,
-        description="Fraction of evaluated scenarios in which the baseline route remained traversable [0.0 - 1.0]",
+    baseline_route_feasibility_fraction: float | None = Field(
+        default=None,
+        description=(
+            "Fraction of evaluated scenarios in which the baseline route remained traversable [0.0 - 1.0], "
+            "or None when evaluated_scenario_count == 0"
+        ),
     )
     mean_route_overlap_fraction: float | None = Field(
         default=None,
-        description="Mean Jaccard grid-cell overlap between baseline and scenario-optimal routes across completed scenarios",
+        description="Mean Jaccard grid-cell overlap between baseline and scenario-optimal routes across completed scenarios, or None when evaluated_scenario_count == 0",
     )
     minimum_route_overlap_fraction: float | None = Field(
         default=None,
-        description="Minimum Jaccard grid-cell overlap between baseline and scenario-optimal routes across completed scenarios",
+        description="Minimum Jaccard grid-cell overlap between baseline and scenario-optimal routes across completed scenarios, or None when evaluated_scenario_count == 0",
     )
     mean_cost_regret_fraction: float | None = Field(
         default=None,
@@ -751,19 +834,20 @@ class BaselineRouteRobustness(BaseModel):
         description="Maximum relative cost regret across feasible completed scenarios, or None if no feasible completed scenarios exist",
     )
     within_regret_threshold_count: int = Field(
-        ...,
+        default=0,
         description="Number of evaluated scenarios where the baseline route was feasible, had valid cost, and stayed within the regret threshold",
     )
     exceeding_regret_threshold_count: int = Field(
         default=0,
         description="Number of feasible evaluated scenarios where the baseline route exceeded the configured cost-regret threshold",
     )
-    baseline_route_retention_fraction: float = Field(
-        ...,
+    baseline_route_retention_fraction: float | None = Field(
+        default=None,
         description=(
             "Fraction of evaluated scenarios in which the baseline route remained traversable, had valid "
-            "scenario cost, and fell within the configured cost-regret threshold. "
-            "Fraction of explicitly tested scenarios ONLY; NOT a probability of mission success."
+            "scenario cost, and fell within the configured cost-regret threshold, or None when "
+            "evaluated_scenario_count == 0. Fraction of explicitly tested scenarios ONLY; NOT a "
+            "probability of mission success."
         ),
     )
     interpretation: str = Field(
