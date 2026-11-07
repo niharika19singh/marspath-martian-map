@@ -1,0 +1,3 @@
+export const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+export function scrollModel(overflows,travel){const starts=[],ends=[];let at=0;overflows.forEach((overflow,i)=>{starts.push(at);at+=Math.max(0,overflow);ends.push(at);if(i<overflows.length-1)at+=travel});return{starts,ends,overflows,travel,max:at}}
+export function locateScroll(model,value){const p=clamp(value,0,model.max);for(let i=0;i<model.starts.length;i++){if(p<=model.ends[i]||i===model.starts.length-1)return{index:i,slide:i,scroll:clamp(p-model.starts[i],0,model.overflows[i])};if(p<model.starts[i+1]){const progress=(p-model.ends[i])/model.travel;return{index:progress<.5?i:i+1,slide:i+progress,scroll:null}}}return{index:0,slide:0,scroll:0}}

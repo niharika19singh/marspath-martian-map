@@ -9,7 +9,6 @@ venv/
 .venv/
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -71,3 +70,8 @@ out/
 *~
 .DS_Store
 Thumbs.db
+
+!/dist/
+
+marspath-contract-response.json
+
