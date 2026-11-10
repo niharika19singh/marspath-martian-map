@@ -216,8 +216,14 @@ MARSPath enforces strict computational boundaries to prevent runaway resource co
 | Limit Variable | Default Value | Enforcement Mechanism | Failure Response |
 |---|---|---|---|
 | `MARSPATH_MAX_GRID_CELLS` | `250000` | Checked during corridor cropping and block aggregation | `413 ComputationalBoundExceededError` |
-| `MARSPATH_MAX_SEARCH_RADIUS_METERS` | `50000.0` (50 km) | Checked on direct distance between start, destination, and waypoints | `413 ComputationalBoundExceededError` |
-| `MARSPATH_ROUTING_TIMEOUT_SECONDS` | `10.0` | Active deadline checked periodically inside A* node expansions and between alternatives | `504 RoutingTimeoutError` |
+| `MARSPATH_MAX_SEARCH_RADIUS_METERS` | `50000.0` (50 km) | Enforced on direct point-to-point and waypoint leg distance *before* corridor preparation | `413 ComputationalBoundExceededError` |
+| `MARSPATH_ROUTING_TIMEOUT_SECONDS` | `10.0` | Active deadline checked periodically inside A* node expansions (`ASTAR_TIMEOUT_CHECK_INTERVAL_NODES = 200`) and across shared search iterations | `504 RoutingTimeoutError` |
+
+### Timeout Scope & Lifecycle Enforcement
+`MARSPATH_ROUTING_TIMEOUT_SECONDS` specifically bounds graph search (A* expansion across primary paths, multi-point waypoint legs, and alternative corridors).
+- **Enforcement Interval:** Evaluated periodically every `ASTAR_TIMEOUT_CHECK_INTERVAL_NODES = 200` node expansions and before each leg / alternative search phase.
+- **Scope Distinction:** It does NOT bound upstream terrain source selection, corridor cropping, or risk array calculation, which are bounded independently by spatial pilot bounds and the pre-corridor `MAX_SEARCH_RADIUS_METERS` guard.
+- **Shared Deadline:** When multi-leg waypoints or alternative corridors are requested, a single shared deadline is passed across successive A* searches so cumulative graph traversal time cannot exceed the configured budget.
 
 ---
 

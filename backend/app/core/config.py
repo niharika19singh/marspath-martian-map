@@ -52,7 +52,16 @@ if HAS_SETTINGS:
 
         MAX_GRID_CELLS: int = 250000
         MAX_SEARCH_RADIUS_METERS: float = 50000.0
-        ROUTING_TIMEOUT_SECONDS: float = 10.0
+        ROUTING_TIMEOUT_SECONDS: float = Field(
+            default=10.0,
+            description=(
+                "Maximum wall-clock seconds allocated specifically for route graph traversal "
+                "(A* search across primary path, multi-point waypoint legs, and alternative corridors). "
+                "Evaluated periodically during node expansion and across search iterations. "
+                "Does not encompass upstream terrain source selection or corridor cropping, which are "
+                "bounded by pilot region bounds and MAX_SEARCH_RADIUS_METERS."
+            ),
+        )
         DEFAULT_MAX_SLOPE_DEG: float = 20.0
         STRICT_MAX_SLOPE_DEG: float = 14.0
 
@@ -132,7 +141,14 @@ else:
         ROUTING_TIMEOUT_SECONDS: float = Field(
             default_factory=lambda: float(
                 os.getenv("MARSPATH_ROUTING_TIMEOUT_SECONDS", "10.0")
-            )
+            ),
+            description=(
+                "Maximum wall-clock seconds allocated specifically for route graph traversal "
+                "(A* search across primary path, multi-point waypoint legs, and alternative corridors). "
+                "Evaluated periodically during node expansion and across search iterations. "
+                "Does not encompass upstream terrain source selection or corridor cropping, which are "
+                "bounded by pilot region bounds and MAX_SEARCH_RADIUS_METERS."
+            ),
         )
         DEFAULT_MAX_SLOPE_DEG: float = 20.0
         STRICT_MAX_SLOPE_DEG: float = 14.0

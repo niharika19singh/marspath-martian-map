@@ -35,7 +35,7 @@ export MARSPATH_ENV="${MARSPATH_ENV:-production}"
 export MARSPATH_USE_REAL_DEM="${MARSPATH_USE_REAL_DEM:-true}"
 export MARSPATH_DEM_PATH="${MARSPATH_DEM_PATH:-backend/app/data/rasters/jezero_mola_hrsc_blended.tif}"
 export MARSPATH_ALLOW_SYNTHETIC_FALLBACK="${MARSPATH_ALLOW_SYNTHETIC_FALLBACK:-true}"
-export PORT="${PORT:-8000}"
+export PORT="${PORT:-${MARSPATH_PORT:-8000}}"
 
 # Select Python binary
 PYTHON_BIN="python3"
@@ -45,6 +45,7 @@ fi
 
 echo "[MARSPath Startup] Repository root: ${REPO_ROOT}"
 echo "[MARSPath Startup] Environment: ${MARSPATH_ENV}"
+echo "[MARSPath Startup] Port: ${PORT}"
 echo "[MARSPath Startup] MARSPATH_USE_REAL_DEM=${MARSPATH_USE_REAL_DEM}"
 echo "[MARSPath Startup] MARSPATH_DEM_PATH=${MARSPATH_DEM_PATH}"
 echo "[MARSPath Startup] MARSPATH_ALLOW_SYNTHETIC_FALLBACK=${MARSPATH_ALLOW_SYNTHETIC_FALLBACK}"

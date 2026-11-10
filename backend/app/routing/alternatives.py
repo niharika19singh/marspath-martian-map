@@ -357,6 +357,7 @@ def generate_route_alternatives(
     route_nodes_out: dict[str, list[tuple[int, int]]] | None = None,
     timeout_seconds: float | None = None,
     deadline: float | None = None,
+    overall_start_time: float | None = None,
 ) -> tuple[list[RouteAlternative], int]:
     """
     Computes 1 to 3 distinct candidate routes and attaches a structured
@@ -375,7 +376,12 @@ def generate_route_alternatives(
 
     # 1. Primary route
     primary_nodes, primary_cost, nodes_1, _ = astar_search(
-        graph, start_px, dest_px, timeout_seconds=timeout_seconds, deadline=deadline
+        graph,
+        start_px,
+        dest_px,
+        timeout_seconds=timeout_seconds,
+        deadline=deadline,
+        overall_start_time=overall_start_time,
     )
     total_nodes_expanded += nodes_1
 
@@ -429,6 +435,7 @@ def generate_route_alternatives(
             penalized_edges=penalized_edges,
             timeout_seconds=timeout_seconds,
             deadline=deadline,
+            overall_start_time=overall_start_time,
         )
         total_nodes_expanded += nodes_2
 
@@ -515,6 +522,7 @@ def generate_route_alternatives(
                     dest_px,
                     timeout_seconds=timeout_seconds,
                     deadline=deadline,
+                    overall_start_time=overall_start_time,
                 )
                 total_nodes_expanded += nodes_3
 

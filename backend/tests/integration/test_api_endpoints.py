@@ -231,10 +231,16 @@ def test_cors_preflight_localhost_origin():
 
 def test_route_plan_search_radius_exceeded(monkeypatch):
     """Verifies that requests exceeding MAX_SEARCH_RADIUS_METERS raise 413 ComputationalBoundExceededError."""
+    from unittest.mock import MagicMock
+
     from backend.app.core.config import get_settings
+    from backend.app.services.terrain_source_service import TerrainSourceSelector
 
     settings = get_settings()
     monkeypatch.setattr(settings, "MAX_SEARCH_RADIUS_METERS", 500.0)
+
+    mock_selector = MagicMock()
+    monkeypatch.setattr(TerrainSourceSelector, "select_and_prepare_corridor", mock_selector)
 
     payload = {
         "start": {"lon": 77.40, "lat": 18.39},
@@ -245,21 +251,69 @@ def test_route_plan_search_radius_exceeded(monkeypatch):
     assert response.status_code == 413
     data = response.json()
     assert "exceeds configured maximum search radius" in str(data)
+    mock_selector.assert_not_called()
+
+
+def test_route_plan_waypoint_radius_exceeded_before_corridor_preparation(monkeypatch):
+    """Verifies that multi-point waypoint requests exceeding MAX_SEARCH_RADIUS_METERS raise 413 without corridor preparation."""
+    from unittest.mock import MagicMock
+
+    from backend.app.core.config import get_settings
+    from backend.app.services.terrain_source_service import TerrainSourceSelector
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "MAX_SEARCH_RADIUS_METERS", 500.0)
+
+    mock_selector = MagicMock()
+    monkeypatch.setattr(TerrainSourceSelector, "select_and_prepare_corridor", mock_selector)
+
+    payload = {
+        "start": {"lon": 77.40, "lat": 18.39},
+        "destination": {"lon": 77.401, "lat": 18.391},
+        "science_waypoints": [{"lon": 77.44, "lat": 18.42}],
+        "crs_identifier": "IAU2000:49900",
+    }
+    response = client.post("/api/v1/routes/plan", json=payload)
+    assert response.status_code == 413
+    mock_selector.assert_not_called()
+
+
+def test_route_plan_out_of_bounds_before_corridor_preparation(monkeypatch):
+    """Verifies that out-of-bounds requests raise 422 without calling corridor preparation."""
+    from unittest.mock import MagicMock
+
+    from backend.app.services.terrain_source_service import TerrainSourceSelector
+
+    mock_selector = MagicMock()
+    monkeypatch.setattr(TerrainSourceSelector, "select_and_prepare_corridor", mock_selector)
+
+    payload = {
+        "start": {"lon": 150.0, "lat": 10.0},
+        "destination": {"lon": 77.44, "lat": 18.42},
+        "crs_identifier": "IAU2000:49900",
+    }
+    response = client.post("/api/v1/routes/plan", json=payload)
+    assert response.status_code == 422
+    mock_selector.assert_not_called()
 
 
 def test_route_plan_routing_timeout_error_returns_504(monkeypatch):
-    """Verifies that routing timeout raises RoutingTimeoutError returning HTTP 504 Gateway Timeout."""
+    """Verifies that routing timeout raises RoutingTimeoutError inside A* and returns HTTP 504 Gateway Timeout."""
+    import backend.app.routing.astar as astar_mod
     from backend.app.core.config import get_settings
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "ROUTING_TIMEOUT_SECONDS", 0.0001)
+    monkeypatch.setattr(settings, "ROUTING_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(astar_mod, "ASTAR_TIMEOUT_CHECK_INTERVAL_NODES", 1)
 
-    def mock_astar(*args, **kwargs):
-        from backend.app.core.exceptions import RoutingTimeoutError
+    clock_state = {"t": 100.0}
 
-        raise RoutingTimeoutError("A* computation timed out.", timeout_seconds=0.0001, elapsed_seconds=0.0002)
+    def controlled_perf_counter():
+        val = clock_state["t"]
+        clock_state["t"] += 1.0  # Advance past 0.05s deadline
+        return val
 
-    monkeypatch.setattr("backend.app.services.route_service.astar_search", mock_astar)
+    monkeypatch.setattr(astar_mod.time, "perf_counter", controlled_perf_counter)
 
     payload = {
         "start": {"lon": 77.40, "lat": 18.39},
@@ -270,24 +324,91 @@ def test_route_plan_routing_timeout_error_returns_504(monkeypatch):
     assert response.status_code == 504
     data = response.json()
     assert "timeout" in str(data).lower()
+    details = data.get("details") or data.get("detail", {}).get("details", {})
+    assert details["timeout_seconds"] == 0.05
+    assert details["elapsed_seconds"] >= 0.05
 
 
 def test_config_settings_port_and_env_loading(monkeypatch):
-    """Verifies that Settings respects PORT fallback, MARSPATH_PORT, and production environment."""
+    """Verifies that Settings deterministic precedence: PORT > MARSPATH_PORT > 8000 default."""
     from backend.app.core.config import Settings
 
+    # Case 1: PORT=10000, MARSPATH_PORT=9000 -> 10000
     monkeypatch.setenv("PORT", "10000")
-    monkeypatch.delenv("MARSPATH_PORT", raising=False)
+    monkeypatch.setenv("MARSPATH_PORT", "9000")
     monkeypatch.setenv("MARSPATH_ENV", "production")
+    cfg1 = Settings()
+    assert cfg1.PORT == 10000
+    assert cfg1.ENV == "production"
 
-    cfg = Settings()
-    assert cfg.PORT == 10000
-    assert cfg.ENV == "production"
-
+    # Case 2: Only MARSPATH_PORT=9000 -> 9000
+    monkeypatch.delenv("PORT", raising=False)
     monkeypatch.setenv("MARSPATH_PORT", "9000")
     cfg2 = Settings()
-    # If both PORT and MARSPATH_PORT are set, it parses properly as int
-    assert cfg2.PORT in (9000, 10000)
+    assert cfg2.PORT == 9000
+
+    # Case 3: Neither set -> 8000
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.delenv("MARSPATH_PORT", raising=False)
+    cfg3 = Settings()
+    assert cfg3.PORT == 8000
+
+
+def test_start_render_script_port_resolution():
+    """Verifies that backend/scripts/start_render.sh deterministic port resolution matches Settings."""
+    import os
+    import subprocess
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "start_render.sh"
+    assert script_path.is_file(), f"Script not found: {script_path}"
+
+    base_env = os.environ.copy()
+    base_env["MARSPATH_SKIP_UVICORN"] = "true"
+    base_env["MARSPATH_USE_REAL_DEM"] = "false"
+
+    # Case 1: PORT=10000, MARSPATH_PORT=9000 -> 10000
+    env1 = base_env.copy()
+    env1["PORT"] = "10000"
+    env1["MARSPATH_PORT"] = "9000"
+    proc1 = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=str(repo_root),
+        env=env1,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[MARSPath Startup] Port: 10000" in proc1.stdout
+
+    # Case 2: Only MARSPATH_PORT=9000 -> 9000
+    env2 = base_env.copy()
+    env2.pop("PORT", None)
+    env2["MARSPATH_PORT"] = "9000"
+    proc2 = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=str(repo_root),
+        env=env2,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[MARSPath Startup] Port: 9000" in proc2.stdout
+
+    # Case 3: Neither set -> 8000
+    env3 = base_env.copy()
+    env3.pop("PORT", None)
+    env3.pop("MARSPATH_PORT", None)
+    proc3 = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=str(repo_root),
+        env=env3,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[MARSPath Startup] Port: 8000" in proc3.stdout
 
 
 def test_runtime_dem_provisioning_and_tamper_detection(tmp_path, monkeypatch):

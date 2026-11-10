@@ -550,6 +550,10 @@ MARSPath supports optional deterministic terrain perturbation stress testing via
 | `422 Unprocessable Entity` | Unsupported CRS (e.g. Earth EPSG:4326) | `{"error": "Coordinate Reference System 'EPSG:4326' is not supported. Mars requires planetary CRS."}` |
 | `404 Not Found` | Unreachable destination (cliff/obstacle) | `{"error": "Unreachable destination: No traversable Martian corridor exists..."}` |
 | `413 Payload Too Large` | Mission corridor exceeds cell budget | `{"error": "Computational bounds exceeded: corridor window requires 320,000 cells..."}` |
-| `413 Payload Too Large` | Search radius exceeded (>50 km) | `{"error": "Computational bounds exceeded: Direct distance 52,100.0m between start and destination exceeds configured maximum search radius of 50,000.0m."}` |
-| `504 Gateway Timeout` | Routing search exceeded timeout | `{"error": "Route planning exceeded routing timeout of 10.00s..."}` |
+| `413 Payload Too Large` | Search radius exceeded (>50 km) | `{"error": "Computational bounds exceeded: Direct distance 52,100.0m between start and destination exceeds configured maximum search radius of 50,000.0m."}` (Evaluated before corridor preparation) |
+| `504 Gateway Timeout` | Routing search exceeded timeout | `{"error": "Route planning exceeded routing timeout of 10.00s..."}` (Bounds route graph traversal across primary, waypoint, and alternative A* corridors) |
 | `503 Service Unavailable` | Strict real DEM missing with fallback=false | `{"error": "Numerical Martian terrain data unavailable: Real DEM requested but file not found..."}` |
+
+> [!NOTE]
+> **Computational Guard Order:** Coordinates are validated against pilot region bounds first (raising `422 Unprocessable Entity` if out-of-bounds). If coordinates are within bounds but direct distance or consecutive waypoint legs exceed `MAX_SEARCH_RADIUS_METERS` (50 km), the request is rejected with `413 Payload Too Large` immediately before corridor selection, cropping, or grid preparation.
+> **Timeout Scope:** `ROUTING_TIMEOUT_SECONDS` (default 10.0s) bounds the A* graph traversal phase across primary route, waypoint legs, and alternative corridors using a shared deadline checked periodically every `ASTAR_TIMEOUT_CHECK_INTERVAL_NODES = 200` expansions and between search phases. Upstream terrain preparation is bounded independently by spatial bounds and radius checks.

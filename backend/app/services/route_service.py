@@ -26,6 +26,7 @@ from backend.app.geospatial.terrain_metrics import compute_physical_pixel_sizes
 from backend.app.geospatial.validation import (
     check_cell_traversability,
     validate_constraints,
+    validate_coordinates_in_bounds,
 )
 from backend.app.routing.alternatives import (
     generate_route_alternatives,
@@ -78,25 +79,21 @@ class RouteService:
         validate_constraints(request.constraints)
         RobustnessService.validate_config(request.robustness_config)
 
-        # 3. Deterministic Multi-Resolution Terrain Source Selection & Corridor Preparation
-        # (Validates start, destination, and waypoints are within pilot region bounds first)
-        selection_outcome = TerrainSourceSelector.select_and_prepare_corridor(
-            start=request.start,
-            destination=request.destination,
-            waypoints=request.science_waypoints,
-            regional_provider=self.provider,
-            hirise_provider=self.hirise_provider,
-            max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
-            corridor_padding_meters=self.corridor_padding_meters,
-        )
+        # 3. Early bounds validation & MAX_SEARCH_RADIUS_METERS guard
+        # Validate that start, destination, and all waypoints lie within pilot region bounds before any expensive operations.
+        regional_master_meta = self.provider.get_dem_raster().metadata
+        validate_coordinates_in_bounds(request.start, regional_master_meta, "Start point")
+        validate_coordinates_in_bounds(request.destination, regional_master_meta, "Destination point")
+        for idx, wp in enumerate(request.science_waypoints or []):
+            validate_coordinates_in_bounds(wp, regional_master_meta, f"Science Waypoint #{idx + 1}")
 
-        # 3b. Enforce MAX_SEARCH_RADIUS_METERS on in-bounds mission points
+        # Enforce MAX_SEARCH_RADIUS_METERS before terrain selection, corridor preparation, or grid construction
         max_search_radius = self.settings.MAX_SEARCH_RADIUS_METERS
         direct_dist_m = haversine_distance_mars(request.start, request.destination)
         if direct_dist_m > max_search_radius:
             raise ComputationalBoundExceededError(
                 f"Direct distance {direct_dist_m:.1f}m between start and destination exceeds configured maximum search radius of {max_search_radius:.1f}m.",
-                dimensions=(selection_outcome.corridor_metadata.width, selection_outcome.corridor_metadata.height),
+                dimensions=(0, 0),
                 max_allowed=int(max_search_radius),
             )
         if request.science_waypoints:
@@ -106,9 +103,20 @@ class RouteService:
                 if leg_dist_m > max_search_radius:
                     raise ComputationalBoundExceededError(
                         f"Direct leg distance {leg_dist_m:.1f}m between mission points exceeds configured maximum search radius of {max_search_radius:.1f}m.",
-                        dimensions=(selection_outcome.corridor_metadata.width, selection_outcome.corridor_metadata.height),
+                        dimensions=(0, 0),
                         max_allowed=int(max_search_radius),
                     )
+
+        # 4. Deterministic Multi-Resolution Terrain Source Selection & Corridor Preparation
+        selection_outcome = TerrainSourceSelector.select_and_prepare_corridor(
+            start=request.start,
+            destination=request.destination,
+            waypoints=request.science_waypoints,
+            regional_provider=self.provider,
+            hirise_provider=self.hirise_provider,
+            max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
+            corridor_padding_meters=self.corridor_padding_meters,
+        )
 
         master_raster = selection_outcome.master_raster
         meta = master_raster.metadata
@@ -206,6 +214,7 @@ class RouteService:
                     max_expansions=request.constraints.max_search_nodes,
                     timeout_seconds=timeout_seconds,
                     deadline=deadline,
+                    overall_start_time=search_start,
                 )
                 total_nodes_expanded += leg_expansions
                 leg_total_cost += leg_cost
@@ -260,6 +269,7 @@ class RouteService:
                     route_nodes_out=baseline_route_nodes,
                     timeout_seconds=timeout_seconds,
                     deadline=deadline,
+                    overall_start_time=search_start,
                 )
                 total_nodes_expanded += alt_nodes
                 for a in alts:
@@ -277,6 +287,7 @@ class RouteService:
                 max_expansions=request.constraints.max_search_nodes,
                 timeout_seconds=timeout_seconds,
                 deadline=deadline,
+                overall_start_time=search_start,
             )
             total_nodes_expanded += dir_expansions
 
@@ -317,6 +328,7 @@ class RouteService:
                         max_expansions=max_exp,
                         timeout_seconds=timeout_seconds,
                         deadline=deadline,
+                        overall_start_time=search_start,
                     )
                     leg2_nodes, leg2_cost, exp2, _ = astar_search(
                         graph,
@@ -325,6 +337,7 @@ class RouteService:
                         max_expansions=max_exp,
                         timeout_seconds=timeout_seconds,
                         deadline=deadline,
+                        overall_start_time=search_start,
                     )
                     total_nodes_expanded += exp1 + exp2
                     detour_cost = leg1_cost + leg2_cost
@@ -445,6 +458,7 @@ class RouteService:
                     route_nodes_out=baseline_route_nodes,
                     timeout_seconds=timeout_seconds,
                     deadline=deadline,
+                    overall_start_time=search_start,
                 )
                 total_nodes_expanded += alt_nodes
         else:
@@ -462,6 +476,7 @@ class RouteService:
                 route_nodes_out=baseline_route_nodes,
                 timeout_seconds=timeout_seconds,
                 deadline=deadline,
+                overall_start_time=search_start,
             )
             total_nodes_expanded += alt_nodes
 
