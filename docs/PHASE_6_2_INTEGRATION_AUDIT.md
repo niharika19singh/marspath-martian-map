@@ -4,7 +4,8 @@
 
 | Reference | Branch Name | Commit SHA | Notes |
 |---|---|---|---|
-| **Backend (PR #1 Head)** | `feature/niharika-geospatial-routing` | `2ad3fcbea7d24b86b658e6ddf18bd8cf27131ed4` | Pull Request [#1](https://github.com/niharika19singh/marspath-martian-map/pull/1) targets `main` (**OPEN**, **UNMERGED**) |
+| **Backend Implementation Baseline Audited** | `feature/niharika-geospatial-routing` | `2ad3fcbea7d24b86b658e6ddf18bd8cf27131ed4` | Phase 6.1.2 application code baseline audited in this report |
+| **Current PR #1 Head / Phase 6.2 Audit Commit** | `feature/niharika-geospatial-routing` | `ae057bcb54fcda99e5d5445122a9c8c1d2c0cbdd` | Pull Request [#1](https://github.com/niharika19singh/marspath-martian-map/pull/1) targets `main` (**OPEN**, **UNMERGED**) |
 | **Frontend** | `kunal` (`origin/kunal`) | `58f348c669ffbbbb84ed4c41b666b9851c6b3725` | Audited read-only under `mission-ui/` |
 | **Main (PR #1 Base)** | `main` (`origin/main`) | `2495f69cf317d016000dedc7e48b14f36435e876` | Target base branch for PR #1 |
 
@@ -179,7 +180,7 @@
 5. **Alternative Route Count & Shortfall Handling (`mission-ui/src/main.jsx:37`):**
    - Renders candidate buttons for `result?.routes`.
    - Does **not** compare `result.routes.length < lastRequest.current.num_alternatives` or inspect `result.routes[0].warnings`.
-   - Instead checks `{result?.limitations?.length > 3 && <p className="partial-note">{result.limitations.at(-1)}</p>}`. Because the Python backend always returns 4–6 scientific/provenance disclaimers in `limitations`, this condition is always true in `api` mode and displays a generic disclaimer rather than an alternative-shortfall explanation.
+   - Instead checks `{result?.limitations?.length > 3 && <p className="partial-note">{result.limitations.at(-1)}</p>}`. In `RouteService.plan_route` (`backend/app/services/route_service.py:512-568`), `limitations` is built dynamically from terrain resolution/HiRISE selection, synthetic vs. real data mode, validation status, and provenance limitations—it is **not** a route-count or alternative-shortfall indicator, and its length varies by operating mode. Alternative generation failures or suppressed alternatives are communicated via `routes[0].warnings` (`backend/app/routing/alternatives.py:489-501, 564`) where applicable. Relying on `limitations.length > 3` is therefore an unreliable heuristic that surfaces a scientific/provenance disclaimer as `.partial-note` whenever more than 3 disclaimers are present.
 6. **Terrain Provenance & Evidence Display (`mission-ui/src/main.jsx:18, 30, 37`):**
    - Top header chip (`main.jsx:30`) displays `{raw ? 'Terrain ready' : 'Loading terrain'} <b>{live ? 'Python API' : 'Local engine'}</b>` without showing `api.status.data_mode` or `api.status.is_synthetic`.
    - Details panel (`main.jsx:18, 37`) displays `evidence_passport.quality_tier`, `effectiveGrid`, `local_integrity_verified`, `source_checksum_verified`, and `dataName`.
@@ -205,7 +206,7 @@
 | **Route Plan Request (`POST /api/v1/routes/plan`)** | Expects `RoutePlanRequest`: `start` (`{lon, lat}`), `destination` (`{lon, lat}`), `crs_identifier` (`"IAU2000:49900"`), `mode`, `constraints`, `science_waypoints`, `num_alternatives` (`1..3`). | `request()` & `run()` send matching JSON body and delete `payload.algorithm` when `!api.algorithmSupported`. (`science_waypoints` is always `[]`). | **Compatible** | **No issue found** | `backend/app/schemas/routes.py:300-336`, `mission-ui/src/main.jsx:13-14` |
 | **3D Route Geometry (`GeoJSONGeometry`)** | Returns `LineString` with `[lon, lat, elevation_m]` 3D tuples when elevations are valid (or 2D `[lon, lat]` if incomplete). | `MapView.jsx` projects `[c[0], c[1]]`; `Profile.jsx` reads `c[0], c[1]` for distance and `Number.isFinite(c[2]) ? c[2] : null` for elevation profile. | **Compatible** | **No issue found** | `backend/app/routing/alternatives.py:104-107, 193-196`, `mission-ui/src/MapView.jsx:12`, `mission-ui/src/Profile.jsx:3` |
 | **Summary & Cost Breakdown Metrics** | Returns `RouteSummary` (`total_distance_meters`, `estimated_duration_hours`, `max_slope_deg`, `elevation_gain_meters`, `elevation_loss_meters`, `data_coverage_fraction`, `risk_category`, etc.) and `cost_breakdown`. | Reads and displays `total_distance_meters`, `estimated_duration_hours`, `total_cost`, `data_coverage_fraction`, `risk_category`, `max_slope_deg`, `elevation_gain_meters`, `elevation_loss_meters`, and all 5 `cost_breakdown` keys. | **Compatible** | **No issue found** | `backend/app/schemas/routes.py:431-585`, `mission-ui/src/main.jsx:17, 37`, `mission-ui/src/Profile.jsx:3` |
-| **Alternative Route Count & Shortfall Notice** | Returns `1..N` feasible routes; appends shortfall reasons to `routes[0].warnings`. `RoutePlanResponse.limitations` always contains 4–6 scientific/provenance disclaimers. | Does not compare `routes.length < num_alternatives` or read `routes[0].warnings`; checks `result?.limitations?.length > 3` and renders `result.limitations.at(-1)` as `.partial-note`. | **Confirmed Defect** (Misleading partial-note in API mode) | **Frontend-owned** | `backend/app/routing/alternatives.py:489-501, 564`, `backend/app/services/route_service.py:535-568`, `mission-ui/src/main.jsx:37` |
+| **Alternative Route Count & Shortfall Notice** | Returns `1..N` feasible routes; communicates alternative generation failures or suppressed alternatives via `routes[0].warnings` where applicable. `RoutePlanResponse.limitations` is built dynamically from terrain resolution, data mode, validation status, and provenance limitations (`route_service.py:512-568`), not route count. | Does not compare `routes.length < num_alternatives` or read `routes[0].warnings`; uses the unreliable `result?.limitations?.length > 3` heuristic to render `result.limitations.at(-1)` as `.partial-note`. | **Confirmed Defect** (Unreliable `limitations.length > 3` heuristic in API mode) | **Frontend-owned** | `backend/app/routing/alternatives.py:489-501, 564`, `backend/app/services/route_service.py:512-568`, `mission-ui/src/main.jsx:37` |
 | **Terrain Provenance & Source Attribution** | In synthetic mode, sets `official_source_url: null` and `active_dem_source_url: null` so synthetic data is never attributed to USGS. | Top header chip omits `data_mode` / `is_synthetic`; details panel hardcodes `<a href={raw?.source_page\|\|'https://astrogeology.usgs.gov/'}>Terrain source ↗</a>` even when backend is in synthetic mode. | **Confirmed Defect** (Synthetic backend routes link to USGS source page) | **Frontend-owned** | `backend/app/services/data_catalog.py:45-57`, `mission-ui/src/main.jsx:30, 37` |
 | **Layer Availability vs. Renderability** | `/api/v1/layers` distinguishes `is_available` (backend calculation ready) from `is_renderable` + `render_url` (browser tile layer; `True` only for `mars_trek_imagery_basemap`). | Fetches `/api/v1/layers` into `api.layers` but never reads it; uses bundled static imagery/HiRISE `.webp` and route-segment hazard vectors in `live` mode. | **Compatible** (`api.layers` unused; no invalid tile requests made) | **No issue found** | `backend/app/schemas/layers.py:60-70`, `backend/app/services/data_catalog.py:124-275`, `mission-ui/src/MapView.jsx:8-12` |
 | **Error & Timeout Response Parsing** | Returns `{"detail": {"error": "...", "details": {...}}}` for `MarsPathError` (`404`, `413`, `422`, `503`, `504`) and `{"detail": [{"msg": "..."}]}` for FastAPI validation (`422`). | Extracts `json.detail?.error \|\| json.error \|\| (Array.isArray(json.detail) ? json.detail.map(d => d.msg).join('; ') : ...)` and handles `AbortError`. | **Compatible** | **No issue found** | `backend/app/api/v1/routes.py:21-30`, `mission-ui/src/main.jsx:14` |
@@ -215,11 +216,11 @@
 
 ## 5. Confirmed Defects and Ownership Summary
 
-### Frontend-Owned Defects (`mission-ui/` on branch `kunal`)
+### Frontend-Owned Defects (`mission-ui/` on branch `kunal` — Kunal)
 1. **Unconditional USGS Attribution Link in API Mode (`mission-ui/src/main.jsx:37`):**
    - Always renders `href={raw?.source_page || 'https://astrogeology.usgs.gov/'}` regardless of `live` state or `active?.evidence_passport?.source?.official_source_url`. When the backend operates in `synthetic_test_fixture` or `synthetic_fallback` mode (`official_source_url: null`), the UI should hide the external USGS link and explicitly badge the session as synthetic in the header (`main.jsx:30`).
 2. **Alternative Shortfall Heuristic Mismatch (`mission-ui/src/main.jsx:37`):**
-   - Uses `result?.limitations?.length > 3` to display `result.limitations.at(-1)` as `.partial-note`. Against the Python backend, `limitations` always contains 4–6 items even when all requested alternatives succeed. The frontend should instead check `result.routes.length < (lastRequest.current?.num_alternatives || numAlternatives)` and display `result.routes[0]?.warnings` when fewer alternatives are returned.
+   - Uses `result?.limitations?.length > 3` to display `result.limitations.at(-1)` as `.partial-note`. In the Python backend (`RouteService.plan_route`, `backend/app/services/route_service.py:512-568`), `limitations` is built dynamically based on terrain resolution, synthetic/real data mode, validation status, and provenance limitations—it is not a route-count or alternative-shortfall indicator, and its length is not constant across operating modes. Alternative generation failures or suppressed alternatives are communicated through the primary route's `warnings` (`routes[0].warnings`, `backend/app/routing/alternatives.py:489-501, 564`) where applicable. The `limitations.length > 3` heuristic is therefore unreliable and should be replaced by checking `result.routes.length < (lastRequest.current?.num_alternatives || numAlternatives)` and displaying `result.routes[0]?.warnings` when fewer alternatives are returned.
 3. **No Build-Time Environment Variable Fallback for Backend URL (`mission-ui/src/main.jsx:7, 15`):**
    - Reads only `localStorage.getItem('marspath-api-url') || ''`. Should fall back to `import.meta.env.VITE_API_URL || ''` so deployed environments can pre-populate the backend endpoint.
 
@@ -330,6 +331,8 @@ curl -sS -f -X POST "${MARSPATH_STAGING_API_URL}/api/v1/routes/plan" \
     routes_returned: (.routes | length),
     primary_route_id: .routes[0].route_id,
     first_coord: .routes[0].geometry.coordinates[0],
+    first_coord_dim: (.routes[0].geometry.coordinates[0] | length),
+    first_coord_has_valid_elev: (if (.routes[0].geometry.coordinates[0] | length) == 3 then (.routes[0].geometry.coordinates[0][2] | type == "number") else null end),
     distance_m: .routes[0].summary.total_distance_meters,
     max_slope_deg: .routes[0].summary.max_slope_deg,
     quality_tier: .routes[0].evidence_passport.quality_tier,
@@ -337,7 +340,7 @@ curl -sS -f -X POST "${MARSPATH_STAGING_API_URL}/api/v1/routes/plan" \
     nodes_expanded: .stats.nodes_expanded
   }'
 ```
-- **Expected (`200 OK`):** `status: "success"`, `routes_returned >= 1`, `first_coord` is a 3-element `[lon, lat, elevation_m]` array, `distance_m > 0`, `max_slope_deg <= 20.0`, `quality_tier` in `["high", "moderate", "low", "unverified"]`.
+- **Expected (`200 OK`):** `status: "success"`, `routes_returned >= 1`, `first_coord` is either a 3-element `[lon, lat, elevation_m]` array (when all route vertices have valid elevation observations, with `first_coord_has_valid_elev: true`) or a 2-element `[lon, lat]` array (when elevation observations are incomplete, with `first_coord_has_valid_elev: null`), `distance_m > 0`, `max_slope_deg <= 20.0`, `quality_tier` in `["high", "moderate", "low", "unverified"]`.
 
 ### 6.7 Error & Guardrail Smoke Tests
 ```bash
