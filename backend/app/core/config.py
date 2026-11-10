@@ -1,4 +1,6 @@
+import ipaddress
 import os
+import re
 from functools import lru_cache
 from urllib.parse import urlsplit
 
@@ -11,6 +13,41 @@ try:
 except ImportError:
     HAS_SETTINGS = False
 
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _is_valid_origin_hostname(hostname: str, is_bracketed_ipv6: bool) -> bool:
+    """Validates that a parsed hostname is a well-formed IPv4, bracketed IPv6, localhost, or RFC 1123 DNS name."""
+    if not hostname:
+        return False
+
+    if is_bracketed_ipv6:
+        if "%" in hostname:
+            return False
+        try:
+            ipaddress.IPv6Address(hostname)
+            return True
+        except ValueError:
+            return False
+
+    if ":" in hostname:
+        return False
+
+    try:
+        ipaddress.IPv4Address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    if not (1 <= len(hostname) <= 253):
+        return False
+
+    labels = hostname.split(".")
+    if labels[-1].isdigit():
+        return False
+
+    return all(_DNS_LABEL_RE.match(label) is not None for label in labels)
+
 
 def validate_cors_origins(raw_origins: str | list[str]) -> list[str]:
     """
@@ -18,7 +55,8 @@ def validate_cors_origins(raw_origins: str | list[str]) -> list[str]:
 
     - Requires at least one explicit origin (empty configuration raises ValueError).
     - Rejects any wildcard ('*') origin or pattern.
-    - Requires exact http:// or https:// scheme and host without path, query, fragment, or credentials.
+    - Requires exact http:// or https:// scheme and valid authority (hostname and optional port)
+      without path, query, fragment, user-information credentials, or non-canonical syntax.
     """
     if isinstance(raw_origins, str):
         candidates = [item.strip() for item in raw_origins.split(",") if item.strip()]
@@ -38,15 +76,57 @@ def validate_cors_origins(raw_origins: str | list[str]) -> list[str]:
             raise ValueError(
                 f"Wildcard CORS origin '{origin}' is not permitted; explicit origins are required."
             )
-        parsed = urlsplit(origin)
+        if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in origin):
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': whitespace or control characters are not permitted."
+            )
+        try:
+            parsed = urlsplit(origin)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': malformed URL structure."
+            ) from exc
+
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError(
-                f"Invalid CORS origin '{origin}': must specify an explicit http:// or https:// scheme and host."
+                f"Invalid CORS origin '{origin}': must specify an explicit http:// or https:// scheme and authority."
             )
-        if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        if parsed.path or parsed.query or parsed.fragment:
             raise ValueError(
-                f"Invalid CORS origin '{origin}': must be an exact origin without path, query, fragment, or credentials."
+                f"Invalid CORS origin '{origin}': must be an exact origin without path, query, or fragment."
             )
+        if "@" in parsed.netloc or parsed.username is not None or parsed.password is not None:
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': user-information credentials or '@' delimiter are not permitted."
+            )
+
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': malformed or out-of-range port."
+            ) from exc
+
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': port must be between 1 and 65535."
+            )
+
+        hostname = parsed.hostname
+        is_bracketed_ipv6 = parsed.netloc.startswith("[")
+        if not hostname or not _is_valid_origin_hostname(hostname, is_bracketed_ipv6):
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': malformed or missing hostname."
+            )
+
+        expected_host = f"[{hostname}]" if is_bracketed_ipv6 else hostname
+        expected_netloc = f"{expected_host}:{port}" if port is not None else expected_host
+        expected_origin = f"{parsed.scheme}://{expected_netloc}"
+        if origin != expected_origin:
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': non-canonical authority or unnormalized origin syntax."
+            )
+
         validated.append(origin)
 
     return validated

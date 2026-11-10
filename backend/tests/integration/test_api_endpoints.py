@@ -324,8 +324,10 @@ def test_cors_empty_origin_configuration_fails_closed(monkeypatch, empty_value):
     with pytest.raises(ValueError, match="empty origin configuration fails closed"):
         _ = cfg.cors_origin_list
 
+    test_app = FastAPI()
     with pytest.raises(ValueError, match="empty origin configuration fails closed"):
-        configure_cors(FastAPI(), cfg)
+        configure_cors(test_app, cfg)
+    assert len(test_app.user_middleware) == 0
 
 
 @pytest.mark.parametrize(
@@ -353,8 +355,90 @@ def test_cors_wildcard_origin_configuration_rejected(monkeypatch, wildcard_value
     with pytest.raises(ValueError, match="Wildcard CORS origin"):
         _ = cfg.cors_origin_list
 
+    test_app = FastAPI()
     with pytest.raises(ValueError, match="Wildcard CORS origin"):
-        configure_cors(FastAPI(), cfg)
+        configure_cors(test_app, cfg)
+    assert len(test_app.user_middleware) == 0
+
+
+@pytest.mark.parametrize(
+    "malformed_origin",
+    [
+        "https://:8080",
+        "https://:",
+        "https://example.com:abc",
+        "https://example.com:99999",
+        "https://example.com:0",
+        "https://example.com:",
+        "https://example.com:080",
+        "https://bad host",
+        "https://@example.com",
+        "https://:@example.com",
+        "https://user:pass@example.com",
+        "https://-example.com",
+        "https://example-.com",
+        "https://example..com",
+        "https://.example.com",
+        "https://example.com.",
+        "https://999.999.999.999",
+        "https://[::1",
+        "https://[127.0.0.1]:8080",
+        "https://example.com/path",
+        "https://example.com?query=1",
+        "https://example.com#frag",
+        "HTTPS://example.com",
+        "https://Example.com",
+    ],
+)
+def test_cors_malformed_authority_origin_rejected(monkeypatch, malformed_origin):
+    """Verifies that malformed hostnames, invalid ports, user-info delimiters, and non-canonical
+    authorities are rejected by validate_cors_origins, Settings.cors_origin_list, and configure_cors
+    before any middleware is added."""
+    from fastapi import FastAPI
+
+    from backend.app.core.config import Settings, validate_cors_origins
+    from backend.app.main import configure_cors
+
+    with pytest.raises(ValueError, match="Invalid CORS origin"):
+        validate_cors_origins(malformed_origin)
+
+    monkeypatch.setenv("MARSPATH_CORS_ORIGINS", malformed_origin)
+    cfg = Settings()
+    with pytest.raises(ValueError, match="Invalid CORS origin"):
+        _ = cfg.cors_origin_list
+
+    test_app = FastAPI()
+    with pytest.raises(ValueError, match="Invalid CORS origin"):
+        configure_cors(test_app, cfg)
+    assert len(test_app.user_middleware) == 0
+
+
+@pytest.mark.parametrize(
+    "valid_origin",
+    [
+        "https://marspath.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://[::1]:8000",
+        "https://[2001:db8::1]",
+    ],
+)
+def test_cors_valid_authority_formats_accepted(monkeypatch, valid_origin):
+    """Verifies that valid DNS, localhost, IPv4, and bracketed IPv6 origins are accepted."""
+    from fastapi import FastAPI
+
+    from backend.app.core.config import Settings, validate_cors_origins
+    from backend.app.main import configure_cors
+
+    assert validate_cors_origins(valid_origin) == [valid_origin]
+
+    monkeypatch.setenv("MARSPATH_CORS_ORIGINS", valid_origin)
+    cfg = Settings()
+    assert cfg.cors_origin_list == [valid_origin]
+
+    test_app = FastAPI()
+    assert configure_cors(test_app, cfg) == [valid_origin]
+    assert len(test_app.user_middleware) == 1
 
 
 def test_production_cors_isolation(monkeypatch):
