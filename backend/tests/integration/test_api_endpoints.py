@@ -106,8 +106,22 @@ def test_route_plan_success():
 def test_openapi_exposes_evidence_passport_schemas():
     response = client.get("/openapi.json")
     assert response.status_code == 200
-    schemas = response.json()["components"]["schemas"]
+    openapi = response.json()
+    paths = openapi["paths"]
+    for required_path in [
+        "/health",
+        "/api/v1/data/status",
+        "/api/v1/layers",
+        "/api/v1/routes/plan",
+    ]:
+        assert required_path in paths, f"Missing OpenAPI path: {required_path}"
+
+    schemas = openapi["components"]["schemas"]
     for model_name in [
+        "RoutePlanRequest",
+        "RoutePlanResponse",
+        "DataStatusResponse",
+        "LayerListResponse",
         "RouteEvidencePassport",
         "SourceEvidence",
         "CoverageEvidence",
@@ -123,6 +137,22 @@ def test_openapi_exposes_evidence_passport_schemas():
         "TerrainSourceSelectionReport",
     ]:
         assert model_name in schemas, f"Missing OpenAPI schema: {model_name}"
+
+    req_schema = schemas["RoutePlanRequest"]
+    assert set(req_schema.get("required", [])) == {"start", "destination"}
+    req_props = req_schema.get("properties", {})
+    for field_name in [
+        "start",
+        "destination",
+        "crs_identifier",
+        "mode",
+        "constraints",
+        "science_waypoints",
+        "num_alternatives",
+        "robustness_config",
+    ]:
+        assert field_name in req_props, f"Missing RoutePlanRequest property: {field_name}"
+    assert "algorithm" not in req_props
 
 
 def test_route_plan_with_robustness_stress_testing():
