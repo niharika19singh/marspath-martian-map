@@ -6,9 +6,27 @@ from backend.app.api.v1.data_status import router as data_status_router
 from backend.app.api.v1.health import router as health_router
 from backend.app.api.v1.layers import router as layers_router
 from backend.app.api.v1.routes import router as routes_router
-from backend.app.core.config import get_settings
+from backend.app.core.config import Settings, get_settings, validate_cors_origins
 from backend.app.core.exceptions import MarsPathError
 from backend.app.core.logging import setup_logging
+
+
+def configure_cors(target_app: FastAPI, app_settings: Settings | None = None) -> list[str]:
+    """
+    Configures CORSMiddleware on the given FastAPI application using validated,
+    fail-closed explicit origins from MARSPath Settings. Never falls back to wildcard.
+    """
+    active_settings = app_settings or get_settings()
+    origins = validate_cors_origins(active_settings.cors_origin_list)
+    target_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    return origins
+
 
 settings = get_settings()
 logger = setup_logging(settings.LOG_LEVEL)
@@ -21,15 +39,8 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS configuration
-origins = settings.cors_origin_list
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins if origins else ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS configuration (fail-closed; no wildcard fallback)
+origins = configure_cors(app, settings)
 
 
 # Custom exception handler

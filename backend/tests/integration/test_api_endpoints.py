@@ -307,32 +307,91 @@ def test_render_yaml_production_cors_hygiene():
         assert origin.startswith("https://")
 
 
-def test_production_cors_isolation():
-    """Regression check: verifies that in production configuration (MARSPATH_CORS_ORIGINS=https://marspath.vercel.app),
-    only the authorized hosted production origin is accepted, and loopback/localhost origins are rejected."""
+@pytest.mark.parametrize("empty_value", ["", "   ", ",", " , , "])
+def test_cors_empty_origin_configuration_fails_closed(monkeypatch, empty_value):
+    """Verifies that an empty CORS_ORIGINS configuration fails closed by raising ValueError
+    rather than falling back to wildcard ['*']."""
     from fastapi import FastAPI
-    from fastapi.middleware.cors import CORSMiddleware
+
+    from backend.app.core.config import Settings, validate_cors_origins
+    from backend.app.main import configure_cors
+
+    with pytest.raises(ValueError, match="empty origin configuration fails closed"):
+        validate_cors_origins(empty_value)
+
+    monkeypatch.setenv("MARSPATH_CORS_ORIGINS", empty_value)
+    cfg = Settings()
+    with pytest.raises(ValueError, match="empty origin configuration fails closed"):
+        _ = cfg.cors_origin_list
+
+    with pytest.raises(ValueError, match="empty origin configuration fails closed"):
+        configure_cors(FastAPI(), cfg)
+
+
+@pytest.mark.parametrize(
+    "wildcard_value",
+    [
+        "*",
+        "https://marspath.vercel.app,*",
+        "*,http://localhost:3000",
+        "https://*.vercel.app",
+        "http://*",
+    ],
+)
+def test_cors_wildcard_origin_configuration_rejected(monkeypatch, wildcard_value):
+    """Verifies that wildcard CORS origins or patterns are rejected by validation and startup configuration."""
+    from fastapi import FastAPI
+
+    from backend.app.core.config import Settings, validate_cors_origins
+    from backend.app.main import configure_cors
+
+    with pytest.raises(ValueError, match="Wildcard CORS origin"):
+        validate_cors_origins(wildcard_value)
+
+    monkeypatch.setenv("MARSPATH_CORS_ORIGINS", wildcard_value)
+    cfg = Settings()
+    with pytest.raises(ValueError, match="Wildcard CORS origin"):
+        _ = cfg.cors_origin_list
+
+    with pytest.raises(ValueError, match="Wildcard CORS origin"):
+        configure_cors(FastAPI(), cfg)
+
+
+def test_production_cors_isolation(monkeypatch):
+    """Regression check: verifies the actual MARSPath Settings -> validate_cors_origins -> configure_cors
+    pipeline under the Render production configuration (MARSPATH_CORS_ORIGINS=https://marspath.vercel.app)."""
+    from pathlib import Path
+
+    import yaml
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    prod_origins = ["https://marspath.vercel.app"]
-    test_app = FastAPI()
-    test_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=prod_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    from backend.app.core.config import Settings
+    from backend.app.main import configure_cors
 
-    @test_app.post("/test-cors")
-    def dummy():
+    repo_root = Path(__file__).resolve().parents[3]
+    with open(repo_root / "render.yaml", encoding="utf-8") as f:
+        render_cfg = yaml.safe_load(f)
+    web_service = next(s for s in render_cfg["services"] if s["name"] == "marspath-backend")
+    env_vars = {item["key"]: str(item["value"]) for item in web_service["envVars"]}
+    prod_cors_env = env_vars["MARSPATH_CORS_ORIGINS"]
+
+    monkeypatch.setenv("MARSPATH_CORS_ORIGINS", prod_cors_env)
+    prod_settings = Settings()
+
+    test_app = FastAPI()
+    configured_origins = configure_cors(test_app, prod_settings)
+    assert configured_origins == ["https://marspath.vercel.app"]
+
+    @test_app.post("/api/v1/routes/plan")
+    def dummy_plan():
         return {"ok": True}
 
     prod_client = TestClient(test_app)
 
-    # 1. Production origin accepted
+    # 1. Exact authorized hosted origin is accepted
     resp = prod_client.options(
-        "/test-cors",
+        "/api/v1/routes/plan",
         headers={
             "Origin": "https://marspath.vercel.app",
             "Access-Control-Request-Method": "POST",
@@ -342,17 +401,19 @@ def test_production_cors_isolation():
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == "https://marspath.vercel.app"
 
-    # 2. Localhost and 127.0.0.1 origins rejected in production
+    # 2. Localhost and 127.0.0.1 origins are rejected under production configuration
     for forbidden_origin in [
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:4173",
+        "http://localhost:8080",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
-        "http://localhost:8080",
+        "http://127.0.0.1:4173",
         "http://127.0.0.1:8080",
     ]:
         resp_forbidden = prod_client.options(
-            "/test-cors",
+            "/api/v1/routes/plan",
             headers={
                 "Origin": forbidden_origin,
                 "Access-Control-Request-Method": "POST",
@@ -361,14 +422,16 @@ def test_production_cors_isolation():
         )
         assert resp_forbidden.headers.get("access-control-allow-origin") is None
 
-    # 3. Subdomain and suffix spoofing rejected (exact-origin matching preserved)
+    # 3. Lookalike, subdomain, port-variant, scheme-downgraded, and suffix-spoofed origins are rejected
     for spoofed_origin in [
         "https://marspath.vercel.app.attacker.com",
         "https://subdomain.marspath.vercel.app",
+        "https://marspath-vercel.app",
+        "https://marspath.vercel.app:8443",
         "http://marspath.vercel.app",
     ]:
         resp_spoofed = prod_client.options(
-            "/test-cors",
+            "/api/v1/routes/plan",
             headers={
                 "Origin": spoofed_origin,
                 "Access-Control-Request-Method": "POST",

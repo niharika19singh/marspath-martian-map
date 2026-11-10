@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -9,6 +10,46 @@ try:
     HAS_SETTINGS = True
 except ImportError:
     HAS_SETTINGS = False
+
+
+def validate_cors_origins(raw_origins: str | list[str]) -> list[str]:
+    """
+    Validates and normalizes configured CORS origins in a fail-closed manner.
+
+    - Requires at least one explicit origin (empty configuration raises ValueError).
+    - Rejects any wildcard ('*') origin or pattern.
+    - Requires exact http:// or https:// scheme and host without path, query, fragment, or credentials.
+    """
+    if isinstance(raw_origins, str):
+        candidates = [item.strip() for item in raw_origins.split(",") if item.strip()]
+    elif isinstance(raw_origins, list):
+        candidates = [str(item).strip() for item in raw_origins if str(item).strip()]
+    else:
+        raise ValueError("CORS_ORIGINS must be a comma-separated string or list of origin strings.")
+
+    if not candidates:
+        raise ValueError(
+            "CORS_ORIGINS must specify at least one explicit origin; empty origin configuration fails closed."
+        )
+
+    validated: list[str] = []
+    for origin in candidates:
+        if "*" in origin:
+            raise ValueError(
+                f"Wildcard CORS origin '{origin}' is not permitted; explicit origins are required."
+            )
+        parsed = urlsplit(origin)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': must specify an explicit http:// or https:// scheme and host."
+            )
+        if parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
+            raise ValueError(
+                f"Invalid CORS origin '{origin}': must be an exact origin without path, query, fragment, or credentials."
+            )
+        validated.append(origin)
+
+    return validated
 
 
 if HAS_SETTINGS:
@@ -73,7 +114,7 @@ if HAS_SETTINGS:
 
         @property
         def cors_origin_list(self) -> list[str]:
-            return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+            return validate_cors_origins(self.CORS_ORIGINS)
 
 else:
 
@@ -167,7 +208,7 @@ else:
 
         @property
         def cors_origin_list(self) -> list[str]:
-            return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+            return validate_cors_origins(self.CORS_ORIGINS)
 
 
 @lru_cache
