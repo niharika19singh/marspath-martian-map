@@ -272,6 +272,112 @@ def test_cors_preflight_disallowed_origin():
     assert response.headers.get("access-control-allow-origin") is None
 
 
+def test_render_yaml_production_cors_hygiene():
+    """Regression check: verifies that render.yaml production blueprint restricts MARSPATH_CORS_ORIGINS strictly
+    to known hosted frontend origins without loopback or wildcard permissions."""
+    from pathlib import Path
+
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[3]
+    render_yaml_path = repo_root / "render.yaml"
+    assert render_yaml_path.is_file(), f"render.yaml not found: {render_yaml_path}"
+
+    with open(render_yaml_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    services = data.get("services", [])
+    web_service = next((s for s in services if s.get("name") == "marspath-backend"), None)
+    assert web_service is not None, "marspath-backend service not found in render.yaml"
+
+    env_vars = {item["key"]: str(item["value"]) for item in web_service.get("envVars", [])}
+    cors_val = env_vars.get("MARSPATH_CORS_ORIGINS", "")
+    origins = [o.strip() for o in cors_val.split(",") if o.strip()]
+
+    # Production hygiene checks:
+    # 1. Exactly https://marspath.vercel.app is configured as the hosted frontend origin
+    assert origins == ["https://marspath.vercel.app"]
+
+    # 2. No loopback addresses permitted in production deployment blueprint
+    for origin in origins:
+        assert "localhost" not in origin.lower()
+        assert "127.0.0.1" not in origin
+        assert "0.0.0.0" not in origin
+        assert "*" not in origin
+        assert origin.startswith("https://")
+
+
+def test_production_cors_isolation():
+    """Regression check: verifies that in production configuration (MARSPATH_CORS_ORIGINS=https://marspath.vercel.app),
+    only the authorized hosted production origin is accepted, and loopback/localhost origins are rejected."""
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.testclient import TestClient
+
+    prod_origins = ["https://marspath.vercel.app"]
+    test_app = FastAPI()
+    test_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=prod_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @test_app.post("/test-cors")
+    def dummy():
+        return {"ok": True}
+
+    prod_client = TestClient(test_app)
+
+    # 1. Production origin accepted
+    resp = prod_client.options(
+        "/test-cors",
+        headers={
+            "Origin": "https://marspath.vercel.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == "https://marspath.vercel.app"
+
+    # 2. Localhost and 127.0.0.1 origins rejected in production
+    for forbidden_origin in [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ]:
+        resp_forbidden = prod_client.options(
+            "/test-cors",
+            headers={
+                "Origin": forbidden_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert resp_forbidden.headers.get("access-control-allow-origin") is None
+
+    # 3. Subdomain and suffix spoofing rejected (exact-origin matching preserved)
+    for spoofed_origin in [
+        "https://marspath.vercel.app.attacker.com",
+        "https://subdomain.marspath.vercel.app",
+        "http://marspath.vercel.app",
+    ]:
+        resp_spoofed = prod_client.options(
+            "/test-cors",
+            headers={
+                "Origin": spoofed_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert resp_spoofed.headers.get("access-control-allow-origin") is None
+
+
 def test_route_plan_search_radius_exceeded(monkeypatch):
     """Verifies that requests exceeding MAX_SEARCH_RADIUS_METERS raise 413 ComputationalBoundExceededError."""
     from unittest.mock import MagicMock

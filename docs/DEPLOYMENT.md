@@ -16,7 +16,10 @@ MARSPATH_PORT=8000
 MARSPATH_LOG_LEVEL=INFO
 
 # Security & CORS
-MARSPATH_CORS_ORIGINS=https://marspath.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:8080,http://127.0.0.1:8080
+# In production (e.g. Render), only known hosted frontend origins are permitted (no localhost or loopback):
+MARSPATH_CORS_ORIGINS=https://marspath.vercel.app
+# Note: For local development, config defaults include localhost/127.0.0.1.
+# If a hosted staging URL is created in the future, it must be explicitly appended here.
 
 # Planetary Data & Provenance Policy
 MARSPATH_DATA_DIR=backend/app/data
