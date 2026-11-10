@@ -28,13 +28,12 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pytest ruff
 
-      - name: Run Ruff Lint Checks
+      - name: Run Ruff Lint Checks (Blocking)
         run: |
           ruff check backend/
-        continue-on-error: true
 
       - name: Run Pytest Suite
         env:
-          PYTHONPATH: backend
+          PYTHONPATH: .
         run: |
           pytest -v backend/tests/

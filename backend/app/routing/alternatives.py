@@ -1,0 +1,568 @@
+import logging
+import math
+from typing import Any
+
+import numpy as np
+
+from backend.app.core.exceptions import (
+    ComputationalBoundExceededError,
+    RoutingTimeoutError,
+    UnreachableDestinationError,
+)
+from backend.app.geospatial.crs import (
+    METERS_PER_DEGREE_LATITUDE,
+    meters_per_degree_lon,
+    pixel_to_geo,
+)
+from backend.app.geospatial.raster_loader import RasterMetadata
+from backend.app.routing.astar import astar_search
+from backend.app.routing.cost_model import MODE_WEIGHTS, calculate_edge_cost
+from backend.app.routing.graph_builder import TerrainGridGraph
+from backend.app.schemas.mission import OptimizationMode, ScienceTarget
+from backend.app.schemas.routes import GeoJSONGeometry, RouteAlternative, RouteSummary
+from backend.app.services.evidence_service import (
+    EvidenceService,
+    compute_nodata_and_boundary_masks,
+)
+
+logger = logging.getLogger("marspath.routing.alternatives")
+
+
+def reconstruct_route_summary(
+    path_nodes: list[tuple[int, int]],
+    graph: TerrainGridGraph,
+    meta: RasterMetadata,
+    mode: OptimizationMode,
+    penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] | None = None,
+    science_targets: list[ScienceTarget] | None = None,
+) -> tuple[RouteSummary, GeoJSONGeometry, dict[str, float], list[str], list[str]]:
+    """
+    Computes detailed summary metrics, GeoJSON geometry, exact cost breakdown,
+    and visited/nearby science targets from an ordered sequence of grid nodes.
+    Uses the exact active mode cost model for score reconciliation and measures
+    actual route observation coverage from the active terrain grid.
+    """
+    if not path_nodes:
+        raise ValueError("Cannot summarize empty path.")
+
+    nodata_mask, _ = compute_nodata_and_boundary_masks(graph.elevation, meta.nodata_value)
+
+    total_dist_2d = 0.0
+    total_dist_3d = 0.0
+    observed_3d_dist = 0.0
+    elev_gain = 0.0
+    elev_loss = 0.0
+    slopes: list[float] = []
+    roughnesses: list[float] = []
+    elevations: list[float] = []
+    geojson_coords: list[list[float]] = []
+
+    cost_base = 0.0
+    cost_slope = 0.0
+    cost_rough = 0.0
+    cost_hazard = 0.0
+    cost_extra = 0.0
+
+    observed_duration_seconds = 0.0
+    observed_duration_step_count = 0
+    observed_hazard_meters = 0.0
+    unobserved_step_meters = 0.0
+
+    valid_sample_count = 0
+    valid_elev_sample_count = 0
+    for r_node, c_node in path_nodes:
+        elev_ok = not bool(nodata_mask[r_node, c_node])
+        if elev_ok:
+            valid_elev_sample_count += 1
+        if (
+            elev_ok
+            and not math.isnan(float(graph.slope_deg[r_node, c_node]))
+            and not math.isnan(float(graph.roughness[r_node, c_node]))
+        ):
+            valid_sample_count += 1
+    measured_coverage_fraction = round(valid_sample_count / max(len(path_nodes), 1), 4)
+    elev_coverage_fraction = round(valid_elev_sample_count / max(len(path_nodes), 1), 4)
+    all_elevations_valid = valid_elev_sample_count == len(path_nodes)
+    is_complete_measurement = valid_sample_count == len(path_nodes)
+    valid_elev_transition_count = 0
+
+    prev_r, prev_c = path_nodes[0]
+    prev_valid = not bool(nodata_mask[prev_r, prev_c])
+    z_prev = float(graph.elevation[prev_r, prev_c])
+    if prev_valid:
+        elevations.append(z_prev)
+
+    lon_start, lat_start = pixel_to_geo(
+        prev_c,
+        prev_r,
+        meta.min_lon,
+        meta.max_lat,
+        meta.deg_per_px_lon,
+        meta.deg_per_px_lat,
+        pixel_center=True,
+    )
+    if all_elevations_valid:
+        geojson_coords.append([round(lon_start, 6), round(lat_start, 6), round(z_prev, 2)])
+    else:
+        geojson_coords.append([round(lon_start, 6), round(lat_start, 6)])
+
+    for curr_r, curr_c in path_nodes[1:]:
+        curr_valid = not bool(nodata_mask[curr_r, curr_c])
+        z_curr = float(graph.elevation[curr_r, curr_c])
+        if curr_valid:
+            elevations.append(z_curr)
+
+        dr = curr_r - prev_r
+        dc = curr_c - prev_c
+
+        d2d = (
+            graph.dist_diag
+            if (dr != 0 and dc != 0)
+            else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
+        )
+        dz = (z_curr - z_prev) if (prev_valid and curr_valid) else 0.0
+        d3d = math.sqrt(d2d**2 + dz**2)
+        total_dist_2d += d2d
+        total_dist_3d += d3d
+
+        if prev_valid and curr_valid:
+            valid_elev_transition_count += 1
+            observed_3d_dist += d3d
+            if dz > 0:
+                elev_gain += dz
+            else:
+                elev_loss += abs(dz)
+
+        slope_raw = float(graph.slope_deg[curr_r, curr_c])
+        rough_raw = float(graph.roughness[curr_r, curr_c])
+        slope_valid = not math.isnan(slope_raw)
+        rough_valid = not math.isnan(rough_raw)
+
+        if slope_valid:
+            slopes.append(slope_raw)
+        if rough_valid:
+            roughnesses.append(rough_raw)
+
+        slope_for_calc = slope_raw if slope_valid else 0.0
+        rough_for_calc = rough_raw if rough_valid else 0.0
+
+        step_is_nodata = not (prev_valid and curr_valid and slope_valid and rough_valid)
+        if step_is_nodata:
+            unobserved_step_meters += d2d
+
+        if (slope_valid and slope_raw > 12.0) or (rough_valid and rough_raw > 0.5):
+            observed_hazard_meters += d3d if (prev_valid and curr_valid) else d2d
+
+        extra_pen = 0.0
+        if penalized_edges and ((prev_r, prev_c), (curr_r, curr_c)) in penalized_edges:
+            extra_pen = penalized_edges[((prev_r, prev_c), (curr_r, curr_c))]
+
+        # Reconcile exact edge cost using active cost model (unchanged)
+        _, step_breakdown = calculate_edge_cost(
+            distance_3d=d3d,
+            slope_deg=slope_for_calc,
+            roughness=rough_for_calc,
+            delta_z=dz,
+            mode=mode,
+            is_nodata=step_is_nodata,
+            extra_penalty=extra_pen,
+        )
+
+        cost_base += step_breakdown["base_distance_cost"]
+        cost_slope += step_breakdown["slope_penalty"]
+        cost_rough += step_breakdown["roughness_penalty"]
+        cost_hazard += step_breakdown["hazard_penalty"]
+        cost_extra += step_breakdown["extra_penalty"]
+
+        # Motion profile: Only accumulate duration when step elevation and slope are genuinely observed;
+        # never substitute 0.0 slope to produce an optimistic complete duration estimate.
+        if prev_valid and curr_valid and slope_valid:
+            speed_mps = 0.15 * max(0.2, 1.0 - (slope_raw / 30.0))
+            observed_duration_seconds += d3d / speed_mps
+            observed_duration_step_count += 1
+
+        lon, lat = pixel_to_geo(
+            curr_c,
+            curr_r,
+            meta.min_lon,
+            meta.max_lat,
+            meta.deg_per_px_lon,
+            meta.deg_per_px_lat,
+            pixel_center=True,
+        )
+        if all_elevations_valid:
+            geojson_coords.append([round(lon, 6), round(lat, 6), round(z_curr, 2)])
+        else:
+            geojson_coords.append([round(lon, 6), round(lat, 6)])
+
+        prev_r, prev_c = curr_r, curr_c
+        prev_valid = curr_valid
+        z_prev = z_curr
+
+    avg_slope: float | None = round(float(np.mean(slopes)), 2) if slopes else None
+    max_slope: float | None = round(float(np.max(slopes)), 2) if slopes else None
+    avg_rough: float | None = round(float(np.mean(roughnesses)), 3) if roughnesses else None
+
+    num_steps = max(len(path_nodes) - 1, 0)
+    all_elev_transitions_valid = all_elevations_valid and (valid_elev_transition_count == num_steps)
+    all_duration_steps_valid = all_elev_transitions_valid and (
+        observed_duration_step_count == num_steps
+    )
+    all_steps_fully_observed = is_complete_measurement and (unobserved_step_meters == 0.0)
+
+    # Distance: distinguish complete 3D surface distance from horizontal 2D distance
+    horizontal_dist_val = round(total_dist_2d, 1)
+    if all_elev_transitions_valid:
+        surface_3d_dist_val: float | None = round(total_dist_3d, 1)
+        total_dist_val = round(total_dist_3d, 1)
+        dist_basis = "complete_3d_surface"
+    else:
+        surface_3d_dist_val = None
+        total_dist_val = horizontal_dist_val
+        dist_basis = "horizontal_2d_only_incomplete_elevation"
+
+    # Duration: complete only when all steps have observed elevation and slope
+    observed_dur_partial: float | None = (
+        round(observed_duration_seconds / 3600.0, 2) if observed_duration_step_count > 0 else None
+    )
+    estimated_dur_val: float | None = (
+        observed_dur_partial if all_duration_steps_valid else None
+    )
+
+    # Energy: complete only when all elevation transitions are observed
+    if all_elev_transitions_valid:
+        energy_val: float | None = round((total_dist_3d * 0.001) + (elev_gain * 0.02), 2)
+        observed_energy_partial: float | None = energy_val
+    else:
+        energy_val = None
+        observed_energy_partial = (
+            round((observed_3d_dist * 0.001) + (elev_gain * 0.02), 2)
+            if valid_elev_transition_count > 0
+            else None
+        )
+
+    # Hazard exposure: complete only when all steps are fully observed
+    observed_hazard_min = round(observed_hazard_meters, 1)
+    unobserved_dist_val = round(unobserved_step_meters, 1)
+    hazard_exposure_val: float | None = (
+        observed_hazard_min if all_steps_fully_observed else None
+    )
+
+    # Distinguish science targets visited vs in proximity using Mars metric distance
+    visited_target_ids: list[str] = []
+    nearby_target_ids: list[str] = []
+    science_score = 0.0
+
+    if science_targets:
+        for target in science_targets:
+            t_lon, t_lat = target.coordinate.lon, target.coordinate.lat
+            m_lon = meters_per_degree_lon(t_lat)
+            m_lat = METERS_PER_DEGREE_LATITUDE
+
+            # Compute min distance to any point along route geometry
+            min_dist_to_route = float("inf")
+            for pt in geojson_coords:
+                p_lon, p_lat = pt[0], pt[1]
+                dx = (p_lon - t_lon) * m_lon
+                dy = (p_lat - t_lat) * m_lat
+                d = math.sqrt(dx**2 + dy**2)
+                if d < min_dist_to_route:
+                    min_dist_to_route = d
+
+            if min_dist_to_route <= 100.0:  # Direct encounter / visited (<100m)
+                visited_target_ids.append(target.id)
+                science_score += target.scientific_priority * 15.0
+            elif min_dist_to_route <= 500.0:  # Remote sensor proximity (<500m)
+                nearby_target_ids.append(target.id)
+                science_score += target.scientific_priority * 5.0
+
+    ref_dist_for_ratio = max(total_dist_3d if all_elev_transitions_valid else total_dist_2d, 1.0)
+    hazard_ratio = observed_hazard_meters / ref_dist_for_ratio
+    if all_steps_fully_observed:
+        risk_assessment_status = "complete_observed"
+        if hazard_ratio >= 0.20 or (max_slope is not None and max_slope >= 18.0):
+            risk_category = "high"
+        elif hazard_ratio >= 0.05 or (max_slope is not None and max_slope >= 12.0):
+            risk_category = "moderate"
+        else:
+            risk_category = "nominal"
+    elif measured_coverage_fraction == 0.0 and not slopes and not roughnesses:
+        risk_assessment_status = "unverified_no_valid_observations"
+        risk_category = "unverified_no_valid_terrain_data"
+    else:
+        risk_assessment_status = "incomplete_partial_observations"
+        if hazard_ratio >= 0.20 or (max_slope is not None and max_slope >= 18.0):
+            risk_category = "high_observed_incomplete_data"
+        elif hazard_ratio >= 0.05 or (max_slope is not None and max_slope >= 12.0):
+            risk_category = "moderate_observed_incomplete_data"
+        else:
+            risk_category = "unverified_incomplete_terrain_data"
+
+    min_elev: float | None = round(float(min(elevations)), 1) if elevations else None
+    max_elev: float | None = round(float(max(elevations)), 1) if elevations else None
+    gain_val: float | None = round(elev_gain, 1) if valid_elev_transition_count > 0 else None
+    loss_val: float | None = round(elev_loss, 1) if valid_elev_transition_count > 0 else None
+
+    summary = RouteSummary(
+        total_distance_meters=total_dist_val,
+        horizontal_distance_meters=horizontal_dist_val,
+        surface_3d_distance_meters=surface_3d_dist_val,
+        distance_measurement_basis=dist_basis,
+        elevation_gain_meters=gain_val,
+        elevation_loss_meters=loss_val,
+        min_elevation_meters=min_elev,
+        max_elevation_meters=max_elev,
+        max_slope_deg=max_slope,
+        average_slope_deg=avg_slope,
+        average_roughness=avg_rough,
+        data_coverage_fraction=measured_coverage_fraction,
+        elevation_sample_coverage_fraction=elev_coverage_fraction,
+        is_complete_measurement=is_complete_measurement,
+        estimated_duration_hours=estimated_dur_val,
+        observed_duration_hours_partial=observed_dur_partial,
+        motion_profile="rover_slope_derated_0.15mps",
+        energy_index=energy_val,
+        observed_energy_index_partial=observed_energy_partial,
+        science_score=round(science_score, 1),
+        hazard_exposure_meters=hazard_exposure_val,
+        observed_hazard_exposure_meters_min=observed_hazard_min,
+        unobserved_step_distance_meters=unobserved_dist_val,
+        risk_category=risk_category,
+        risk_assessment_status=risk_assessment_status,
+    )
+
+    geometry = GeoJSONGeometry(type="LineString", coordinates=geojson_coords)
+
+    breakdown = {
+        "base_distance_cost": round(cost_base, 2),
+        "slope_penalty": round(cost_slope, 2),
+        "roughness_penalty": round(cost_rough, 2),
+        "hazard_penalty": round(cost_hazard, 2),
+        "extra_penalty": round(cost_extra, 2),
+    }
+
+    return summary, geometry, breakdown, visited_target_ids, nearby_target_ids
+
+
+def generate_route_alternatives(
+    graph: TerrainGridGraph,
+    meta: RasterMetadata,
+    start_px: tuple[int, int],
+    dest_px: tuple[int, int],
+    requested_mode: OptimizationMode,
+    num_alternatives: int = 1,
+    science_targets: list[ScienceTarget] | None = None,
+    master_meta: RasterMetadata | None = None,
+    provenance: dict[str, Any] | None = None,
+    route_nodes_out: dict[str, list[tuple[int, int]]] | None = None,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
+    overall_start_time: float | None = None,
+) -> tuple[list[RouteAlternative], int]:
+    """
+    Computes 1 to 3 distinct candidate routes and attaches a structured
+    `RouteEvidencePassport` to every alternative.
+    Route 1: Primary route for the requested mode.
+    Route 2: Backup corridor generated by penalizing primary route edges.
+    Route 3: Safety-first or Science-oriented corridor.
+
+    Returns:
+        (routes_list, total_nodes_expanded)
+    """
+    results: list[RouteAlternative] = []
+    total_nodes_expanded = 0
+    effective_master_meta = master_meta or meta
+    effective_prov = provenance or {}
+
+    # 1. Primary route
+    primary_nodes, primary_cost, nodes_1, _ = astar_search(
+        graph,
+        start_px,
+        dest_px,
+        timeout_seconds=timeout_seconds,
+        deadline=deadline,
+        overall_start_time=overall_start_time,
+    )
+    total_nodes_expanded += nodes_1
+
+    summary_1, geom_1, breakdown_1, visited_1, nearby_1 = reconstruct_route_summary(
+        primary_nodes, graph, meta, requested_mode, science_targets=science_targets
+    )
+    passport_1 = EvidenceService.build_route_evidence_passport(
+        path_nodes=primary_nodes,
+        graph=graph,
+        master_meta=effective_master_meta,
+        cropped_meta=meta,
+        provenance=effective_prov,
+        mode=requested_mode,
+    )
+
+    if route_nodes_out is not None:
+        route_nodes_out["route_primary_opt"] = list(primary_nodes)
+
+    results.append(
+        RouteAlternative(
+            route_id="route_primary_opt",
+            name=f"Primary Route ({requested_mode.value.replace('_', ' ').title()})",
+            mode=requested_mode,
+            score_rank=1,
+            total_cost=round(sum(breakdown_1.values()), 2),
+            cost_breakdown=breakdown_1,
+            summary=summary_1,
+            geometry=geom_1,
+            science_targets_visited=visited_1,
+            science_targets_nearby=nearby_1,
+            warnings=[],
+            evidence_passport=passport_1,
+        )
+    )
+
+    if num_alternatives <= 1:
+        return results, total_nodes_expanded
+
+    # 2. Alternative route: Penalize edges of primary path to find alternative corridor
+    penalized_edges: dict[tuple[tuple[int, int], tuple[int, int]], float] = {}
+    for i in range(len(primary_nodes) - 1):
+        u, v = primary_nodes[i], primary_nodes[i + 1]
+        penalized_edges[(u, v)] = 1500.0  # +1500m cost penalty to divert
+        penalized_edges[(v, u)] = 1500.0
+
+    try:
+        alt_nodes, alt_cost, nodes_2, _ = astar_search(
+            graph,
+            start_px,
+            dest_px,
+            penalized_edges=penalized_edges,
+            timeout_seconds=timeout_seconds,
+            deadline=deadline,
+            overall_start_time=overall_start_time,
+        )
+        total_nodes_expanded += nodes_2
+
+        # Check if alternative is genuinely distinct
+        shared_nodes = set(primary_nodes).intersection(set(alt_nodes))
+        overlap_pct = len(shared_nodes) / max(len(primary_nodes), 1)
+
+        if overlap_pct < 0.85:
+            summary_2, geom_2, breakdown_2, visited_2, nearby_2 = reconstruct_route_summary(
+                alt_nodes,
+                graph,
+                meta,
+                requested_mode,
+                penalized_edges=penalized_edges,
+                science_targets=science_targets,
+            )
+            passport_2 = EvidenceService.build_route_evidence_passport(
+                path_nodes=alt_nodes,
+                graph=graph,
+                master_meta=effective_master_meta,
+                cropped_meta=meta,
+                provenance=effective_prov,
+                mode=requested_mode,
+                penalized_edges=penalized_edges,
+            )
+            if route_nodes_out is not None:
+                route_nodes_out["route_alt_corridor"] = list(alt_nodes)
+            results.append(
+                RouteAlternative(
+                    route_id="route_alt_corridor",
+                    name="Alternative Diverse Corridor",
+                    mode=requested_mode,
+                    score_rank=2,
+                    total_cost=round(sum(breakdown_2.values()), 2),
+                    cost_breakdown=breakdown_2,
+                    summary=summary_2,
+                    geometry=geom_2,
+                    science_targets_visited=visited_2,
+                    science_targets_nearby=nearby_2,
+                    warnings=[
+                        "Alternative corridor avoids high-traffic bottlenecks of primary route."
+                    ],
+                    evidence_passport=passport_2,
+                )
+            )
+        else:
+            logger.info(
+                "Secondary alternative discarded: overlap (%.1f%%) exceeds 85%% threshold.",
+                overlap_pct * 100.0,
+            )
+            results[0].warnings.append(
+                f"Secondary corridor search suppressed: generated path overlapped {int(overlap_pct * 100)}% with primary route."
+            )
+    except RoutingTimeoutError:
+        raise
+    except (UnreachableDestinationError, ComputationalBoundExceededError) as e:
+        logger.info("Secondary alternative search failed: %s", e)
+        results[0].warnings.append(f"Secondary corridor search unviable: {e.message}")
+    except Exception as e:
+        logger.warning("Unexpected error during secondary alternative search: %s", e)
+        results[0].warnings.append(
+            "Secondary corridor search encountered an unexpected traversal barrier."
+        )
+
+    # 3. Third alternative if requested and mode was not safety_first
+    if num_alternatives >= 3 and len(results) < 3:
+        if requested_mode != OptimizationMode.SAFETY_FIRST:
+            alt_mode = OptimizationMode.SAFETY_FIRST
+            safety_ceiling = MODE_WEIGHTS[alt_mode].slope_ceiling_deg
+            safety_traversable = graph.traversable & (graph.slope_deg <= safety_ceiling)
+            graph_safety = TerrainGridGraph(
+                elevation=graph.elevation,
+                slope_deg=graph.slope_deg,
+                roughness=graph.roughness,
+                traversable_mask=safety_traversable,
+                dx_meters=graph.dx,
+                dy_meters=graph.dy,
+                mode=alt_mode,
+            )
+            try:
+                safety_nodes, safety_cost, nodes_3, _ = astar_search(
+                    graph_safety,
+                    start_px,
+                    dest_px,
+                    timeout_seconds=timeout_seconds,
+                    deadline=deadline,
+                    overall_start_time=overall_start_time,
+                )
+                total_nodes_expanded += nodes_3
+
+                summary_3, geom_3, breakdown_3, visited_3, nearby_3 = reconstruct_route_summary(
+                    safety_nodes, graph_safety, meta, alt_mode, science_targets=science_targets
+                )
+                passport_3 = EvidenceService.build_route_evidence_passport(
+                    path_nodes=safety_nodes,
+                    graph=graph_safety,
+                    master_meta=effective_master_meta,
+                    cropped_meta=meta,
+                    provenance=effective_prov,
+                    mode=alt_mode,
+                )
+                if route_nodes_out is not None:
+                    route_nodes_out["route_safety_backup"] = list(safety_nodes)
+                results.append(
+                    RouteAlternative(
+                        route_id="route_safety_backup",
+                        name="Conservative Safety-First Corridor",
+                        mode=alt_mode,
+                        score_rank=len(results) + 1,
+                        total_cost=round(sum(breakdown_3.values()), 2),
+                        cost_breakdown=breakdown_3,
+                        summary=summary_3,
+                        geometry=geom_3,
+                        science_targets_visited=visited_3,
+                        science_targets_nearby=nearby_3,
+                        warnings=[
+                            "Strict 14° slope constraint enforced; prioritizes minimum roughness."
+                        ],
+                        evidence_passport=passport_3,
+                    )
+                )
+            except RoutingTimeoutError:
+                raise
+            except (UnreachableDestinationError, ComputationalBoundExceededError) as e:
+                logger.info("Safety-first alternative search failed: %s", e)
+                results[0].warnings.append(f"Safety-first alternative unviable: {e.message}")
+            except Exception as e:
+                logger.warning("Unexpected error during safety alternative search: %s", e)
+
+    return results, total_nodes_expanded
