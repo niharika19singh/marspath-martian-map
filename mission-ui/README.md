@@ -28,8 +28,16 @@ From this directory:
 - `npm install`
 - `npm run build` → `../dist/mission-control/`
 - `node check-engine.mjs` → algorithm-equivalence, constraints, nodata-barrier, validation, cost reconciliation, dataset hash, and selected-route-export checks.
+- `node check-traverse.mjs` → recorded Perseverance traverse segment/vertex integrity, sol filtering, and GeoJSON export checks.
+- `node check-integration.mjs` → API synthetic/official provenance attribution, alternative-shortfall and warning handling, `VITE_API_URL` / `localStorage` precedence, and API route planning without local DEM checks.
 
-DEM/imagery files live in `../dist/mission-data/`. OpenLayers and React render entirely in the client; no Python runtime is embedded in the static Site.
+An optional build-time fallback URL for the Python FastAPI backend can be configured via `VITE_API_URL` (see `.env.example`). Precedence is:
+1. User-configured `localStorage` (`marspath-api-url`).
+2. `VITE_API_URL` environment variable.
+3. Empty string (`''`).
+Setting `VITE_API_URL` pre-populates the connection input without claiming an active connection until `/health`, `/api/v1/data/status`, `/api/v1/layers`, and `/openapi.json` are validated.
+
+DEM/imagery files live in `../dist/mission-data/`. OpenLayers and React render entirely in the client; no Python runtime is embedded in the static Site. When connected to the Python API, route planning, summary metrics, elevation profile, evidence passport, and exports remain operational even if `/mission-data/jezero-dem.json` is unavailable for local map visualization.
 
 ## Validation
 
