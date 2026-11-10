@@ -419,16 +419,20 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
         provenance = self._get_fallback().get_provenance()
         provenance["local_integrity_verified"] = None
         provenance["source_checksum_verified"] = False
-        if self._fallback_occurred:
+        if self._fallback_occurred or self.use_real_dem:
+            fallback_reason = (
+                self._fallback_reason
+                or f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found or invalid at: {self.dem_path}"
+            )
             provenance["data_mode"] = "synthetic_fallback"
             provenance["real_data_validation_status"] = "incomplete_missing_genuine_dem"
-            provenance["fallback_reason"] = self._fallback_reason
+            provenance["fallback_reason"] = fallback_reason
             provenance["real_dem_requested"] = True
             provenance["real_dem_loaded"] = False
             provenance["file_path"] = self.dem_path
             provenance["provenance_verification_method"] = "none_file_missing_or_invalid"
             provenance["provenance_limitations"] = [
-                f"Real DEM was requested at '{self.dem_path}', but file was not found or failed validation: {self._fallback_reason}.",
+                f"Real DEM was requested at '{self.dem_path}', but file was not found or failed validation: {fallback_reason}.",
                 "Real-data validation remains incomplete. Fallback synthetic model active.",
                 "Route cost weights and categorical risk levels are deterministic multi-criteria decision heuristics, not calibrated probabilities of rover failure.",
             ]

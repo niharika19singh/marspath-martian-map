@@ -573,8 +573,11 @@ def test_render_startup_fallback_and_strict_failure_reflected_in_health_and_data
         try:
             client = TestClient(app)
             health_resp = client.get("/health")
-            assert health_resp.status_code == 200
-            readiness = health_resp.json()["data_readiness"]
+            assert health_resp.status_code == 503
+            health_body = health_resp.json()
+            assert health_body["status"] == "degraded"
+            readiness = health_body["data_readiness"]
+            assert readiness["status"] == "degraded"
             assert readiness["real_dem_requested"] is True
             assert readiness["real_dem_loaded"] is False
             assert readiness["dem_loaded"] is False
@@ -588,6 +591,7 @@ def test_render_startup_fallback_and_strict_failure_reflected_in_health_and_data
             status_resp = client.get("/api/v1/data/status")
             assert status_resp.status_code == 200
             st = status_resp.json()
+            assert st["status"] == "degraded"
             assert st["real_dem_requested"] is True
             assert st["real_dem_loaded"] is False
             assert st["dem_loaded"] is False

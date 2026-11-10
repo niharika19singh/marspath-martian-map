@@ -10,12 +10,12 @@
 #    - Otherwise extracts only the 178x252 Jezero Crater sub-window (~90 KB) from
 #      the official USGS 200m global blended DEM endpoint via GDAL /vsicurl/ HTTP
 #      Range reads (never downloading the full 11.38 GB archive).
-# 3. Enforces fallback policy (`MARSPATH_ALLOW_SYNTHETIC_FALLBACK`):
-#    - If `true`: logs a warning on ingestion failure and continues startup so
-#      `/health` and `/api/v1/data/status` transparently report `synthetic_fallback`,
-#      `real_dem_loaded=false`, `dem_loaded=false`, and `blocking_errors`.
+# 3. Enforces fallback policy (`MARSPATH_ALLOW_SYNTHETIC_FALLBACK`, default `false`):
 #    - If `false`: exits non-zero and aborts startup if real terrain cannot be
 #      provisioned and verified.
+#    - If `true`: logs a warning on ingestion failure and continues startup in
+#      degraded `synthetic_fallback` mode (`GET /health` returns HTTP 503 with
+#      `status="degraded"`, `real_dem_loaded=false`, `dem_loaded=false`, and `blocking_errors`).
 # 4. Starts Uvicorn on `0.0.0.0:$PORT`.
 # ==============================================================================
 
@@ -34,7 +34,7 @@ fi
 export MARSPATH_ENV="${MARSPATH_ENV:-production}"
 export MARSPATH_USE_REAL_DEM="${MARSPATH_USE_REAL_DEM:-true}"
 export MARSPATH_DEM_PATH="${MARSPATH_DEM_PATH:-backend/app/data/rasters/jezero_mola_hrsc_blended.tif}"
-export MARSPATH_ALLOW_SYNTHETIC_FALLBACK="${MARSPATH_ALLOW_SYNTHETIC_FALLBACK:-true}"
+export MARSPATH_ALLOW_SYNTHETIC_FALLBACK="${MARSPATH_ALLOW_SYNTHETIC_FALLBACK:-false}"
 export PORT="${PORT:-${MARSPATH_PORT:-8000}}"
 
 # Select Python binary

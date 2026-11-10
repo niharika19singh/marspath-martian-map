@@ -293,6 +293,10 @@ class DataCatalogService:
         res_meters = round(raster.metadata.meters_per_px_y, 1)
 
         provenance = self.provider.get_provenance()
+        real_dem_requested = bool(
+            provenance.get("real_dem_requested", self.settings.USE_REAL_DEM)
+        )
+        real_dem_loaded = bool(provenance.get("real_dem_loaded", not is_syn))
         active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
         val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
 
@@ -310,11 +314,17 @@ class DataCatalogService:
         ]
         blocking_errors: list[str] = []
         fallback_reason: str | None = None
+        overall_status = "healthy"
 
-        if is_syn:
-            if active_mode == "synthetic_fallback":
+        if is_syn or (real_dem_requested and not real_dem_loaded):
+            if active_mode == "synthetic_fallback" or real_dem_requested:
+                overall_status = "degraded"
+                active_mode = "synthetic_fallback"
+                if val_status == "synthetic_test_fixture":
+                    val_status = "incomplete_missing_genuine_dem"
                 fallback_reason = str(
-                    provenance.get("fallback_reason", "Real DEM missing or invalid")
+                    provenance.get("fallback_reason")
+                    or f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found or invalid at: {getattr(self.provider, 'dem_path', 'unknown')}"
                 )
                 limitations.append(
                     f"Fallback to Synthetic Jezero Crater Terrain Model occurred: {fallback_reason}."
@@ -351,14 +361,12 @@ class DataCatalogService:
             enriched_products.append(prod)
 
         return DataStatusResponse(
-            status="healthy",
+            status=overall_status,
             data_mode=active_mode,
             real_data_validation_status=val_status,
             dem_loaded=not is_syn,
-            real_dem_requested=bool(
-                provenance.get("real_dem_requested", self.settings.USE_REAL_DEM)
-            ),
-            real_dem_loaded=bool(provenance.get("real_dem_loaded", not is_syn)),
+            real_dem_requested=real_dem_requested,
+            real_dem_loaded=real_dem_loaded,
             local_integrity_verified=provenance.get("local_integrity_verified"),
             source_checksum_verified=bool(provenance.get("source_checksum_verified", False)),
             is_synthetic=is_syn,

@@ -1082,7 +1082,10 @@ class RoutePlanResponse(BaseModel):
 class DataStatusResponse(BaseModel):
     """System report on data readiness, CRS, and raster availability."""
 
-    status: str
+    status: str = Field(
+        default="healthy",
+        description="Operational readiness status: 'healthy' when the configured terrain mode is active, or 'degraded' when real terrain was requested (MARSPATH_USE_REAL_DEM=true) but synthetic fallback is active",
+    )
     data_mode: str
     real_data_validation_status: str = Field(
         default="synthetic_test_fixture",

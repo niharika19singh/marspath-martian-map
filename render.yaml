@@ -26,12 +26,9 @@ services:
       # start_render.sh provisions and verifies the USGS 200m Jezero DEM before starting Uvicorn.
       - key: MARSPATH_USE_REAL_DEM
         value: "true"
-      # Demo resilience policy: if the upstream USGS endpoint is temporarily unreachable,
-      # MARSPATH_ALLOW_SYNTHETIC_FALLBACK="true" keeps the API available in `synthetic_fallback`
-      # mode while transparently reporting `real_dem_loaded: false`, `dem_loaded: false`,
-      # `is_synthetic: true`, and `blocking_errors`.
-      # For strict production enforcement (fail startup if real terrain cannot be provisioned),
-      # set MARSPATH_ALLOW_SYNTHETIC_FALLBACK="false".
+      # Fail-closed production policy: if the real DEM cannot be provisioned or verified,
+      # MARSPATH_ALLOW_SYNTHETIC_FALLBACK="false" aborts startup rather than serving
+      # synthetic fallback terrain in production.
       - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
-        value: "true"
+        value: "false"
     healthCheckPath: /health
