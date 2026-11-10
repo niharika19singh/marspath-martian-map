@@ -16,7 +16,7 @@ MARSPATH_PORT=8000
 MARSPATH_LOG_LEVEL=INFO
 
 # Security & CORS
-MARSPATH_CORS_ORIGINS=https://marspath.vercel.app,http://localhost:3000
+MARSPATH_CORS_ORIGINS=https://marspath.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:8080,http://127.0.0.1:8080
 
 # Planetary Data & Provenance Policy
 MARSPATH_DATA_DIR=backend/app/data

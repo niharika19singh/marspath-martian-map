@@ -30,7 +30,13 @@ if HAS_SETTINGS:
         PORT: int = Field(default=8000, validation_alias=AliasChoices("PORT", "MARSPATH_PORT"))
         LOG_LEVEL: str = "INFO"
 
-        CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://marspath.vercel.app"
+        CORS_ORIGINS: str = (
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "http://localhost:5173,http://127.0.0.1:5173,"
+            "http://localhost:4173,http://127.0.0.1:4173,"
+            "http://localhost:8080,http://127.0.0.1:8080,"
+            "https://marspath.vercel.app"
+        )
 
         DATA_DIR: str = "backend/app/data"
         USE_REAL_DEM: bool = False
@@ -86,7 +92,13 @@ else:
         CORS_ORIGINS: str = Field(
             default_factory=lambda: os.getenv(
                 "MARSPATH_CORS_ORIGINS",
-                "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://marspath.vercel.app",
+                (
+                    "http://localhost:3000,http://127.0.0.1:3000,"
+                    "http://localhost:5173,http://127.0.0.1:5173,"
+                    "http://localhost:4173,http://127.0.0.1:4173,"
+                    "http://localhost:8080,http://127.0.0.1:8080,"
+                    "https://marspath.vercel.app"
+                ),
             )
         )
 

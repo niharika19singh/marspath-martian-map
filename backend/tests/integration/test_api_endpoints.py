@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -227,6 +228,48 @@ def test_cors_preflight_localhost_origin():
     )
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "https://marspath.vercel.app",
+    ],
+)
+def test_cors_preflight_supported_origins(origin):
+    """Verifies that CORS preflight from all supported dev/preview/prod origins returns 200 with matching origin."""
+    response = client.options(
+        "/api/v1/routes/plan",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == origin
+    assert "POST" in response.headers.get("access-control-allow-methods", "")
+
+
+def test_cors_preflight_disallowed_origin():
+    """Verifies that CORS preflight from an unauthorized origin does not return CORS headers."""
+    response = client.options(
+        "/api/v1/routes/plan",
+        headers={
+            "Origin": "http://unauthorized-domain.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.headers.get("access-control-allow-origin") is None
 
 
 def test_route_plan_search_radius_exceeded(monkeypatch):
