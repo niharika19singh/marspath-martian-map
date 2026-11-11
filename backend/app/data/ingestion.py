@@ -176,6 +176,7 @@ def ingest_jezero_dem(
     source_url_or_path: str | None = None,
     bounds: tuple[float, float, float, float] = DEFAULT_JEZERO_BOUNDS,
     force: bool = False,
+    manifest: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Extracts the Jezero Crater corridor DEM from the specified source (official USGS
@@ -243,7 +244,8 @@ def ingest_jezero_dem(
         computed_source_md5 = compute_file_md5(src_path).lower()
         computed_source_sha256 = compute_file_sha256(src_path).lower()
 
-        for item in DATA_CATALOG_MANIFEST:
+        effective_manifest = manifest if manifest is not None else DATA_CATALOG_MANIFEST
+        for item in effective_manifest:
             cat_md5 = str(item.get("upstream_md5") or "").lower().strip()
             cat_sha = str(item.get("sha256") or "").lower().strip()
             if (cat_md5 and computed_source_md5 == cat_md5) or (
@@ -438,6 +440,7 @@ def provision_runtime_dem(
     allow_fallback: bool | None = None,
     source_url_or_path: str | None = None,
     force: bool = False,
+    manifest: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Idempotent runtime DEM provisioning helper for cloud/Render startup:
@@ -512,6 +515,7 @@ def provision_runtime_dem(
             output_path=target_path,
             source_url_or_path=source_url_or_path,
             force=True,
+            manifest=manifest,
         )
         is_valid, reason, _ = _validate_existing_local_dem(target_path)
         if not is_valid:
@@ -580,6 +584,164 @@ def provision_runtime_dem(
         ) from exc
 
 
+def verify_runtime_dem(
+    dem_path: str | Path | None = None,
+    use_real_dem: bool | None = None,
+    allow_fallback: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Strict read-only runtime DEM verification for container startup (Phase 7.2.1):
+    1. When `use_real_dem` is False, logs and returns immediately with 'skipped_real_dem_disabled'.
+    2. When `use_real_dem` is True:
+       - Strictly verifies that the pre-built target raster exists and is non-empty.
+       - Strictly verifies that the provenance sidecar exists and is valid JSON.
+       - Strictly verifies local file SHA-256 integrity against the sidecar.
+       - Loads the raster via MOLAHRSCRasterProvider and validates DEM data integrity.
+       - Evaluates the unified evaluate_terrain_readiness() gate.
+       - Enforces acceptable real DEM validation status ('verified_source' or
+         'official_endpoint_retrieved_checksum_unverified').
+       - NEVER makes network requests, NEVER downloads or re-ingests data,
+         NEVER mutates, deletes, or regenerates artifacts.
+       - If any check fails:
+         * When `allow_fallback=True`: logs a warning and returns 'fallback_to_synthetic'.
+         * When `allow_fallback=False`: raises RuntimeError to abort startup immediately.
+    """
+    from backend.app.core.config import get_settings
+    from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
+    from backend.app.services.data_catalog import (
+        ACCEPTABLE_REAL_VALIDATION_STATUSES,
+        evaluate_terrain_readiness,
+    )
+
+    settings = get_settings()
+    target_path = Path(dem_path or settings.DEM_PATH)
+    effective_use_real = settings.USE_REAL_DEM if use_real_dem is None else use_real_dem
+    effective_fallback = (
+        settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
+    )
+    sidecar_path = get_provenance_sidecar_path(target_path)
+
+    if not effective_use_real:
+        logger.info(
+            "MARSPATH_USE_REAL_DEM=false; skipping real DEM runtime verification. Operating in synthetic_test_fixture mode."
+        )
+        return {
+            "status": "skipped_real_dem_disabled",
+            "real_dem_requested": False,
+            "real_dem_loaded": False,
+            "is_synthetic": True,
+            "dem_path": str(target_path),
+            "readiness_status": "healthy",
+        }
+
+    try:
+        if not target_path.is_file():
+            raise RuntimeError(
+                f"Runtime DEM raster missing at '{target_path}'. Build-time provisioning did not create artifact."
+            )
+        if target_path.stat().st_size == 0:
+            raise RuntimeError(f"Runtime DEM raster is empty (0 bytes) at '{target_path}'.")
+        if not sidecar_path.is_file():
+            raise RuntimeError(
+                f"Runtime DEM provenance sidecar missing at '{sidecar_path}'."
+            )
+
+        try:
+            with open(sidecar_path, encoding="utf-8") as f:
+                sidecar = json.load(f)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to parse runtime DEM provenance sidecar JSON at '{sidecar_path}': {exc}"
+            ) from exc
+
+        integrity_ok, reason, _ = verify_local_integrity(target_path)
+        if not integrity_ok:
+            raise RuntimeError(
+                f"Runtime DEM local SHA-256 integrity verification failed: {reason}"
+            )
+
+        try:
+            provider = MOLAHRSCRasterProvider(
+                dem_path=str(target_path),
+                use_real_dem=effective_use_real,
+                allow_fallback=effective_fallback,
+            )
+            raster = provider.get_dem_raster()
+            provenance = provider.get_provenance()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Runtime DEM provider failed to load raster at '{target_path}': {exc}"
+            ) from exc
+
+        readiness = evaluate_terrain_readiness(
+            is_synthetic=raster.metadata.is_synthetic,
+            provenance=provenance,
+            default_use_real_dem=True,
+            dem_path=str(target_path),
+        )
+
+        if readiness.get("status") != "healthy":
+            raise RuntimeError(
+                f"Runtime DEM readiness gate failed (status='{readiness.get('status')}'): {readiness.get('blocking_errors')}"
+            )
+        if readiness.get("is_synthetic") is not False:
+            raise RuntimeError("Runtime DEM is marked as synthetic when real DEM was requested.")
+        if readiness.get("local_integrity_verified") is not True:
+            raise RuntimeError(
+                f"Runtime DEM local_integrity_verified is not True: {readiness.get('local_integrity_verified')}"
+            )
+        val_status = readiness.get("real_data_validation_status")
+        if val_status not in ACCEPTABLE_REAL_VALIDATION_STATUSES:
+            raise RuntimeError(
+                f"Runtime DEM validation_status '{val_status}' not in acceptable statuses: {sorted(ACCEPTABLE_REAL_VALIDATION_STATUSES)}"
+            )
+        if readiness.get("blocking_errors"):
+            raise RuntimeError(
+                f"Runtime DEM blocking errors present: {readiness.get('blocking_errors')}"
+            )
+
+        logger.info(
+            "Runtime DEM verification passed for %s (status=%s, SHA-256=%s...)",
+            target_path,
+            val_status,
+            str(sidecar.get("local_file_sha256", ""))[:12],
+        )
+        return {
+            "status": "verified_valid",
+            "real_dem_requested": True,
+            "real_dem_loaded": True,
+            "is_synthetic": False,
+            "dem_path": str(target_path),
+            "local_file_sha256": sidecar.get("local_file_sha256"),
+            "validation_status": val_status,
+            "readiness_status": readiness.get("status"),
+        }
+    except Exception as exc:
+        if effective_fallback:
+            logger.warning(
+                "Runtime DEM verification failed (%s), but MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true; "
+                "continuing startup in degraded synthetic fallback mode.",
+                exc,
+            )
+            return {
+                "status": "fallback_to_synthetic",
+                "real_dem_requested": True,
+                "real_dem_loaded": False,
+                "is_synthetic": True,
+                "dem_path": str(target_path),
+                "error": str(exc),
+                "readiness_status": "degraded",
+            }
+
+        logger.error(
+            "CRITICAL: Runtime DEM verification failed (%s) and MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false. Aborting startup.",
+            exc,
+        )
+        raise RuntimeError(
+            f"Strict runtime DEM verification failed (MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false): {exc}"
+        ) from exc
+
+
 if __name__ == "__main__":
     import sys
 
@@ -595,7 +757,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Run idempotent runtime DEM provisioning honoring MARSPATH_USE_REAL_DEM and MARSPATH_ALLOW_SYNTHETIC_FALLBACK",
     )
+    parser.add_argument(
+        "--verify-runtime",
+        action="store_true",
+        help="Run strict read-only runtime DEM verification (never downloads, extracts, or deletes)",
+    )
     args = parser.parse_args()
+
+    if args.verify_runtime:
+        try:
+            res = verify_runtime_dem(dem_path=args.output)
+            print(f"Runtime verification status: {res['status']}")
+            print(f"Real DEM requested: {res['real_dem_requested']}")
+            print(f"Real DEM loaded: {res['real_dem_loaded']}")
+            if res.get("validation_status"):
+                print(f"Validation status: {res['validation_status']}")
+            if res.get("local_file_sha256"):
+                print(f"Local SHA-256: {res['local_file_sha256']}")
+            sys.exit(0)
+        except Exception as err:
+            print(f"Runtime verification failed: {err}", file=sys.stderr)
+            sys.exit(1)
 
     if args.provision_runtime:
         try:

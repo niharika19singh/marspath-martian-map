@@ -49,11 +49,18 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
         OrderedDict()
     )
 
-    def __init__(self, dem_path: str | None = None):
+    def __init__(
+        self,
+        dem_path: str | None = None,
+        use_real_dem: bool | None = None,
+        allow_fallback: bool | None = None,
+    ):
         settings = get_settings()
         self.dem_path = dem_path or settings.DEM_PATH
-        self.use_real_dem = settings.USE_REAL_DEM
-        self.allow_fallback = settings.ALLOW_SYNTHETIC_FALLBACK
+        self.use_real_dem = settings.USE_REAL_DEM if use_real_dem is None else use_real_dem
+        self.allow_fallback = (
+            settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
+        )
         self._raster_data: RasterData | None = None
         self._cached_file_id: tuple[str, int, int, int, int, int] | None = None
         self._fallback_provider: SyntheticTerrainProvider | None = None

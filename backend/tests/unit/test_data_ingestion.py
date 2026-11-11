@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 
 import numpy as np
@@ -389,8 +390,19 @@ def test_render_startup_reuses_already_provisioned_valid_dem():
         assert res["local_file_sha256"] == initial_sha
         assert os.path.getmtime(out_path) == initial_mtime
 
-        # Also verify `backend/scripts/start_render.sh` shell execution with MARSPATH_SKIP_UVICORN=true
+        # Also verify `backend/scripts/start_render.sh` shell execution with MARSPATH_SKIP_UVICORN=true on genuine DEM
         repo_root = Path(__file__).resolve().parents[3]
+        genuine_dem = (
+            repo_root
+            / "backend"
+            / "app"
+            / "data"
+            / "rasters"
+            / "jezero_mola_hrsc_blended.tif"
+        )
+        shutil.copy(genuine_dem, out_path)
+        shutil.copy(f"{genuine_dem}.provenance.json", f"{out_path}.provenance.json")
+
         script_path = repo_root / "backend" / "scripts" / "start_render.sh"
         env = os.environ.copy()
         env.update(
@@ -411,7 +423,7 @@ def test_render_startup_reuses_already_provisioned_valid_dem():
             check=False,
         )
         assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
-        assert "already_provisioned_valid" in proc.stdout
+        assert "verified_valid" in proc.stdout
     finally:
         for p in [source_path, out_path, f"{out_path}.provenance.json", f"{out_path}.provision_error.json"]:
             if os.path.exists(p):
@@ -469,7 +481,7 @@ def test_render_startup_provisions_missing_dem():
             integrity_ok, _, _ = verify_local_integrity(out_path)
             assert integrity_ok is True
 
-            # Test via start_render.sh on a fresh missing path
+            # Phase 7.2.1: Runtime startup (start_render.sh) is strictly read-only and fails closed on missing DEM
             out_path_2 = os.path.join(tmp_dir, "jezero_script_provisioned.tif")
             repo_root = Path(__file__).resolve().parents[3]
             script_path = repo_root / "backend" / "scripts" / "start_render.sh"
@@ -491,9 +503,12 @@ def test_render_startup_provisions_missing_dem():
                 text=True,
                 check=False,
             )
-            assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
-            assert "provisioned_from_source" in proc.stdout
-            assert os.path.exists(out_path_2)
+            assert (
+                proc.returncode != 0
+            ), "start_render.sh must fail closed when runtime DEM artifact is missing"
+            assert not os.path.exists(
+                out_path_2
+            ), "start_render.sh must never download or create missing files at runtime"
         finally:
             if os.path.exists(source_path):
                 os.remove(source_path)

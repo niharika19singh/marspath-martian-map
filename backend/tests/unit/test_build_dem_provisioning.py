@@ -1,31 +1,50 @@
 """
-Phase 7.2 — Build-Time DEM Provisioning & Immutable Runtime Artifact Regression Suite.
+Phase 7.2.1 — Trust Manifest & Immutable Runtime Hardening Regression Suite.
 
-Covers all 13 required test cases:
-1. Build provisioning creates both GeoTIFF and .provenance.json sidecar.
-2. Missing or unreachable upstream source causes build provisioning to fail with nonzero exit.
-3. Build provisioning fails closed: synthetic fallback cannot satisfy build requirements.
-4. Existing valid artifact is reused without re-ingesting (idempotency).
-5. Existing artifact with modified or tampered bytes fails integrity verification.
-6. Missing provenance sidecar fails verification.
-7. Unverified numerical terrain (valid_numeric_raster_unverified_source) is rejected as degraded.
-8. Official endpoint extract with local_integrity_verified=True and source_checksum_verified=False remains acceptable.
-9. Runtime startup (start_render.sh) reuses valid build artifact without remote requests.
-10. Runtime startup fails before Uvicorn when artifact is absent or invalid.
-11. /health reports HTTP 200 for acceptable real terrain.
-12. /health reports HTTP 503 for unacceptable or synthetic production terrain.
-13. /api/v1/data/status preserves Phase 7.1.1 readiness classification.
+Covers all required test sections:
+Section 2: Manifest Immutability Tests (5 tests)
+- Environment variables cannot override manifest checksums.
+- Official USGS upstream MD5 constant is unchanged.
+- Official Jezero window array SHA-256 digest is unchanged.
+- Arbitrary local raster cannot become verified_source via env vars.
+- Official endpoint extract remains official_endpoint_retrieved_checksum_unverified.
+
+Section 3: Build-Time DEM Provisioning Tests (8 tests)
+- Build provisioning creates both GeoTIFF and .provenance.json sidecar.
+- Missing or unreachable upstream source causes build provisioning failure.
+- Build provisioning fails closed against synthetic fallback.
+- Existing valid artifact is reused without re-ingesting (idempotency).
+- Existing artifact with modified/tampered bytes fails integrity verification.
+- Missing provenance sidecar fails verification.
+- Unverified numerical terrain (valid_numeric_raster_unverified_source) is rejected.
+- Official endpoint extract with local_integrity_verified=True remains acceptable.
+
+Section 4: Runtime Verification-Only Tests (10 tests)
+- Runtime startup (start_render.sh) reuses valid build artifact without remote requests.
+- Runtime startup fails before launching Uvicorn when artifact is absent or invalid.
+- Reachable mocked upstream source test: zero network requests during failed runtime startup.
+- Runtime verification fails when DEM artifact is missing.
+- Runtime verification fails when provenance sidecar is missing.
+- Runtime verification fails when local SHA-256 integrity mismatch occurs.
+- Runtime verification fails when provenance validation status is unacceptable.
+- Synthetic development mode (MARSPATH_USE_REAL_DEM=false) succeeds and reports healthy.
+- /health reports HTTP 200 for acceptable real terrain.
+- /health and /api/v1/data/status preserve Phase 7.1.1 readiness classifications.
 """
 
 import hashlib
+import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import numpy as np
+import pytest
 import rasterio
 from fastapi.testclient import TestClient
 from rasterio.transform import from_origin
@@ -35,9 +54,16 @@ from backend.app.data.ingestion import (
     USGS_MOLA_HRSC_MD5,
     USGS_MOLA_HRSC_PRODUCT_ID,
     compute_file_md5,
+    provision_runtime_dem,
     verify_local_integrity,
+    verify_runtime_dem,
 )
-from backend.app.data.manifest import DATA_CATALOG_MANIFEST, _compute_raster_array_sha256
+from backend.app.data.manifest import (
+    DATA_CATALOG_MANIFEST,
+    USGS_JEZERO_WINDOW_ARRAY_SHA256,
+    _compute_raster_array_sha256,
+    verify_manifest_provenance,
+)
 from backend.app.main import app
 from backend.app.services.data_catalog import (
     ACCEPTABLE_REAL_VALIDATION_STATUSES,
@@ -47,6 +73,15 @@ from backend.app.services.data_catalog import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BUILD_SCRIPT = REPO_ROOT / "backend" / "scripts" / "provision_build_dem.sh"
 START_SCRIPT = REPO_ROOT / "backend" / "scripts" / "start_render.sh"
+GENUINE_DEM_PATH = (
+    REPO_ROOT
+    / "backend"
+    / "app"
+    / "data"
+    / "rasters"
+    / "jezero_mola_hrsc_blended.tif"
+)
+GENUINE_SIDECAR_PATH = Path(f"{GENUINE_DEM_PATH}.provenance.json")
 
 
 def _write_sample_geotiff(
@@ -131,8 +166,7 @@ def _build_test_env(
     source_path: str | None = None,
     allow_fallback: str = "false",
     extra_bin_dir: str | None = None,
-    manifest_jezero_win_sha: str | None = None,
-    manifest_up_md5: str | None = None,
+    use_real_dem: str = "true",
 ) -> dict[str, str]:
     """Constructs environment dict with correct PYTHONPATH and isolation."""
     env = os.environ.copy()
@@ -142,24 +176,143 @@ def _build_test_env(
         f"{REPO_ROOT}:{REPO_ROOT}/backend:{REPO_ROOT}/.deps:{env.get('PYTHONPATH', '')}"
     )
     env["MARSPATH_ENV"] = "production"
-    env["MARSPATH_USE_REAL_DEM"] = "true"
+    env["MARSPATH_USE_REAL_DEM"] = use_real_dem
     env["MARSPATH_DEM_PATH"] = dem_path
     env["MARSPATH_ALLOW_SYNTHETIC_FALLBACK"] = allow_fallback
     if source_path:
         env["MARSPATH_INGESTION_SOURCE"] = source_path
     else:
         env.pop("MARSPATH_INGESTION_SOURCE", None)
-    if manifest_jezero_win_sha:
-        env["MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256"] = manifest_jezero_win_sha
-    if manifest_up_md5:
-        env["MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE"] = manifest_up_md5
     return env
 
 
+def _copy_genuine_jezero_dem(target_path: str | Path) -> tuple[str, str]:
+    """Copies the genuine Jezero DEM raster and sidecar to target_path."""
+    t_path = Path(target_path)
+    t_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(GENUINE_DEM_PATH, t_path)
+    shutil.copy(GENUINE_SIDECAR_PATH, f"{t_path}.provenance.json")
+
+    with open(f"{t_path}.provenance.json", encoding="utf-8") as f:
+        sidecar = json.load(f)
+    return sidecar["local_file_sha256"], sidecar["extracted_array_sha256"]
+
+
 # ==============================================================================
-# Test 1: Build provisioning creates both GeoTIFF and .provenance.json sidecar
+# SECTION 2: AUTHORITATIVE MANIFEST IMMUTABILITY TESTS (5 tests)
 # ==============================================================================
+
+
+def test_manifest_env_vars_cannot_override_checksums(monkeypatch):
+    """Test 2.1: Setting MARSPATH_MANIFEST_* env vars cannot override catalog checksums."""
+    monkeypatch.setenv(
+        "MARSPATH_MANIFEST_SHA256_OVERRIDE", "deadbeef111122223333444455556666"
+    )
+    monkeypatch.setenv(
+        "MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE", "deadbeefdeadbeefdeadbeefdeadbeef"
+    )
+    monkeypatch.setenv(
+        "MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256",
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    )
+
+    # Re-evaluate or inspect catalog item
+    usgs_item = next(
+        p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
+    )
+    assert (
+        usgs_item["upstream_md5"] == "e98092a06bea74d5ec9a704dcd1fe318"
+    ), "upstream_md5 must remain authoritative regardless of env vars"
+    assert (
+        USGS_JEZERO_WINDOW_ARRAY_SHA256
+        == "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
+    ), "USGS_JEZERO_WINDOW_ARRAY_SHA256 must remain constant"
+    assert (
+        usgs_item.get("jezero_window_array_sha256")
+        == "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
+    )
+
+
+def test_manifest_official_usgs_upstream_md5_constant():
+    """Test 2.2: Official USGS upstream MD5 constant is strictly preserved."""
+    usgs_item = next(
+        p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
+    )
+    assert usgs_item["upstream_md5"] == "e98092a06bea74d5ec9a704dcd1fe318"
+    assert USGS_MOLA_HRSC_MD5 == "e98092a06bea74d5ec9a704dcd1fe318"
+
+
+def test_manifest_official_jezero_window_array_sha256_constant():
+    """Test 2.3: Official Jezero Crater window array SHA-256 digest is strictly preserved."""
+    assert (
+        USGS_JEZERO_WINDOW_ARRAY_SHA256
+        == "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
+    )
+
+
+def test_arbitrary_local_raster_cannot_become_verified_source_via_env(monkeypatch):
+    """Test 2.4: An arbitrary local raster cannot become verified_source via env vars."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dummy_tif = os.path.join(tmp_dir, "fake_mars_dem.tif")
+        digest, _ = _write_sample_geotiff(dummy_tif, height=90, width=120)
+
+        # Set malicious env vars attempting to override manifest
+        monkeypatch.setenv("MARSPATH_MANIFEST_SHA256_OVERRIDE", digest)
+        monkeypatch.setenv(
+            "MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE",
+            "fake_md5_string_1234567890abcdef",
+        )
+        monkeypatch.setenv(
+            "MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256",
+            "fake_arr_sha256_1234567890abcdef",
+        )
+
+        # Sidecar claiming to be verified
+        sidecar_data = {
+            "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
+            "validation_status": "verified_source",
+            "source_checksum_verified": True,
+            "local_integrity_verified": True,
+            "local_file_sha256": digest,
+        }
+        with open(f"{dummy_tif}.provenance.json", "w", encoding="utf-8") as f:
+            json.dump(sidecar_data, f, indent=2)
+
+        is_verified, method, matched_item = verify_manifest_provenance(
+            file_sha256=digest,
+            metadata_tags={"PRODUCT_ID": USGS_MOLA_HRSC_PRODUCT_ID},
+            file_path=dummy_tif,
+        )
+        assert is_verified is False
+        assert method == "unverified_sidecar_source_not_authenticated"
+        assert matched_item is None
+
+
+def test_official_endpoint_extract_remains_unverified_checksum_without_full_source():
+    """Test 2.5: Path 2b extract returns honest unverified status when full source is absent."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_copy = os.path.join(tmp_dir, "jezero_test_extract.tif")
+        digest, arr_sha = _copy_genuine_jezero_dem(dem_copy)
+
+        is_verified, method, matched = verify_manifest_provenance(
+            file_sha256=digest,
+            metadata_tags={},
+            file_path=dem_copy,
+        )
+        # Never claims full source checksum verified without the full 11.38 GB archive
+        assert is_verified is False
+        assert method == "official_endpoint_retrieved_checksum_unverified"
+        assert matched is not None
+        assert matched["id"] == USGS_MOLA_HRSC_PRODUCT_ID
+
+
+# ==============================================================================
+# SECTION 3: BUILD-TIME DEM PROVISIONING TESTS (8 tests)
+# ==============================================================================
+
+
 def test_01_build_provisioning_creates_geotiff_and_provenance_sidecar(monkeypatch):
+    """Test 3.1: Build provisioning creates both GeoTIFF and .provenance.json sidecar."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         source_tif = os.path.join(tmp_dir, "source_jezero_raw.tif")
         _create_source_geotiff_for_ingestion(source_tif)
@@ -168,23 +321,21 @@ def test_01_build_provisioning_creates_geotiff_and_provenance_sidecar(monkeypatc
         out_dem = os.path.join(tmp_dir, "built_jezero_dem.tif")
         sidecar = Path(f"{out_dem}.provenance.json")
 
-        env = _build_test_env(
-            tmp_dir,
-            out_dem,
-            source_path=source_tif,
-            manifest_up_md5=src_md5,
+        # Isolated in-memory manifest fixture for unit test execution
+        usgs_entry = next(
+            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
+        )
+        monkeypatch.setitem(usgs_entry, "upstream_md5", src_md5)
+
+        record = provision_runtime_dem(
+            dem_path=out_dem,
+            use_real_dem=True,
+            allow_fallback=False,
+            source_url_or_path=source_tif,
+            force=True,
         )
 
-        proc = subprocess.run(
-            ["bash", str(BUILD_SCRIPT)],
-            cwd=str(REPO_ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert proc.returncode == 0, f"Build script failed:\nSTDOUT: {proc.stdout}\nSTDERR: {proc.stderr}"
+        assert record["status"] == "provisioned_from_source"
         assert os.path.exists(out_dem), "Provisioned DEM raster was not created"
         assert os.path.getsize(out_dem) > 0, "Provisioned DEM raster is empty"
         assert sidecar.exists(), "Provenance sidecar was not created"
@@ -202,11 +353,15 @@ def test_01_build_provisioning_creates_geotiff_and_provenance_sidecar(monkeypatc
                 hasher.update(chunk)
         assert hasher.hexdigest().lower() == sidecar_data["local_file_sha256"].lower()
 
+        # Strict runtime verification must pass
+        v_res = verify_runtime_dem(
+            dem_path=out_dem, use_real_dem=True, allow_fallback=False
+        )
+        assert v_res["status"] == "verified_valid"
 
-# ==============================================================================
-# Test 2: Missing or unreachable upstream source causes build provisioning to fail nonzero
-# ==============================================================================
+
 def test_02_missing_or_unreachable_source_causes_build_provisioning_failure():
+    """Test 3.2: Missing or unreachable upstream source causes build provisioning to fail nonzero."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "failed_build.tif")
         bad_source = os.path.join(tmp_dir, "nonexistent_source_path.tif")
@@ -222,21 +377,24 @@ def test_02_missing_or_unreachable_source_causes_build_provisioning_failure():
             check=False,
         )
 
-        assert proc.returncode != 0, "Build script must exit nonzero on unreachable source"
+        assert (
+            proc.returncode != 0
+        ), "Build script must exit nonzero on unreachable source"
         assert not os.path.exists(out_dem), "Partial DEM must be cleaned up on failure"
-        assert not os.path.exists(f"{out_dem}.provenance.json"), "Partial sidecar must not exist"
+        assert not os.path.exists(
+            f"{out_dem}.provenance.json"
+        ), "Partial sidecar must not exist"
 
 
-# ==============================================================================
-# Test 3: Build provisioning fails closed: synthetic fallback cannot satisfy build
-# ==============================================================================
 def test_03_build_provisioning_fails_closed_against_synthetic_fallback():
+    """Test 3.3: Build provisioning fails closed: synthetic fallback cannot satisfy build."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "synthetic_forbidden.tif")
         bad_source = os.path.join(tmp_dir, "unreachable_source.tif")
 
-        # Explicitly attempt to pass allow_fallback="true" to build script
-        env = _build_test_env(tmp_dir, out_dem, source_path=bad_source, allow_fallback="true")
+        env = _build_test_env(
+            tmp_dir, out_dem, source_path=bad_source, allow_fallback="true"
+        )
 
         proc = subprocess.run(
             ["bash", str(BUILD_SCRIPT)],
@@ -247,44 +405,23 @@ def test_03_build_provisioning_fails_closed_against_synthetic_fallback():
             check=False,
         )
 
-        assert proc.returncode != 0, "Build provisioning must fail closed even if env had fallback=true"
-        assert not os.path.exists(out_dem), "Target raster must not be populated with synthetic data"
+        assert (
+            proc.returncode != 0
+        ), "Build provisioning must fail closed even if env had fallback=true"
+        assert not os.path.exists(
+            out_dem
+        ), "Target raster must not be populated with synthetic data"
 
 
-# ==============================================================================
-# Test 4: Existing valid artifact is reused without re-ingesting (idempotency)
-# ==============================================================================
-def test_04_existing_valid_artifact_reused_without_reingesting(monkeypatch):
+def test_04_existing_valid_artifact_reused_without_reingesting():
+    """Test 3.4: Existing valid artifact is reused without re-ingesting (idempotency)."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "existing_valid.tif")
-        digest, arr_sha = _write_sample_geotiff(out_dem, height=90, width=120, offset=-2565.0)
-
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-        )
-        monkeypatch.setitem(usgs_entry, "jezero_window_array_sha256", arr_sha)
-
-        sidecar_data = {
-            "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
-            "source_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
-            "ingestion_method": "official_endpoint_vsicurl_range_extract",
-            "validation_status": "official_endpoint_retrieved_checksum_unverified",
-            "source_checksum_verified": False,
-            "local_integrity_verified": True,
-            "local_file_sha256": digest,
-            "extracted_array_sha256": arr_sha,
-        }
-        with open(f"{out_dem}.provenance.json", "w", encoding="utf-8") as f:
-            json.dump(sidecar_data, f, indent=2)
+        _copy_genuine_jezero_dem(out_dem)
 
         # Point source to an unreachable path to prove no download/ingestion is attempted
         unreachable_source = os.path.join(tmp_dir, "should_never_be_touched.tif")
-        env = _build_test_env(
-            tmp_dir,
-            out_dem,
-            source_path=unreachable_source,
-            manifest_jezero_win_sha=arr_sha,
-        )
+        env = _build_test_env(tmp_dir, out_dem, source_path=unreachable_source)
 
         proc = subprocess.run(
             ["bash", str(BUILD_SCRIPT)],
@@ -295,15 +432,20 @@ def test_04_existing_valid_artifact_reused_without_reingesting(monkeypatch):
             check=False,
         )
 
-        assert proc.returncode == 0, f"Expected idempotency success:\n{proc.stdout}\n{proc.stderr}"
-        assert "already_provisioned_valid" in proc.stdout or "Skipping re-ingestion" in proc.stdout
-        assert "ALL BUILD-TIME DEM ARTIFACT INTEGRITY CHECKS PASSED" in proc.stdout
+        assert (
+            proc.returncode == 0
+        ), f"Expected idempotency success:\n{proc.stdout}\n{proc.stderr}"
+        assert (
+            "already_provisioned_valid" in proc.stdout
+            or "Skipping re-ingestion" in proc.stderr
+        )
+        assert (
+            "ALL BUILD-TIME DEM ARTIFACT INTEGRITY CHECKS PASSED" in proc.stdout
+        )
 
 
-# ==============================================================================
-# Test 5: Existing artifact with modified or tampered bytes fails integrity verification
-# ==============================================================================
 def test_05_tampered_artifact_bytes_fails_integrity_verification():
+    """Test 3.5: Existing artifact with modified or tampered bytes fails integrity verification."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "tampered.tif")
         digest, _ = _write_sample_geotiff(out_dem, height=90, width=120)
@@ -341,10 +483,8 @@ def test_05_tampered_artifact_bytes_fails_integrity_verification():
         assert proc.returncode != 0
 
 
-# ==============================================================================
-# Test 6: Missing provenance sidecar fails verification
-# ==============================================================================
 def test_06_missing_provenance_sidecar_fails_verification():
+    """Test 3.6: Missing provenance sidecar fails verification."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "no_sidecar.tif")
         _write_sample_geotiff(out_dem, height=90, width=120)
@@ -367,10 +507,8 @@ def test_06_missing_provenance_sidecar_fails_verification():
         assert proc.returncode != 0
 
 
-# ==============================================================================
-# Test 7: Unverified numerical terrain is rejected as degraded
-# ==============================================================================
 def test_07_unverified_numerical_terrain_rejected_as_degraded():
+    """Test 3.7: Unverified numerical terrain is rejected as degraded."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "unverified_numeric.tif")
         digest, _ = _write_sample_geotiff(out_dem, height=90, width=120)
@@ -415,13 +553,10 @@ def test_07_unverified_numerical_terrain_rejected_as_degraded():
             check=False,
         )
         assert proc.returncode != 0
-        assert "not in acceptable statuses" in proc.stderr or proc.returncode != 0
 
 
-# ==============================================================================
-# Test 8: Official endpoint extract with local_integrity_verified=True remains acceptable
-# ==============================================================================
 def test_08_official_endpoint_extract_unverified_checksum_remains_acceptable():
+    """Test 3.8: Official endpoint extract with local_integrity_verified=True remains acceptable."""
     readiness = evaluate_terrain_readiness(
         is_synthetic=False,
         provenance={
@@ -447,40 +582,23 @@ def test_08_official_endpoint_extract_unverified_checksum_remains_acceptable():
 
 
 # ==============================================================================
-# Test 9: Runtime startup reuses valid build artifact without remote requests
+# SECTION 4: RUNTIME VERIFICATION-ONLY TESTS (10 tests)
 # ==============================================================================
-def test_09_runtime_startup_reuses_valid_build_artifact_without_remote_requests(monkeypatch):
+
+
+def test_09_runtime_startup_reuses_valid_build_artifact_without_remote_requests():
+    """Test 4.1: Runtime startup reuses valid build artifact without remote requests."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dem = os.path.join(tmp_dir, "runtime_reused.tif")
-        digest, arr_sha = _write_sample_geotiff(out_dem, height=90, width=120, offset=-2565.0)
-
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-        )
-        monkeypatch.setitem(usgs_entry, "jezero_window_array_sha256", arr_sha)
-
-        sidecar_data = {
-            "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
-            "source_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
-            "ingestion_method": "official_endpoint_vsicurl_range_extract",
-            "validation_status": "official_endpoint_retrieved_checksum_unverified",
-            "source_checksum_verified": False,
-            "local_integrity_verified": True,
-            "local_file_sha256": digest,
-            "extracted_array_sha256": arr_sha,
-        }
-        with open(f"{out_dem}.provenance.json", "w", encoding="utf-8") as f:
-            json.dump(sidecar_data, f, indent=2)
+        _copy_genuine_jezero_dem(out_dem)
 
         # Point source to unreachable URL to ensure no network call is made
         env = _build_test_env(
             tmp_dir,
             out_dem,
             source_path="http://127.0.0.1:9/unreachable.tif",
-            manifest_jezero_win_sha=arr_sha,
         )
         env["MARSPATH_SKIP_UVICORN"] = "true"
-        env["MARSPATH_VERIFY_READINESS"] = "true"
 
         proc = subprocess.run(
             ["bash", str(START_SCRIPT)],
@@ -491,15 +609,16 @@ def test_09_runtime_startup_reuses_valid_build_artifact_without_remote_requests(
             check=False,
         )
 
-        assert proc.returncode == 0, f"Startup script failed:\n{proc.stdout}\n{proc.stderr}"
-        assert "already_provisioned_valid" in proc.stdout or "Skipping re-ingestion" in proc.stdout
-        assert "Real DEM artifact and provenance verified successfully" in proc.stdout
+        assert (
+            proc.returncode == 0
+        ), f"Startup script failed:\n{proc.stdout}\n{proc.stderr}"
+        assert "Running strict runtime DEM verification" in proc.stdout
+        assert "Runtime verification status: verified_valid" in proc.stdout
+        assert "MARSPATH_SKIP_UVICORN=true; pre-launch verification finished." in proc.stdout
 
 
-# ==============================================================================
-# Test 10: Runtime startup fails before Uvicorn when artifact is absent or invalid
-# ==============================================================================
 def test_10_runtime_startup_fails_before_uvicorn_when_artifact_absent_or_invalid():
+    """Test 4.2: Runtime startup fails before Uvicorn when artifact is absent or invalid."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         bin_dir, uvicorn_marker = _setup_fake_uvicorn(tmp_dir)
 
@@ -520,7 +639,9 @@ def test_10_runtime_startup_fails_before_uvicorn_when_artifact_absent_or_invalid
             check=False,
         )
         assert proc_a.returncode != 0
-        assert not os.path.exists(uvicorn_marker), "Uvicorn must not be launched when artifact is missing"
+        assert not os.path.exists(
+            uvicorn_marker
+        ), "Uvicorn must not be launched when artifact is missing"
 
         # Case B: Tampered bytes
         tampered_dem = os.path.join(tmp_dir, "tampered_runtime.tif")
@@ -553,7 +674,9 @@ def test_10_runtime_startup_fails_before_uvicorn_when_artifact_absent_or_invalid
             check=False,
         )
         assert proc_b.returncode != 0
-        assert not os.path.exists(uvicorn_marker), "Uvicorn must not be launched when artifact is corrupted"
+        assert not os.path.exists(
+            uvicorn_marker
+        ), "Uvicorn must not be launched when artifact is corrupted"
 
         # Case C: Unverified source status
         unverified_dem = os.path.join(tmp_dir, "unverified_runtime.tif")
@@ -584,35 +707,173 @@ def test_10_runtime_startup_fails_before_uvicorn_when_artifact_absent_or_invalid
             check=False,
         )
         assert proc_c.returncode != 0
-        assert not os.path.exists(uvicorn_marker), "Uvicorn must not be launched for unverified source"
+        assert not os.path.exists(
+            uvicorn_marker
+        ), "Uvicorn must not be launched for unverified source"
 
 
-# ==============================================================================
-# Test 11: /health reports HTTP 200 for acceptable real terrain
-# ==============================================================================
-def test_11_health_reports_200_for_acceptable_real_terrain(monkeypatch):
+def test_11_runtime_verification_reachable_mocked_upstream_causes_zero_requests():
+    """Test 4.3: Reachable mocked upstream source experiences ZERO requests during startup failure."""
+
+    class _CountingHTTPHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.server.request_count += 1
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"MOCK_DATA")
+
+        def do_HEAD(self):
+            self.server.request_count += 1
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass  # Suppress server logging during tests
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _CountingHTTPHandler)
+    httpd.request_count = 0
+    server_port = httpd.server_address[1]
+
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            missing_dem = os.path.join(tmp_dir, "missing_at_runtime.tif")
+            # Point to the live reachable mock HTTP server
+            source_url = (
+                f"http://127.0.0.1:{server_port}/Mars_HRSC_MOLA_BlendDEM.tif"
+            )
+
+            env = _build_test_env(
+                tmp_dir,
+                missing_dem,
+                source_path=source_url,
+                allow_fallback="false",
+            )
+
+            proc = subprocess.run(
+                ["bash", str(START_SCRIPT)],
+                cwd=str(REPO_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            # Startup must fail
+            assert proc.returncode != 0
+            # Zero network contact must be made: the mock server request count must be exactly 0
+            assert (
+                httpd.request_count == 0
+            ), f"Runtime startup made {httpd.request_count} network requests! Expected exactly 0."
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_12_runtime_verification_missing_artifact_fails():
+    """Test 4.4: verify_runtime_dem fails directly when DEM artifact is missing."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        nonexistent = os.path.join(tmp_dir, "missing_dem.tif")
+        with pytest.raises(RuntimeError) as exc_info:
+            verify_runtime_dem(
+                dem_path=nonexistent, use_real_dem=True, allow_fallback=False
+            )
+        assert "Runtime DEM raster missing" in str(exc_info.value)
+
+
+def test_13_runtime_verification_missing_sidecar_fails():
+    """Test 4.5: verify_runtime_dem fails directly when provenance sidecar is missing."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_file = os.path.join(tmp_dir, "no_sidecar.tif")
+        _write_sample_geotiff(dem_file, height=90, width=120)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            verify_runtime_dem(
+                dem_path=dem_file, use_real_dem=True, allow_fallback=False
+            )
+        assert "provenance sidecar missing" in str(exc_info.value)
+
+
+def test_14_runtime_verification_corrupted_local_sha256_fails():
+    """Test 4.6: verify_runtime_dem fails directly on local SHA-256 integrity mismatch."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_file = os.path.join(tmp_dir, "corrupt.tif")
+        _copy_genuine_jezero_dem(dem_file)
+
+        # Corrupt file bytes
+        with open(dem_file, "ab") as f:
+            f.write(b"EXTRA_CORRUPT_BYTES")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            verify_runtime_dem(
+                dem_path=dem_file, use_real_dem=True, allow_fallback=False
+            )
+        assert "local SHA-256 integrity verification failed" in str(exc_info.value)
+
+
+def test_15_runtime_verification_unacceptable_provenance_fails():
+    """Test 4.7: verify_runtime_dem fails directly on unverified provenance status."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_file = os.path.join(tmp_dir, "unverified_prov.tif")
+        digest, _ = _write_sample_geotiff(dem_file, height=90, width=120)
+        with open(f"{dem_file}.provenance.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "source_product_id": "unverified",
+                    "validation_status": "valid_numeric_raster_unverified_source",
+                    "local_integrity_verified": True,
+                    "local_file_sha256": digest,
+                },
+                f,
+            )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            verify_runtime_dem(
+                dem_path=dem_file, use_real_dem=True, allow_fallback=False
+            )
+        assert (
+            "Runtime DEM readiness gate failed" in str(exc_info.value)
+            or "unacceptable statuses" in str(exc_info.value)
+        )
+
+
+def test_16_runtime_verification_synthetic_development_mode_healthy():
+    """Test 4.8: Synthetic development mode (MARSPATH_USE_REAL_DEM=false) succeeds and reports healthy."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fake_dem = os.path.join(tmp_dir, "nonexistent.tif")
+
+        # In-process verification returns skipped status
+        res = verify_runtime_dem(
+            dem_path=fake_dem, use_real_dem=False, allow_fallback=False
+        )
+        assert res["status"] == "skipped_real_dem_disabled"
+        assert res["real_dem_requested"] is False
+        assert res["readiness_status"] == "healthy"
+
+        # start_render.sh with MARSPATH_USE_REAL_DEM=false exits 0
+        env = _build_test_env(tmp_dir, fake_dem, use_real_dem="false")
+        env["MARSPATH_SKIP_UVICORN"] = "true"
+        proc = subprocess.run(
+            ["bash", str(START_SCRIPT)],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0
+        assert "skipped_real_dem_disabled" in proc.stdout
+
+
+def test_17_health_endpoint_reports_200_for_acceptable_real_terrain(
+    monkeypatch,
+):
+    """Test 4.9: /health reports HTTP 200 for acceptable real terrain."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         dem_path = os.path.join(tmp_dir, "jezero_acceptable.tif")
-        digest, arr_sha = _write_sample_geotiff(dem_path, height=90, width=120, offset=-2565.0)
-
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-        )
-        monkeypatch.setitem(usgs_entry, "jezero_window_array_sha256", arr_sha)
-
-        sidecar_data = {
-            "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
-            "source_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
-            "published_upstream_md5": USGS_MOLA_HRSC_MD5,
-            "source_checksum_verified": False,
-            "local_integrity_verified": True,
-            "ingestion_method": "official_endpoint_vsicurl_range_extract",
-            "validation_status": "official_endpoint_retrieved_checksum_unverified",
-            "local_file_sha256": digest,
-            "extracted_array_sha256": arr_sha,
-        }
-        with open(f"{dem_path}.provenance.json", "w", encoding="utf-8") as f:
-            json.dump(sidecar_data, f, indent=2)
+        _copy_genuine_jezero_dem(dem_path)
 
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
         monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
@@ -632,14 +893,32 @@ def test_11_health_reports_200_for_acceptable_real_terrain(monkeypatch):
         assert body["blocking_errors"] == []
 
 
-# ==============================================================================
-# Test 12: /health reports HTTP 503 for unacceptable or synthetic production terrain
-# ==============================================================================
-def test_12_health_reports_503_for_unacceptable_or_synthetic_production_terrain(monkeypatch):
+def test_18_health_and_data_status_readiness_preserved(monkeypatch):
+    """Test 4.10: /health and /api/v1/data/status preserve Phase 7.1.1 readiness classifications."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         client = TestClient(app)
 
-        # 1. Synthetic fallback mode in production
+        # 1. Acceptable real terrain
+        dem_path = os.path.join(tmp_dir, "jezero_ok.tif")
+        _copy_genuine_jezero_dem(dem_path)
+
+        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
+        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
+        get_settings.cache_clear()
+
+        status_resp = client.get("/api/v1/data/status")
+        assert status_resp.status_code == 200
+        body = status_resp.json()
+        assert body["status"] == "healthy"
+        assert body["dem_loaded"] is True
+        assert body["local_integrity_verified"] is True
+        assert (
+            body["real_data_validation_status"]
+            == "official_endpoint_retrieved_checksum_unverified"
+        )
+
+        # 2. Synthetic fallback mode in production -> HTTP 503 degraded
         missing_dem = os.path.join(tmp_dir, "missing.tif")
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
         monkeypatch.setenv("MARSPATH_DEM_PATH", missing_dem)
@@ -652,7 +931,7 @@ def test_12_health_reports_503_for_unacceptable_or_synthetic_production_terrain(
         assert resp.json()["data_mode"] == "synthetic_fallback"
         assert resp.json()["real_dem_loaded"] is False
 
-        # 2. Unverified numerical terrain
+        # 3. Unverified numerical terrain -> HTTP 503 degraded
         unverified_dem = os.path.join(tmp_dir, "unverified.tif")
         u_digest, _ = _write_sample_geotiff(unverified_dem, height=90, width=120)
         with open(f"{unverified_dem}.provenance.json", "w", encoding="utf-8") as f:
@@ -675,70 +954,3 @@ def test_12_health_reports_503_for_unacceptable_or_synthetic_production_terrain(
         assert resp.status_code == 503
         assert resp.json()["status"] == "degraded"
         assert len(resp.json()["blocking_errors"]) > 0
-
-
-# ==============================================================================
-# Test 13: /api/v1/data/status preserves Phase 7.1.1 readiness classification
-# ==============================================================================
-def test_13_data_status_preserves_phase_7_1_1_readiness_classification(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        client = TestClient(app)
-
-        # 1. Acceptable real terrain
-        dem_path = os.path.join(tmp_dir, "jezero_ok.tif")
-        digest, arr_sha = _write_sample_geotiff(dem_path, height=90, width=120, offset=-2565.0)
-
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-        )
-        monkeypatch.setitem(usgs_entry, "jezero_window_array_sha256", arr_sha)
-
-        sidecar_data = {
-            "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
-            "source_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
-            "ingestion_method": "official_endpoint_vsicurl_range_extract",
-            "validation_status": "official_endpoint_retrieved_checksum_unverified",
-            "source_checksum_verified": False,
-            "local_integrity_verified": True,
-            "local_file_sha256": digest,
-            "extracted_array_sha256": arr_sha,
-        }
-        with open(f"{dem_path}.provenance.json", "w", encoding="utf-8") as f:
-            json.dump(sidecar_data, f, indent=2)
-
-        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
-        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
-        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
-        get_settings.cache_clear()
-
-        status_resp = client.get("/api/v1/data/status")
-        assert status_resp.status_code == 200
-        body = status_resp.json()
-        assert body["status"] == "healthy"
-        assert body["dem_loaded"] is True
-        assert body["local_integrity_verified"] is True
-        assert body["real_data_validation_status"] == "official_endpoint_retrieved_checksum_unverified"
-
-        # 2. Unverified numerical terrain
-        unverified_dem = os.path.join(tmp_dir, "unverified_data_status.tif")
-        u_digest, _ = _write_sample_geotiff(unverified_dem, height=90, width=120)
-        with open(f"{unverified_dem}.provenance.json", "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "source_product_id": "unverified",
-                    "validation_status": "valid_numeric_raster_unverified_source",
-                    "local_integrity_verified": True,
-                    "local_file_sha256": u_digest,
-                },
-                f,
-            )
-
-        monkeypatch.setenv("MARSPATH_DEM_PATH", unverified_dem)
-        get_settings.cache_clear()
-
-        status_resp = client.get("/api/v1/data/status")
-        assert status_resp.status_code == 200
-        body = status_resp.json()
-        assert body["status"] == "degraded"
-        assert body["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
-        assert len(body["blocking_errors"]) > 0

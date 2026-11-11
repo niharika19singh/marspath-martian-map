@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +27,7 @@ import numpy as np
 # Deterministic SHA-256 of the float32 elevation array for the Jezero Crater window
 # (col_off=76212, row_off=21131, width=252, height=178; 77.1485°E-77.9988°E, 18.1009°N-18.7015°N)
 # streamed from USGS Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif
-USGS_JEZERO_WINDOW_ARRAY_SHA256 = (
-    os.environ.get("MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256", "").strip().lower()
-    or "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
-)
+USGS_JEZERO_WINDOW_ARRAY_SHA256 = "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
 
 DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
     {
@@ -229,20 +225,6 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
     },
 ]
 
-# Apply optional environment overrides for test fixtures and subprocess isolation
-if os.environ.get("MARSPATH_MANIFEST_SHA256_OVERRIDE"):
-    DATA_CATALOG_MANIFEST[0]["sha256"] = (
-        os.environ["MARSPATH_MANIFEST_SHA256_OVERRIDE"].strip().lower()
-    )
-if os.environ.get("MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE"):
-    DATA_CATALOG_MANIFEST[0]["upstream_md5"] = (
-        os.environ["MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE"].strip().lower()
-    )
-if os.environ.get("MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256"):
-    DATA_CATALOG_MANIFEST[0]["jezero_window_array_sha256"] = (
-        os.environ["MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256"].strip().lower()
-    )
-
 
 def _compute_file_digest(filepath: str | Path, algo: str = "sha256") -> str:
     h = hashlib.new(algo)
@@ -300,6 +282,7 @@ def verify_manifest_provenance(
     file_sha256: str,
     metadata_tags: dict[str, str],
     file_path: str = "",
+    manifest: list[dict[str, Any]] | None = None,
 ) -> tuple[bool, str, dict[str, Any] | None]:
     """
     Evaluates whether a loaded raster matches an official NASA/ESA/USGS planetary product.
@@ -322,11 +305,12 @@ def verify_manifest_provenance(
        - Manually forged sidecar, unverified source MD5 string, self-asserted TIFF tags, or
          arbitrary local numeric rasters.
     """
+    effective_manifest = manifest if manifest is not None else DATA_CATALOG_MANIFEST
     clean_sha = file_sha256.lower().strip() if file_sha256 else ""
 
     # 1. Direct manifest SHA-256 match over loaded file bytes
     if clean_sha:
-        for item in DATA_CATALOG_MANIFEST:
+        for item in effective_manifest:
             manifest_sha = item.get("sha256")
             if manifest_sha and manifest_sha.lower().strip() == clean_sha:
                 return True, "authoritative_manifest_sha256_match", item
@@ -342,7 +326,7 @@ def verify_manifest_provenance(
         or ""
     ).upper()
     has_applicable_md5_candidate = False
-    for item in DATA_CATALOG_MANIFEST:
+    for item in effective_manifest:
         up_md5 = item.get("upstream_md5")
         if not up_md5:
             continue
@@ -361,7 +345,7 @@ def verify_manifest_provenance(
     if has_applicable_md5_candidate and file_path and Path(file_path).exists():
         try:
             file_md5 = _compute_file_digest(file_path, "md5")
-            for item in DATA_CATALOG_MANIFEST:
+            for item in effective_manifest:
                 up_md5 = item.get("upstream_md5")
                 if up_md5 and up_md5.lower().strip() == file_md5:
                     return True, "authoritative_manifest_md5_match", item
@@ -402,7 +386,7 @@ def verify_manifest_provenance(
                 ):
                     actual_src_md5 = _compute_file_digest(source_ref, "md5")
                     actual_src_sha256 = _compute_file_digest(source_ref, "sha256")
-                    for item in DATA_CATALOG_MANIFEST:
+                    for item in effective_manifest:
                         cat_md5 = str(item.get("upstream_md5") or "").lower().strip()
                         cat_sha = str(item.get("sha256") or "").lower().strip()
                         md5_ok = bool(cat_md5 and actual_src_md5 == cat_md5)
@@ -419,7 +403,7 @@ def verify_manifest_provenance(
                 if ingestion_method == "official_endpoint_vsicurl_range_extract":
                     actual_arr_sha = _compute_raster_array_sha256(fp)
                     sc_arr_sha = str(sc_data.get("extracted_array_sha256", "")).lower().strip()
-                    for item in DATA_CATALOG_MANIFEST:
+                    for item in effective_manifest:
                         expected_win_sha = str(item.get("jezero_window_array_sha256") or "").lower().strip()
                         if (
                             actual_arr_sha
@@ -442,7 +426,7 @@ def verify_manifest_provenance(
         norm_tags.get("PDS3_PRODUCT_ID", ""),
     ]
 
-    for item in DATA_CATALOG_MANIFEST:
+    for item in effective_manifest:
         auth_ids = [str(x).upper() for x in item.get("authoritative_product_ids", [])]
         item_id = item.get("id", "").upper()
         item_doi = item.get("pds_doi", "").upper()
