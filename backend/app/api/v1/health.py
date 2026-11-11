@@ -2,6 +2,7 @@ from fastapi import APIRouter, Response
 
 from backend.app.core.config import get_settings
 from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
+from backend.app.services.data_catalog import evaluate_terrain_readiness
 
 router = APIRouter(tags=["Health"])
 
@@ -11,10 +12,14 @@ def get_health(response: Response):
     """
     Returns service health, version, active environment,
     and scientific planetary data readiness status.
-    Separates API service availability from scientific data readiness:
-    - Case A: Real DEM requested and loaded (including official endpoint extract with
-      local_integrity_verified=True and source_checksum_verified=False) -> HTTP 200, status="healthy".
-    - Case B: Real DEM requested but synthetic fallback is active -> HTTP 503, status="degraded".
+    Separates API service availability from scientific data readiness using
+    the unified evaluate_terrain_readiness() gate:
+    - Case A: Real DEM requested and loaded with acceptable provenance
+      (verified_source or official_endpoint_retrieved_checksum_unverified with
+      local_integrity_verified=True) -> HTTP 200, status="healthy".
+    - Case B: Real DEM requested but unacceptable real-data readiness
+      (synthetic fallback, local_integrity_verified=False/None, or
+      valid_numeric_raster_unverified_source) -> HTTP 503, status="degraded".
     - Case C: Real DEM requested, unavailable, and fallback disabled -> raises TerrainDataUnavailableError (HTTP 503).
     - Case D: Local synthetic development mode (USE_REAL_DEM=false) -> HTTP 200, status="healthy".
     """
@@ -24,35 +29,25 @@ def get_health(response: Response):
     is_syn = provider.is_synthetic()
     prov = provider.get_provenance()
 
-    real_dem_requested = bool(prov.get("real_dem_requested", settings.USE_REAL_DEM))
-    real_dem_loaded = bool(prov.get("real_dem_loaded", not is_syn))
-    dem_loaded = not is_syn
-    data_mode = prov.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
-    fallback_reason = prov.get("fallback_reason")
-
-    is_degraded_fallback = bool(
-        real_dem_requested and (not real_dem_loaded or is_syn or data_mode == "synthetic_fallback")
+    readiness = evaluate_terrain_readiness(
+        is_synthetic=is_syn,
+        provenance=prov,
+        default_use_real_dem=bool(getattr(provider, "use_real_dem", settings.USE_REAL_DEM)),
+        dem_path=getattr(provider, "dem_path", None),
     )
-    if is_degraded_fallback:
-        response.status_code = 503
-        overall_status = "degraded"
-        data_mode = "synthetic_fallback"
-        real_dem_loaded = False
-        dem_loaded = False
-        is_syn = True
-        if not fallback_reason:
-            fallback_reason = (
-                f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but synthetic fallback is active "
-                f"at '{provider.dem_path}'."
-            )
-    else:
-        overall_status = "healthy"
 
-    blocking_errors = [fallback_reason] if fallback_reason else []
-    validation_status = prov.get(
-        "real_data_validation_status",
-        "incomplete_missing_genuine_dem" if is_degraded_fallback else "synthetic_test_fixture",
-    )
+    response.status_code = readiness["http_status_code"]
+    overall_status = readiness["status"]
+    dem_loaded = readiness["dem_loaded"]
+    real_dem_requested = readiness["real_dem_requested"]
+    real_dem_loaded = readiness["real_dem_loaded"]
+    is_syn = readiness["is_synthetic"]
+    data_mode = readiness["data_mode"]
+    validation_status = readiness["real_data_validation_status"]
+    local_integrity_verified = readiness["local_integrity_verified"]
+    source_checksum_verified = readiness["source_checksum_verified"]
+    fallback_reason = readiness["fallback_reason"]
+    blocking_errors = readiness["blocking_errors"]
 
     readiness_payload = {
         "status": overall_status,
@@ -62,8 +57,8 @@ def get_health(response: Response):
         "is_synthetic": is_syn,
         "data_mode": data_mode,
         "real_data_validation_status": validation_status,
-        "local_integrity_verified": prov.get("local_integrity_verified"),
-        "source_checksum_verified": bool(prov.get("source_checksum_verified", False)),
+        "local_integrity_verified": local_integrity_verified,
+        "source_checksum_verified": source_checksum_verified,
         "dem_resolution_meters": round(raster.metadata.meters_per_px_y, 1),
         "grid_shape": [raster.metadata.height, raster.metadata.width],
         "spatial_coverage": prov.get(
@@ -96,8 +91,8 @@ def get_health(response: Response):
         "is_synthetic": is_syn,
         "data_mode": data_mode,
         "real_data_validation_status": validation_status,
-        "local_integrity_verified": prov.get("local_integrity_verified"),
-        "source_checksum_verified": bool(prov.get("source_checksum_verified", False)),
+        "local_integrity_verified": local_integrity_verified,
+        "source_checksum_verified": source_checksum_verified,
         "fallback_reason": fallback_reason,
         "blocking_errors": blocking_errors,
         "data_readiness": readiness_payload,

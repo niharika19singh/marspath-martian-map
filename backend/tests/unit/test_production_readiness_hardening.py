@@ -1,16 +1,21 @@
 """
-Phase 7.1 — Production Fail-Closed Readiness Hardening Regression Suite.
+Phase 7.1.1 — Provenance Readiness Gate & Evidence Corrections Regression Suite.
 
-Covers all 8 required regression cases:
-1. Real DEM loaded, local integrity verified, upstream checksum unverified: /health returns 200 and real mode.
-2. Real DEM requested, synthetic fallback active: /health returns 503 and degraded readiness.
-3. Real DEM missing, fallback disabled: provider raises TerrainDataUnavailableError and the API returns 503.
-4. Runtime provisioning fails with fallback disabled (and default Render config is fail-closed):
-   startup provisioning exits nonzero and Uvicorn is not launched.
-5. Local synthetic development mode: /health remains available (200) and reports synthetic test data honestly.
-6. Data-status endpoint (/api/v1/data/status) does not report healthy when real terrain is requested but unavailable.
-7. Real-data route planning and provenance remain functional after the hardening changes.
-8. Real DEM mode does not require source_checksum_verified=true when official_endpoint_retrieved_checksum_unverified is present.
+Covers all 10 required readiness regression cases:
+1. Official endpoint extract, local integrity true, upstream checksum false: HTTP 200 and healthy.
+2. Verified source, local integrity true: HTTP 200 and healthy.
+3. Non-synthetic raster with local integrity false: HTTP 503 and degraded.
+4. Non-synthetic raster with local integrity null (missing sidecar): HTTP 503 and degraded.
+5. Non-synthetic raster with valid_numeric_raster_unverified_source: HTTP 503 and degraded.
+6. Synthetic fallback while real DEM requested: HTTP 503 and degraded.
+7. Real DEM unavailable with fallback disabled: preserve existing 503 exception behavior.
+8. Local synthetic development mode with real DEM disabled: HTTP 200 and explicitly synthetic.
+9. /api/v1/data/status mirrors readiness classification for all relevant cases.
+10. Real official-endpoint route planning and provenance remain functional.
+Extra:
+11. Startup fail-closed verification:
+    - MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false: provisioning failure exits nonzero and Uvicorn is not executed.
+    - MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true: provisioning continues with synthetic fallback, but /health returns 503/degraded.
 """
 
 import hashlib
@@ -34,26 +39,19 @@ from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
 from backend.app.main import app
 
 
-def _create_official_unverified_checksum_dem_fixture(tmp_dir: str, monkeypatch) -> str:
-    """
-    Create a valid Mars 2000 GeoTIFF and companion .provenance.json matching
-    an official-endpoint window extract (local_integrity_verified=True,
-    source_checksum_verified=False, validation_status='official_endpoint_retrieved_checksum_unverified').
-    """
-    dem_path = os.path.join(tmp_dir, "jezero_mola_hrsc_blended.tif")
-    # Create gently varying elevation around Jezero landing area (-2570 m to -2510 m)
-    height, width = 90, 120
+def _write_sample_geotiff(
+    path: str, height: int = 90, width: int = 120, offset: float = -2565.0
+) -> tuple[str, str]:
+    """Writes a valid numerical Mars 2000 GeoTIFF over Jezero Crater and returns (file_sha256, array_sha256)."""
     y_idx, x_idx = np.meshgrid(
         np.linspace(0.0, 1.0, height), np.linspace(0.0, 1.0, width), indexing="ij"
     )
-    elev = (-2565.0 + 35.0 * x_idx + 20.0 * y_idx).astype(np.int16)
-
-    # Covers 77.0E to 78.2E, 18.08N to 18.80N
+    elev = (offset + 35.0 * x_idx + 20.0 * y_idx).astype(np.int16)
     transform = from_origin(77.0, 18.80, 0.01, 0.008)
     crs_str = "+proj=longlat +R=3396190 +no_defs"
 
     with rasterio.open(
-        dem_path,
+        path,
         "w",
         driver="GTiff",
         height=height,
@@ -67,12 +65,18 @@ def _create_official_unverified_checksum_dem_fixture(tmp_dir: str, monkeypatch) 
         dst.write(elev, 1)
 
     sha256_hash = hashlib.sha256()
-    with open(dem_path, "rb") as f:
+    with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
             sha256_hash.update(chunk)
     digest = sha256_hash.hexdigest()
-    file_size = os.path.getsize(dem_path)
-    arr_sha = _compute_raster_array_sha256(dem_path)
+    arr_sha = _compute_raster_array_sha256(path)
+    return digest, arr_sha
+
+
+def _create_official_unverified_checksum_dem_fixture(tmp_dir: str, monkeypatch) -> str:
+    """Case 1 & 10: Official endpoint extract, local integrity True, upstream checksum False."""
+    dem_path = os.path.join(tmp_dir, "jezero_mola_hrsc_blended.tif")
+    digest, arr_sha = _write_sample_geotiff(dem_path, height=90, width=120, offset=-2565.0)
 
     usgs_entry = next(
         p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
@@ -90,16 +94,16 @@ def _create_official_unverified_checksum_dem_fixture(tmp_dir: str, monkeypatch) 
         "validation_status": "official_endpoint_retrieved_checksum_unverified",
         "local_file_sha256": digest,
         "extracted_array_sha256": arr_sha,
-        "file_size_bytes": file_size,
-        "crs": crs_str,
+        "file_size_bytes": os.path.getsize(dem_path),
+        "crs": "+proj=longlat +R=3396190 +no_defs",
         "window_bounds": {
             "min_lon": 77.0,
             "min_lat": 18.08,
             "max_lon": 78.2,
             "max_lat": 18.8,
         },
-        "width": width,
-        "height": height,
+        "width": 120,
+        "height": 90,
         "nodata": -32768.0,
         "ingested_at_utc": "2026-11-10T13:15:46.303771+00:00",
     }
@@ -109,12 +113,89 @@ def _create_official_unverified_checksum_dem_fixture(tmp_dir: str, monkeypatch) 
     return dem_path
 
 
-def test_case_1_real_dem_loaded_unverified_upstream_checksum_returns_200_healthy(monkeypatch):
-    """
-    Regression Case 1:
-    Real DEM loaded, local integrity verified, upstream checksum unverified:
-    /health returns 200 and real mode ('real_official_endpoint_unverified_checksum').
-    """
+def _create_verified_source_dem_fixture(tmp_dir: str, monkeypatch) -> str:
+    """Case 2: Full source verified via manifest SHA-256 match, local integrity True."""
+    dem_path = os.path.join(tmp_dir, "jezero_verified_source.tif")
+    digest, _ = _write_sample_geotiff(dem_path, height=91, width=121, offset=-2560.0)
+
+    usgs_entry = next(
+        p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
+    )
+    monkeypatch.setitem(usgs_entry, "sha256", digest)
+
+    provenance_record = {
+        "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
+        "source_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
+        "source_checksum_verified": True,
+        "local_integrity_verified": True,
+        "validation_status": "verified_source",
+        "local_file_sha256": digest,
+    }
+    with open(f"{dem_path}.provenance.json", "w", encoding="utf-8") as pf:
+        json.dump(provenance_record, pf, indent=2)
+
+    return dem_path
+
+
+def _create_local_integrity_false_fixture(tmp_dir: str) -> str:
+    """Case 3: Non-synthetic raster with tampered bytes or mismatched sidecar (local_integrity_verified=False)."""
+    dem_path = os.path.join(tmp_dir, "jezero_integrity_fail.tif")
+    _write_sample_geotiff(dem_path, height=92, width=122, offset=-2555.0)
+
+    provenance_record = {
+        "source_product_id": USGS_MOLA_HRSC_PRODUCT_ID,
+        "source_url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif",
+        "local_file_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "validation_status": "verified_source",
+        "source_checksum_verified": True,
+    }
+    with open(f"{dem_path}.provenance.json", "w", encoding="utf-8") as pf:
+        json.dump(provenance_record, pf, indent=2)
+
+    return dem_path
+
+
+def _create_local_integrity_null_fixture(tmp_dir: str) -> str:
+    """Case 4: Non-synthetic raster with missing sidecar (local_integrity_verified=None/null)."""
+    dem_path = os.path.join(tmp_dir, "jezero_no_sidecar.tif")
+    _write_sample_geotiff(dem_path, height=93, width=123, offset=-2550.0)
+    return dem_path
+
+
+def _create_unverified_source_raster_fixture(tmp_dir: str) -> str:
+    """Case 5: Non-synthetic raster with valid local sidecar but unverified source provenance."""
+    dem_path = os.path.join(tmp_dir, "jezero_unverified_source.tif")
+    digest, _ = _write_sample_geotiff(dem_path, height=94, width=124, offset=-2545.0)
+
+    provenance_record = {
+        "source_product_id": "unverified_local_model",
+        "source_url": "arbitrary_unauthenticated_file.tif",
+        "local_file_sha256": digest,
+        "source_checksum_verified": False,
+        "validation_status": "valid_numeric_raster_unverified_source",
+    }
+    with open(f"{dem_path}.provenance.json", "w", encoding="utf-8") as pf:
+        json.dump(provenance_record, pf, indent=2)
+
+    return dem_path
+
+    provenance_record = {
+        "source_product_id": "unverified_local_model",
+        "source_url": "arbitrary_unauthenticated_file.tif",
+        "local_file_sha256": digest,
+        "source_checksum_verified": False,
+        "validation_status": "valid_numeric_raster_unverified_source",
+    }
+    with open(f"{dem_path}.provenance.json", "w", encoding="utf-8") as pf:
+        json.dump(provenance_record, pf, indent=2)
+
+    return dem_path
+
+
+# ==============================================================================
+# Case 1: Official endpoint extract, local integrity True, upstream checksum False -> 200 & healthy
+# ==============================================================================
+def test_case_1_official_endpoint_extract_local_integrity_true_returns_200_healthy(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         dem_path = _create_official_unverified_checksum_dem_fixture(tmp_dir, monkeypatch)
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
@@ -136,63 +217,189 @@ def test_case_1_real_dem_loaded_unverified_upstream_checksum_returns_200_healthy
             assert body["real_data_validation_status"] == "official_endpoint_retrieved_checksum_unverified"
             assert body["local_integrity_verified"] is True
             assert body["source_checksum_verified"] is False
-            assert body["fallback_reason"] is None
             assert body["blocking_errors"] == []
 
-            readiness = body["data_readiness"]
-            assert readiness["status"] == "healthy"
-            assert readiness["real_dem_loaded"] is True
-            assert readiness["is_synthetic"] is False
-            assert readiness["local_integrity_verified"] is True
-            assert readiness["source_checksum_verified"] is False
+            status_resp = client.get("/api/v1/data/status")
+            assert status_resp.status_code == 200
+            st = status_resp.json()
+            assert st["status"] == "healthy"
+            assert st["real_dem_requested"] is True
+            assert st["real_dem_loaded"] is True
+            assert st["dem_loaded"] is True
+            assert st["is_synthetic"] is False
+            assert st["data_mode"] == "real_official_endpoint_unverified_checksum"
+            assert st["local_integrity_verified"] is True
+            assert st["source_checksum_verified"] is False
+            assert st["blocking_errors"] == []
         finally:
             get_settings.cache_clear()
 
 
-def test_case_8_real_dem_mode_does_not_require_source_checksum_verified_for_official_endpoint(monkeypatch):
-    """
-    Regression Case 8:
-    The real DEM mode does not require source_checksum_verified=true when the correct
-    intermediate official-endpoint validation status ('official_endpoint_retrieved_checksum_unverified')
-    is present.
-    """
+# ==============================================================================
+# Case 2: Verified source, local integrity True -> 200 & healthy
+# ==============================================================================
+def test_case_2_verified_source_local_integrity_true_returns_200_healthy(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
-        dem_path = _create_official_unverified_checksum_dem_fixture(tmp_dir, monkeypatch)
+        dem_path = _create_verified_source_dem_fixture(tmp_dir, monkeypatch)
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
         monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
         monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
         get_settings.cache_clear()
 
         try:
-            provider = MOLAHRSCRasterProvider(dem_path=dem_path)
-            prov = provider.get_provenance()
-            assert prov["is_synthetic"] is False
-            assert prov["source_checksum_verified"] is False
-            assert prov["local_integrity_verified"] is True
-            assert prov["real_data_validation_status"] == "official_endpoint_retrieved_checksum_unverified"
-            assert prov["data_mode"] == "real_official_endpoint_unverified_checksum"
-
             client = TestClient(app)
-            health_resp = client.get("/health")
-            assert health_resp.status_code == 200
-            assert health_resp.json()["status"] == "healthy"
-            assert health_resp.json()["source_checksum_verified"] is False
+            resp = client.get("/health")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["status"] == "healthy"
+            assert body["real_dem_requested"] is True
+            assert body["real_dem_loaded"] is True
+            assert body["dem_loaded"] is True
+            assert body["is_synthetic"] is False
+            assert body["data_mode"] == "real"
+            assert body["real_data_validation_status"] == "verified_source"
+            assert body["local_integrity_verified"] is True
+            assert body["source_checksum_verified"] is True
+            assert body["blocking_errors"] == []
 
             status_resp = client.get("/api/v1/data/status")
             assert status_resp.status_code == 200
-            assert status_resp.json()["status"] == "healthy"
-            assert status_resp.json()["source_checksum_verified"] is False
-            assert status_resp.json()["real_dem_loaded"] is True
+            st = status_resp.json()
+            assert st["status"] == "healthy"
+            assert st["real_dem_requested"] is True
+            assert st["real_dem_loaded"] is True
+            assert st["dem_loaded"] is True
+            assert st["is_synthetic"] is False
+            assert st["data_mode"] == "real"
+            assert st["real_data_validation_status"] == "verified_source"
+            assert st["local_integrity_verified"] is True
+            assert st["source_checksum_verified"] is True
+            assert st["blocking_errors"] == []
         finally:
             get_settings.cache_clear()
 
 
-def test_case_2_real_dem_requested_synthetic_fallback_active_returns_503_degraded(monkeypatch):
-    """
-    Regression Case 2:
-    Real DEM requested (USE_REAL_DEM=true), synthetic fallback active (ALLOW_SYNTHETIC_FALLBACK=true,
-    missing real DEM): /health returns HTTP 503 and degraded readiness.
-    """
+# ==============================================================================
+# Case 3: Non-synthetic raster with local integrity False -> 503 & degraded
+# ==============================================================================
+def test_case_3_non_synthetic_raster_local_integrity_false_returns_503_degraded(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_path = _create_local_integrity_false_fixture(tmp_dir)
+        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
+        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
+        get_settings.cache_clear()
+
+        try:
+            client = TestClient(app)
+            resp = client.get("/health")
+            assert resp.status_code == 503
+            body = resp.json()
+            assert body["status"] == "degraded"
+            assert body["real_dem_requested"] is True
+            assert body["real_dem_loaded"] is True
+            assert body["dem_loaded"] is True
+            assert body["is_synthetic"] is False
+            assert body["local_integrity_verified"] is False
+            assert len(body["blocking_errors"]) >= 1
+            assert any("integrity" in err.lower() for err in body["blocking_errors"])
+
+            status_resp = client.get("/api/v1/data/status")
+            assert status_resp.status_code == 200
+            st = status_resp.json()
+            assert st["status"] == "degraded"
+            assert st["real_dem_requested"] is True
+            assert st["real_dem_loaded"] is True
+            assert st["dem_loaded"] is True
+            assert st["is_synthetic"] is False
+            assert st["local_integrity_verified"] is False
+            assert len(st["blocking_errors"]) >= 1
+        finally:
+            get_settings.cache_clear()
+
+
+# ==============================================================================
+# Case 4: Non-synthetic raster with local integrity null -> 503 & degraded
+# ==============================================================================
+def test_case_4_non_synthetic_raster_local_integrity_null_returns_503_degraded(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_path = _create_local_integrity_null_fixture(tmp_dir)
+        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
+        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
+        get_settings.cache_clear()
+
+        try:
+            client = TestClient(app)
+            resp = client.get("/health")
+            assert resp.status_code == 503
+            body = resp.json()
+            assert body["status"] == "degraded"
+            assert body["real_dem_requested"] is True
+            assert body["real_dem_loaded"] is True
+            assert body["dem_loaded"] is True
+            assert body["is_synthetic"] is False
+            assert body["local_integrity_verified"] is None
+            assert len(body["blocking_errors"]) >= 1
+
+            status_resp = client.get("/api/v1/data/status")
+            assert status_resp.status_code == 200
+            st = status_resp.json()
+            assert st["status"] == "degraded"
+            assert st["real_dem_requested"] is True
+            assert st["real_dem_loaded"] is True
+            assert st["dem_loaded"] is True
+            assert st["is_synthetic"] is False
+            assert st["local_integrity_verified"] is None
+            assert len(st["blocking_errors"]) >= 1
+        finally:
+            get_settings.cache_clear()
+
+
+# ==============================================================================
+# Case 5: Non-synthetic raster with valid_numeric_raster_unverified_source -> 503 & degraded
+# ==============================================================================
+def test_case_5_non_synthetic_raster_unverified_source_returns_503_degraded(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        dem_path = _create_unverified_source_raster_fixture(tmp_dir)
+        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_path)
+        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
+        get_settings.cache_clear()
+
+        try:
+            client = TestClient(app)
+            resp = client.get("/health")
+            assert resp.status_code == 503
+            body = resp.json()
+            assert body["status"] == "degraded"
+            assert body["real_dem_requested"] is True
+            assert body["real_dem_loaded"] is True
+            assert body["dem_loaded"] is True
+            assert body["is_synthetic"] is False
+            assert body["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+            assert body["local_integrity_verified"] is True
+            assert len(body["blocking_errors"]) >= 1
+            assert any("provenance" in err.lower() or "validation status" in err.lower() for err in body["blocking_errors"])
+
+            status_resp = client.get("/api/v1/data/status")
+            assert status_resp.status_code == 200
+            st = status_resp.json()
+            assert st["status"] == "degraded"
+            assert st["real_dem_requested"] is True
+            assert st["real_dem_loaded"] is True
+            assert st["dem_loaded"] is True
+            assert st["is_synthetic"] is False
+            assert st["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
+            assert len(st["blocking_errors"]) >= 1
+        finally:
+            get_settings.cache_clear()
+
+
+# ==============================================================================
+# Case 6: Synthetic fallback while real DEM requested -> 503 & degraded
+# ==============================================================================
+def test_case_6_synthetic_fallback_while_real_dem_requested_returns_503_degraded(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         missing_dem = os.path.join(tmp_dir, "missing_real_dem.tif")
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
@@ -214,25 +421,25 @@ def test_case_2_real_dem_requested_synthetic_fallback_active_returns_503_degrade
             assert body["fallback_reason"] is not None
             assert len(body["blocking_errors"]) >= 1
 
-            readiness = body["data_readiness"]
-            assert readiness["status"] == "degraded"
-            assert readiness["real_dem_requested"] is True
-            assert readiness["real_dem_loaded"] is False
-            assert readiness["dem_loaded"] is False
-            assert readiness["is_synthetic"] is True
-            assert readiness["data_mode"] == "synthetic_fallback"
-            assert readiness["fallback_reason"] is not None
-            assert len(readiness["blocking_errors"]) >= 1
+            status_resp = client.get("/api/v1/data/status")
+            assert status_resp.status_code == 200
+            st = status_resp.json()
+            assert st["status"] == "degraded"
+            assert st["real_dem_requested"] is True
+            assert st["real_dem_loaded"] is False
+            assert st["dem_loaded"] is False
+            assert st["is_synthetic"] is True
+            assert st["data_mode"] == "synthetic_fallback"
+            assert st["fallback_reason"] is not None
+            assert len(st["blocking_errors"]) >= 1
         finally:
             get_settings.cache_clear()
 
 
-def test_case_3_real_dem_missing_fallback_disabled_raises_503(monkeypatch):
-    """
-    Regression Case 3:
-    Real DEM missing, fallback disabled: provider raises TerrainDataUnavailableError
-    and the API returns HTTP 503 across /health, /api/v1/data/status, /api/v1/layers, and /api/v1/routes/plan.
-    """
+# ==============================================================================
+# Case 7: Real DEM unavailable with fallback disabled -> 503 exception
+# ==============================================================================
+def test_case_7_real_dem_unavailable_fallback_disabled_raises_503(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         missing_dem = os.path.join(tmp_dir, "missing_real_dem.tif")
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
@@ -271,64 +478,10 @@ def test_case_3_real_dem_missing_fallback_disabled_raises_503(monkeypatch):
             get_settings.cache_clear()
 
 
-def test_case_4_runtime_provisioning_fails_closed_by_default():
-    """
-    Regression Case 4:
-    - Verify render.yaml configures MARSPATH_ALLOW_SYNTHETIC_FALLBACK="false".
-    - Verify start_render.sh defaults MARSPATH_ALLOW_SYNTHETIC_FALLBACK to "false" when unset,
-      exits nonzero when provisioning fails, and never launches Uvicorn.
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    render_yaml_path = repo_root / "render.yaml"
-    render_yaml_text = render_yaml_path.read_text(encoding="utf-8")
-    assert "key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: \"false\"" in render_yaml_text
-    assert "key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: \"true\"" not in render_yaml_text
-
-    script_path = repo_root / "backend" / "scripts" / "start_render.sh"
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        missing_dem = os.path.join(tmp_dir, "missing_dem.tif")
-        missing_source = os.path.join(tmp_dir, "nonexistent_source.tif")
-        uvicorn_marker = os.path.join(tmp_dir, "uvicorn_was_launched.txt")
-
-        # Create a fake 'uvicorn' binary in PATH that writes a marker file if executed
-        fake_bin_dir = os.path.join(tmp_dir, "bin")
-        os.makedirs(fake_bin_dir, exist_ok=True)
-        fake_uvicorn = os.path.join(fake_bin_dir, "uvicorn")
-        with open(fake_uvicorn, "w", encoding="utf-8") as f:
-            f.write(f"#!/usr/bin/env bash\necho 'launched' > '{uvicorn_marker}'\nexit 0\n")
-        os.chmod(fake_uvicorn, 0o755)
-
-        env = os.environ.copy()
-        # Ensure MARSPATH_ALLOW_SYNTHETIC_FALLBACK is unset so start_render.sh uses its default ('false')
-        env.pop("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", None)
-        env.pop("MARSPATH_SKIP_UVICORN", None)
-        env.update(
-            {
-                "PATH": f"{fake_bin_dir}:{env.get('PATH', '')}",
-                "MARSPATH_USE_REAL_DEM": "true",
-                "MARSPATH_DEM_PATH": missing_dem,
-                "MARSPATH_INGESTION_SOURCE": missing_source,
-            }
-        )
-
-        proc = subprocess.run(
-            ["bash", str(script_path)],
-            cwd=str(repo_root),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert proc.returncode != 0
-        assert not os.path.exists(uvicorn_marker), "Uvicorn must NOT launch when provisioning fails with fallback disabled"
-
-
-def test_case_5_local_synthetic_development_mode_returns_200_healthy(monkeypatch):
-    """
-    Regression Case 5:
-    Local synthetic development mode (USE_REAL_DEM=false): /health remains available (HTTP 200)
-    and reports synthetic test data honestly (data_mode='synthetic_test_fixture').
-    """
+# ==============================================================================
+# Case 8: Local synthetic development mode (USE_REAL_DEM=false) -> 200 & explicitly synthetic
+# ==============================================================================
+def test_case_8_local_synthetic_development_mode_returns_200_healthy(monkeypatch):
     monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "false")
     monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true")
     get_settings.cache_clear()
@@ -344,6 +497,9 @@ def test_case_5_local_synthetic_development_mode_returns_200_healthy(monkeypatch
         assert body["dem_loaded"] is False
         assert body["is_synthetic"] is True
         assert body["data_mode"] == "synthetic_test_fixture"
+        assert body["real_data_validation_status"] == "synthetic_test_fixture"
+        assert body["local_integrity_verified"] is None
+        assert body["source_checksum_verified"] is False
         assert body["fallback_reason"] is None
         assert body["blocking_errors"] == []
 
@@ -351,48 +507,70 @@ def test_case_5_local_synthetic_development_mode_returns_200_healthy(monkeypatch
         assert status_resp.status_code == 200
         st = status_resp.json()
         assert st["status"] == "healthy"
-        assert st["data_mode"] == "synthetic_test_fixture"
+        assert st["real_dem_requested"] is False
         assert st["is_synthetic"] is True
+        assert st["data_mode"] == "synthetic_test_fixture"
+        assert st["real_data_validation_status"] == "synthetic_test_fixture"
+        assert st["blocking_errors"] == []
     finally:
         get_settings.cache_clear()
 
 
-def test_case_6_data_status_endpoint_reports_degraded_when_real_terrain_unavailable(monkeypatch):
-    """
-    Regression Case 6:
-    /api/v1/data/status does not report 'healthy' when real terrain is requested
-    but unavailable (returns status='degraded' when synthetic fallback is active).
-    """
+# ==============================================================================
+# Case 9: /api/v1/data/status mirrors readiness classification across all states
+# ==============================================================================
+def test_case_9_data_status_mirrors_readiness_classification_for_all_cases(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
-        missing_dem = os.path.join(tmp_dir, "missing_dem.tif")
+        usgs_entry = next(
+            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
+        )
+
+        # State A: Acceptable official extract -> healthy
+        dem_a = _create_official_unverified_checksum_dem_fixture(tmp_dir, monkeypatch)
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
-        monkeypatch.setenv("MARSPATH_DEM_PATH", missing_dem)
-        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true")
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_a)
+        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "false")
         get_settings.cache_clear()
+        client = TestClient(app)
+        assert client.get("/api/v1/data/status").json()["status"] == "healthy"
 
-        try:
-            client = TestClient(app)
-            resp = client.get("/api/v1/data/status")
-            assert resp.status_code == 200
-            st = resp.json()
-            assert st["status"] == "degraded"
-            assert st["status"] != "healthy"
-            assert st["real_dem_requested"] is True
-            assert st["real_dem_loaded"] is False
-            assert st["dem_loaded"] is False
-            assert st["is_synthetic"] is True
-            assert st["data_mode"] == "synthetic_fallback"
-            assert st["fallback_reason"] is not None
-            assert len(st["blocking_errors"]) >= 1
-        finally:
-            get_settings.cache_clear()
+        # State B: Verified source -> healthy
+        dem_b = _create_verified_source_dem_fixture(tmp_dir, monkeypatch)
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_b)
+        get_settings.cache_clear()
+        assert client.get("/api/v1/data/status").json()["status"] == "healthy"
+
+        # Reset manifest sha256 so it cannot match non-verified states
+        monkeypatch.setitem(usgs_entry, "sha256", None)
+
+        # State C: Integrity False -> degraded
+        dem_c = _create_local_integrity_false_fixture(tmp_dir)
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_c)
+        get_settings.cache_clear()
+        assert client.get("/api/v1/data/status").json()["status"] == "degraded"
+
+        # State D: Integrity null -> degraded
+        dem_d = _create_local_integrity_null_fixture(tmp_dir)
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_d)
+        get_settings.cache_clear()
+        assert client.get("/api/v1/data/status").json()["status"] == "degraded"
+
+        # State E: Unverified source -> degraded
+        dem_e = _create_unverified_source_raster_fixture(tmp_dir)
+        monkeypatch.setenv("MARSPATH_DEM_PATH", dem_e)
+        get_settings.cache_clear()
+        assert client.get("/api/v1/data/status").json()["status"] == "degraded"
+
+        # State F: Synthetic development mode -> healthy
+        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "false")
+        get_settings.cache_clear()
+        assert client.get("/api/v1/data/status").json()["status"] == "healthy"
 
 
-def test_case_7_real_data_route_planning_and_provenance_remain_functional(monkeypatch):
-    """
-    Regression Case 7:
-    Real-data route planning and provenance remain functional after the hardening changes.
-    """
+# ==============================================================================
+# Case 10: Real official-endpoint route planning and provenance remain functional
+# ==============================================================================
+def test_case_10_real_official_endpoint_route_planning_and_provenance_functional(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         dem_path = _create_official_unverified_checksum_dem_fixture(tmp_dir, monkeypatch)
         monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
@@ -402,22 +580,6 @@ def test_case_7_real_data_route_planning_and_provenance_remain_functional(monkey
 
         try:
             client = TestClient(app)
-            # Check /api/v1/data/status in real mode
-            status_resp = client.get("/api/v1/data/status")
-            assert status_resp.status_code == 200
-            st = status_resp.json()
-            assert st["status"] == "healthy"
-            assert st["real_dem_requested"] is True
-            assert st["real_dem_loaded"] is True
-            assert st["dem_loaded"] is True
-            assert st["is_synthetic"] is False
-            assert st["data_mode"] == "real_official_endpoint_unverified_checksum"
-            assert st["real_data_validation_status"] == "official_endpoint_retrieved_checksum_unverified"
-            assert st["local_integrity_verified"] is True
-            assert st["source_checksum_verified"] is False
-            assert st["blocking_errors"] == []
-
-            # Plan a route in real DEM mode
             route_resp = client.post(
                 "/api/v1/routes/plan",
                 json={
@@ -443,3 +605,93 @@ def test_case_7_real_data_route_planning_and_provenance_remain_functional(monkey
             assert prov["official_product_id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
         finally:
             get_settings.cache_clear()
+
+
+# ==============================================================================
+# Startup fail-closed behavior test: tests both explicit fallback values
+# ==============================================================================
+def test_startup_fail_closed_behavior_both_fallback_values(monkeypatch):
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[3]
+    render_yaml_path = repo_root / "render.yaml"
+    render_yaml_text = render_yaml_path.read_text(encoding="utf-8")
+    assert "key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: \"false\"" in render_yaml_text
+    assert "key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: \"true\"" not in render_yaml_text
+
+    script_path = repo_root / "backend" / "scripts" / "start_render.sh"
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        missing_dem = os.path.join(tmp_dir, "missing_dem.tif")
+        missing_source = os.path.join(tmp_dir, "nonexistent_source.tif")
+        uvicorn_marker = os.path.join(tmp_dir, "uvicorn_was_launched.txt")
+
+        # Fake 'python3' binary that intercepts '-m uvicorn' without leaving a hung daemon
+        fake_bin_dir = os.path.join(tmp_dir, "bin")
+        os.makedirs(fake_bin_dir, exist_ok=True)
+        fake_python = os.path.join(fake_bin_dir, "python3")
+        real_python = sys.executable
+        with open(fake_python, "w", encoding="utf-8") as f:
+            f.write(
+                f"#!/usr/bin/env bash\n"
+                f'if [[ "$*" == *"-m uvicorn"* ]]; then\n'
+                f'    echo "launched" > "{uvicorn_marker}"\n'
+                f"    exit 0\n"
+                f"fi\n"
+                f'exec "{real_python}" "$@"\n'
+            )
+        os.chmod(fake_python, 0o755)
+
+        base_env = os.environ.copy()
+        base_env.pop("MARSPATH_SKIP_UVICORN", None)
+        base_env.update(
+            {
+                "PATH": f"{fake_bin_dir}:{base_env.get('PATH', '')}",
+                "MARSPATH_USE_REAL_DEM": "true",
+                "MARSPATH_DEM_PATH": missing_dem,
+                "MARSPATH_INGESTION_SOURCE": missing_source,
+            }
+        )
+
+        # 1. Fallback disabled (default unset, or explicitly "false"): exits non-zero and Uvicorn NEVER launched
+        for fb_val in (None, "false"):
+            env = base_env.copy()
+            if fb_val is None:
+                env.pop("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", None)
+            else:
+                env["MARSPATH_ALLOW_SYNTHETIC_FALLBACK"] = fb_val
+
+            proc = subprocess.run(
+                ["bash", str(script_path)],
+                cwd=str(repo_root),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert proc.returncode != 0
+            assert not os.path.exists(uvicorn_marker), "Uvicorn must NOT launch when provisioning fails with fallback disabled"
+
+        # 2. Fallback explicitly enabled ("true"): provisioning continues, reaches Uvicorn execution, and /health returns 503/degraded
+        env_fallback = base_env.copy()
+        env_fallback["MARSPATH_ALLOW_SYNTHETIC_FALLBACK"] = "true"
+        proc_fallback = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=str(repo_root),
+            env=env_fallback,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc_fallback.returncode == 0
+        assert os.path.exists(uvicorn_marker), "Uvicorn execution should be reached when fallback is enabled"
+
+        # Verify that in this fallback state, /health indeed returns 503 and degraded
+        monkeypatch.setenv("MARSPATH_USE_REAL_DEM", "true")
+        monkeypatch.setenv("MARSPATH_DEM_PATH", missing_dem)
+        monkeypatch.setenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true")
+        get_settings.cache_clear()
+        client = TestClient(app)
+        health_resp = client.get("/health")
+        assert health_resp.status_code == 503
+        assert health_resp.json()["status"] == "degraded"
+        assert health_resp.json()["data_mode"] == "synthetic_fallback"

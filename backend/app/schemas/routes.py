@@ -1084,7 +1084,7 @@ class DataStatusResponse(BaseModel):
 
     status: str = Field(
         default="healthy",
-        description="Operational readiness status: 'healthy' when the configured terrain mode is active, or 'degraded' when real terrain was requested (MARSPATH_USE_REAL_DEM=true) but synthetic fallback is active",
+        description="Operational readiness status: 'healthy' when acceptable planetary terrain is active (or synthetic_test_fixture with MARSPATH_USE_REAL_DEM=false), or 'degraded' when real terrain was requested (MARSPATH_USE_REAL_DEM=true) but unacceptable real-data readiness (synthetic fallback, integrity failure, or unverified provenance) is present",
     )
     data_mode: str
     real_data_validation_status: str = Field(

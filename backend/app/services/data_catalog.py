@@ -19,6 +19,184 @@ DEFAULT_USGS_200M_URL = (
     "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m"
 )
 
+ACCEPTABLE_REAL_VALIDATION_STATUSES: frozenset[str] = frozenset(
+    {
+        "verified_source",
+        "official_endpoint_retrieved_checksum_unverified",
+    }
+)
+
+
+def evaluate_terrain_readiness(
+    *,
+    is_synthetic: bool,
+    provenance: dict[str, Any],
+    default_use_real_dem: bool,
+    dem_path: str | None = None,
+) -> dict[str, Any]:
+    """
+    Shared production readiness gate evaluated identically by `/health` and `/api/v1/data/status`.
+
+    1. When `real_dem_requested` is False (`MARSPATH_USE_REAL_DEM=false`):
+       - Local synthetic development mode (`data_mode="synthetic_test_fixture"`).
+       - Returns `status="healthy"`, `http_status_code=200`.
+    2. When `real_dem_requested` is True (`MARSPATH_USE_REAL_DEM=true`):
+       - Production readiness (`status="healthy"`, `http_status_code=200`) requires ALL of:
+         * `real_dem_requested is True`
+         * `real_dem_loaded is True`
+         * `dem_loaded is True`
+         * `is_synthetic is False`
+         * `local_integrity_verified is True`
+         * `real_data_validation_status in {"verified_source", "official_endpoint_retrieved_checksum_unverified"}`
+       - For `"official_endpoint_retrieved_checksum_unverified"`, `source_checksum_verified == False`
+         is explicitly permitted when `local_integrity_verified is True`.
+       - For `"verified_source"`, `source_checksum_verified` must be `True`.
+       - Any unacceptable real-data state (synthetic fallback, `local_integrity_verified is False`,
+         `local_integrity_verified is None`, `valid_numeric_raster_unverified_source`, or any
+         non-synthetic raster without acceptable provenance) returns `status="degraded"`,
+         `http_status_code=503`, and populates `blocking_errors` with the diagnostic reason(s).
+    """
+    effective_path = str(dem_path or provenance.get("file_path") or "unknown")
+    real_dem_requested = bool(provenance.get("real_dem_requested", default_use_real_dem))
+    raw_real_dem_loaded = bool(provenance.get("real_dem_loaded", not is_synthetic))
+    raw_data_mode = str(
+        provenance.get("data_mode") or ("synthetic_test_fixture" if is_synthetic else "real")
+    )
+    raw_val_status = str(
+        provenance.get("real_data_validation_status")
+        or ("synthetic_test_fixture" if is_synthetic else "valid_numeric_raster_unverified_source")
+    )
+    local_integrity_verified = provenance.get("local_integrity_verified")
+    source_checksum_verified = bool(provenance.get("source_checksum_verified", False))
+    verification_method = str(
+        provenance.get("provenance_verification_method") or "unverified"
+    )
+    raw_fallback_reason = provenance.get("fallback_reason")
+
+    # Case 1: Local synthetic development mode (MARSPATH_USE_REAL_DEM=false)
+    if not real_dem_requested:
+        return {
+            "status": "healthy",
+            "http_status_code": 200,
+            "dem_loaded": False,
+            "real_dem_requested": False,
+            "real_dem_loaded": False,
+            "is_synthetic": True,
+            "data_mode": "synthetic_test_fixture",
+            "real_data_validation_status": "synthetic_test_fixture",
+            "local_integrity_verified": None,
+            "source_checksum_verified": False,
+            "provenance_verification_method": provenance.get(
+                "provenance_verification_method", "none_synthetic"
+            ),
+            "fallback_reason": None,
+            "blocking_errors": [],
+        }
+
+    # Case 2: Real DEM requested, but synthetic fallback is active
+    if is_synthetic or not raw_real_dem_loaded or raw_data_mode == "synthetic_fallback":
+        val_status = (
+            "incomplete_missing_genuine_dem"
+            if raw_val_status == "synthetic_test_fixture"
+            else raw_val_status
+        )
+        fallback_reason = str(
+            raw_fallback_reason
+            or (
+                f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found "
+                f"or invalid at: {effective_path}"
+            )
+        )
+        return {
+            "status": "degraded",
+            "http_status_code": 503,
+            "dem_loaded": False,
+            "real_dem_requested": True,
+            "real_dem_loaded": False,
+            "is_synthetic": True,
+            "data_mode": "synthetic_fallback",
+            "real_data_validation_status": val_status,
+            "local_integrity_verified": None,
+            "source_checksum_verified": False,
+            "provenance_verification_method": provenance.get(
+                "provenance_verification_method", "none_file_missing_or_invalid"
+            ),
+            "fallback_reason": fallback_reason,
+            "blocking_errors": [fallback_reason],
+        }
+
+    # Case 3: Real DEM requested and non-synthetic raster is loaded -> enforce strict provenance & integrity gate
+    dem_loaded = True
+    real_dem_loaded = True
+    blocking_errors: list[str] = []
+
+    if local_integrity_verified is False:
+        blocking_errors.append(
+            f"Local DEM integrity verification failed (local_integrity_verified=false; "
+            f"method={verification_method}) for '{effective_path}'."
+        )
+    elif local_integrity_verified is not True:
+        blocking_errors.append(
+            f"Local DEM integrity is unverified (local_integrity_verified=null; missing or "
+            f"unauthenticated provenance sidecar; method={verification_method}) for '{effective_path}'."
+        )
+
+    if raw_val_status not in ACCEPTABLE_REAL_VALIDATION_STATUSES:
+        blocking_errors.append(
+            f"Real DEM provenance validation status '{raw_val_status}' is not acceptable for "
+            f"production readiness (requires 'verified_source' or "
+            f"'official_endpoint_retrieved_checksum_unverified'; method={verification_method}) "
+            f"for '{effective_path}'."
+        )
+    elif raw_val_status == "verified_source" and not source_checksum_verified:
+        blocking_errors.append(
+            f"Real DEM claims validation_status='verified_source' but source_checksum_verified=false "
+            f"for '{effective_path}'."
+        )
+
+    if raw_data_mode not in ("real", "real_official_endpoint_unverified_checksum"):
+        msg = (
+            f"Real DEM data_mode '{raw_data_mode}' is not acceptable for production readiness "
+            f"(validation_status='{raw_val_status}') for '{effective_path}'."
+        )
+        if not blocking_errors:
+            blocking_errors.append(msg)
+
+    if blocking_errors:
+        return {
+            "status": "degraded",
+            "http_status_code": 503,
+            "dem_loaded": dem_loaded,
+            "real_dem_requested": True,
+            "real_dem_loaded": real_dem_loaded,
+            "is_synthetic": False,
+            "data_mode": raw_data_mode,
+            "real_data_validation_status": raw_val_status,
+            "local_integrity_verified": (
+                local_integrity_verified if isinstance(local_integrity_verified, bool) else None
+            ),
+            "source_checksum_verified": source_checksum_verified,
+            "provenance_verification_method": verification_method,
+            "fallback_reason": raw_fallback_reason,
+            "blocking_errors": blocking_errors,
+        }
+
+    return {
+        "status": "healthy",
+        "http_status_code": 200,
+        "dem_loaded": True,
+        "real_dem_requested": True,
+        "real_dem_loaded": True,
+        "is_synthetic": False,
+        "data_mode": raw_data_mode,
+        "real_data_validation_status": raw_val_status,
+        "local_integrity_verified": True,
+        "source_checksum_verified": source_checksum_verified,
+        "provenance_verification_method": verification_method,
+        "fallback_reason": None,
+        "blocking_errors": [],
+    }
+
 
 class DataCatalogService:
     def __init__(
@@ -293,12 +471,23 @@ class DataCatalogService:
         res_meters = round(raster.metadata.meters_per_px_y, 1)
 
         provenance = self.provider.get_provenance()
-        real_dem_requested = bool(
-            provenance.get("real_dem_requested", self.settings.USE_REAL_DEM)
+        readiness = evaluate_terrain_readiness(
+            is_synthetic=is_syn,
+            provenance=provenance,
+            default_use_real_dem=bool(
+                getattr(self.provider, "use_real_dem", self.settings.USE_REAL_DEM)
+            ),
+            dem_path=getattr(self.provider, "dem_path", None),
         )
-        real_dem_loaded = bool(provenance.get("real_dem_loaded", not is_syn))
-        active_mode = provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
-        val_status = provenance.get("real_data_validation_status", "synthetic_test_fixture")
+        overall_status = readiness["status"]
+        real_dem_requested = readiness["real_dem_requested"]
+        real_dem_loaded = readiness["real_dem_loaded"]
+        dem_loaded = readiness["dem_loaded"]
+        effective_is_syn = readiness["is_synthetic"]
+        active_mode = readiness["data_mode"]
+        val_status = readiness["real_data_validation_status"]
+        fallback_reason = readiness["fallback_reason"]
+        blocking_errors: list[str] = list(readiness["blocking_errors"])
 
         hi_val = self.hirise_provider.validate_hirise_raster()
         hi_prov = (
@@ -312,33 +501,18 @@ class DataCatalogService:
             "Route cost weights, hazard exposure metrics, and risk categories are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of failure.",
             "Visual imagery layers must not be used for physical slope or energy calculations.",
         ]
-        blocking_errors: list[str] = []
-        fallback_reason: str | None = None
-        overall_status = "healthy"
 
-        if is_syn or (real_dem_requested and not real_dem_loaded):
+        if effective_is_syn or (real_dem_requested and not real_dem_loaded):
             if active_mode == "synthetic_fallback" or real_dem_requested:
-                overall_status = "degraded"
-                active_mode = "synthetic_fallback"
-                if val_status == "synthetic_test_fixture":
-                    val_status = "incomplete_missing_genuine_dem"
-                fallback_reason = str(
-                    provenance.get("fallback_reason")
-                    or f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found or invalid at: {getattr(self.provider, 'dem_path', 'unknown')}"
-                )
                 limitations.append(
                     f"Fallback to Synthetic Jezero Crater Terrain Model occurred: {fallback_reason}."
                 )
-                blocking_errors.append(fallback_reason)
             else:
                 limitations.append(
                     "Operating in development mode with Synthetic Jezero Crater Terrain Model. Real NASA/USGS DEM is not loaded."
                 )
         else:
-            if val_status in (
-                "verified_source",
-                "official_endpoint_retrieved_checksum_unverified",
-            ):
+            if val_status in ACCEPTABLE_REAL_VALIDATION_STATUSES:
                 limitations.append(
                     "The USGS global blended DEM (Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2) has a nominal resolution of 200 m/px; USGS warns of HRSC/MOLA blending seam inconsistencies and notes this dataset was originally constructed for global thermal-modelling (THEMIS thermal inertia) rather than precision local surface navigation."
                 )
@@ -350,7 +524,7 @@ class DataCatalogService:
         for entry in DATA_CATALOG_MANIFEST:
             prod = dict(entry)
             if prod.get("id") == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2":
-                prod["is_loaded"] = not is_syn
+                prod["is_loaded"] = dem_loaded
                 prod["runtime_status"] = val_status
             elif prod.get("id") == "dem_hirise_jezero_delta_1m":
                 prod["is_loaded"] = bool(hi_val.is_valid)
@@ -364,17 +538,19 @@ class DataCatalogService:
             status=overall_status,
             data_mode=active_mode,
             real_data_validation_status=val_status,
-            dem_loaded=not is_syn,
+            dem_loaded=dem_loaded,
             real_dem_requested=real_dem_requested,
             real_dem_loaded=real_dem_loaded,
-            local_integrity_verified=provenance.get("local_integrity_verified"),
-            source_checksum_verified=bool(provenance.get("source_checksum_verified", False)),
-            is_synthetic=is_syn,
+            local_integrity_verified=readiness["local_integrity_verified"],
+            source_checksum_verified=readiness["source_checksum_verified"],
+            is_synthetic=effective_is_syn,
             active_pilot_region="Jezero Crater, Mars",
             pilot_bounds=bounds,
             crs=crs_info,
             loaded_dem=(
-                self.provider.dem_path if not is_syn else "Synthetic Jezero Crater Terrain Model"
+                self.provider.dem_path
+                if not effective_is_syn
+                else "Synthetic Jezero Crater Terrain Model"
             ),
             active_dem_dataset_name=provenance.get("dataset_name"),
             active_dem_product_id=provenance.get("official_product_id"),
