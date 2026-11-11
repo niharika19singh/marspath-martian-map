@@ -55,8 +55,80 @@ echo "[MARSPath Startup] MARSPATH_ALLOW_SYNTHETIC_FALLBACK=${MARSPATH_ALLOW_SYNT
     --output "${MARSPATH_DEM_PATH}" \
     ${MARSPATH_INGESTION_SOURCE:+--source "${MARSPATH_INGESTION_SOURCE}"}
 
-if [ "${MARSPATH_SKIP_UVICORN:-false}" = "true" ]; then
+if [ "${MARSPATH_SKIP_UVICORN:-false}" = "true" ] && [ "${MARSPATH_VERIFY_READINESS:-false}" != "true" ]; then
     echo "[MARSPath Startup] MARSPATH_SKIP_UVICORN=true; startup provisioning check finished."
+    exit 0
+fi
+
+# Defense-in-depth runtime verification: when real DEM is required and fallback is forbidden,
+# strictly verify the build artifact exists, passes SHA-256 integrity, and meets the readiness gate
+# before launching Uvicorn.
+if [ "${MARSPATH_USE_REAL_DEM}" = "true" ] && [ "${MARSPATH_ALLOW_SYNTHETIC_FALLBACK}" = "false" ]; then
+    echo "[MARSPath Startup] Running defense-in-depth pre-launch DEM integrity and readiness verification..."
+    "${PYTHON_BIN}" - << 'EOF'
+import sys
+import os
+from pathlib import Path
+
+dem_path_str = os.environ.get("MARSPATH_DEM_PATH", "backend/app/data/rasters/jezero_mola_hrsc_blended.tif")
+dem_path = Path(dem_path_str)
+sidecar_path = Path(f"{dem_path_str}.provenance.json")
+
+if not dem_path.is_file():
+    print(f"CRITICAL: Real DEM raster missing at '{dem_path}'. Aborting startup.", file=sys.stderr)
+    sys.exit(1)
+
+if not sidecar_path.is_file():
+    print(f"CRITICAL: Provenance sidecar missing at '{sidecar_path}'. Aborting startup.", file=sys.stderr)
+    sys.exit(1)
+
+from backend.app.data.ingestion import verify_local_integrity
+from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
+from backend.app.services.data_catalog import evaluate_terrain_readiness, ACCEPTABLE_REAL_VALIDATION_STATUSES
+
+ok, reason, sidecar = verify_local_integrity(dem_path)
+if not ok:
+    print(f"CRITICAL: Local SHA-256 integrity verification failed: {reason}. Aborting startup.", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    prov = MOLAHRSCRasterProvider(dem_path=str(dem_path))
+    raster = prov.get_dem_raster()
+    provenance = prov.get_provenance()
+    readiness = evaluate_terrain_readiness(
+        is_synthetic=raster.metadata.is_synthetic,
+        provenance=provenance,
+        default_use_real_dem=True,
+        dem_path=str(dem_path),
+    )
+
+    if readiness.get("status") != "healthy":
+        print(f"CRITICAL: Pre-launch readiness gate failed: {readiness.get('blocking_errors')}. Aborting startup.", file=sys.stderr)
+        sys.exit(1)
+
+    if readiness.get("is_synthetic") is not False:
+        print("CRITICAL: Pre-launch terrain is marked as synthetic. Aborting startup.", file=sys.stderr)
+        sys.exit(1)
+
+    if readiness.get("local_integrity_verified") is not True:
+        print(f"CRITICAL: Pre-launch local_integrity_verified is not True: {readiness.get('local_integrity_verified')}. Aborting startup.", file=sys.stderr)
+        sys.exit(1)
+
+    val_status = readiness.get("real_data_validation_status")
+    if val_status not in ACCEPTABLE_REAL_VALIDATION_STATUSES:
+        print(f"CRITICAL: Pre-launch validation status '{val_status}' unacceptable. Aborting startup.", file=sys.stderr)
+        sys.exit(1)
+
+except Exception as exc:
+    print(f"CRITICAL: Pre-launch DEM provider validation failed: {exc}. Aborting startup.", file=sys.stderr)
+    sys.exit(1)
+
+print(f"[MARSPath Startup] Real DEM artifact and provenance verified successfully ({dem_path}).")
+EOF
+fi
+
+if [ "${MARSPATH_SKIP_UVICORN:-false}" = "true" ]; then
+    echo "[MARSPath Startup] MARSPATH_SKIP_UVICORN=true; pre-launch verification finished."
     exit 0
 fi
 

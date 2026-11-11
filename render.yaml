@@ -2,12 +2,12 @@ services:
   - type: web
     name: marspath-backend
     runtime: python
-    buildCommand: "pip install -r backend/requirements.txt"
-    # Runs idempotent runtime DEM provisioning (backend/scripts/start_render.sh) before Uvicorn:
-    # - Validates existing Jezero DEM + provenance sidecar SHA-256 if present.
-    # - If missing or invalid (e.g. fresh ephemeral container startup/restart), extracts the
-    #   178x252 Jezero Crater window (~90 KB) from the official USGS endpoint via /vsicurl/.
-    # - Never downloads the full 11.38 GB global archive.
+    # Build command: installs backend dependencies and provisions the official Jezero DEM
+    # artifact into the container image at build time (backend/scripts/provision_build_dem.sh).
+    # The build succeeds only if the real DEM is extracted, validated, and passes local SHA-256 integrity.
+    buildCommand: "pip install -r backend/requirements.txt && bash backend/scripts/provision_build_dem.sh"
+    # Start command: re-verifies local DEM integrity and provenance readiness (defense-in-depth)
+    # in <5 ms without re-downloading before launching Uvicorn (backend/scripts/start_render.sh).
     startCommand: "bash backend/scripts/start_render.sh"
     envVars:
       - key: PYTHON_VERSION

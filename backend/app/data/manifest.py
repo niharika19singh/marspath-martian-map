@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,10 @@ import numpy as np
 # Deterministic SHA-256 of the float32 elevation array for the Jezero Crater window
 # (col_off=76212, row_off=21131, width=252, height=178; 77.1485°E-77.9988°E, 18.1009°N-18.7015°N)
 # streamed from USGS Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif
-USGS_JEZERO_WINDOW_ARRAY_SHA256 = "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
+USGS_JEZERO_WINDOW_ARRAY_SHA256 = (
+    os.environ.get("MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256", "").strip().lower()
+    or "e9a823c7ee00f68e6b5985425b90e574e30638f6223d07010bc75f98214f3074"
+)
 
 DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
     {
@@ -224,6 +228,20 @@ DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
         "limitations": "Rendered RGB image tiles; zero elevation data. Strictly visualization-only.",
     },
 ]
+
+# Apply optional environment overrides for test fixtures and subprocess isolation
+if os.environ.get("MARSPATH_MANIFEST_SHA256_OVERRIDE"):
+    DATA_CATALOG_MANIFEST[0]["sha256"] = (
+        os.environ["MARSPATH_MANIFEST_SHA256_OVERRIDE"].strip().lower()
+    )
+if os.environ.get("MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE"):
+    DATA_CATALOG_MANIFEST[0]["upstream_md5"] = (
+        os.environ["MARSPATH_MANIFEST_UPSTREAM_MD5_OVERRIDE"].strip().lower()
+    )
+if os.environ.get("MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256"):
+    DATA_CATALOG_MANIFEST[0]["jezero_window_array_sha256"] = (
+        os.environ["MARSPATH_MANIFEST_JEZERO_WINDOW_ARRAY_SHA256"].strip().lower()
+    )
 
 
 def _compute_file_digest(filepath: str | Path, algo: str = "sha256") -> str:
