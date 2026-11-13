@@ -43,6 +43,16 @@ Once running, navigate to:
 PYTHONPATH=. pytest backend/tests/ -v
 ```
 
+### 6. Docker Build & Container Execution
+The Docker image encapsulates the complete production environment with build-time DEM provisioning:
+```bash
+# Build Docker image (provisions and bakes the Jezero Crater DEM into the image at build time)
+docker build -f backend/Dockerfile -t marspath-backend .
+
+# Run container (verification-only startup; zero runtime network downloads; fail-closed enforcement)
+docker run -p 8000:8000 marspath-backend
+```
+
 ---
 
 ## 📡 Key Endpoints

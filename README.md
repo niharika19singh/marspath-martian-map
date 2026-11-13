@@ -74,6 +74,15 @@ export MARSPATH_HIRISE_DEM_PATH=backend/app/data/rasters/hirise_jezero_delta_dtm
 uvicorn backend.app.main:app --reload
 ```
 
+### Docker Container Deployment
+```bash
+# Build production image with build-time DEM provisioning
+docker build -f backend/Dockerfile -t marspath-backend .
+
+# Run container (verification-only, fail-closed runtime)
+docker run -p 8000:8000 marspath-backend
+```
+
 ---
 
 ## 🧪 Testing and Quality Gate

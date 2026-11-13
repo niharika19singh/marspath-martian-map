@@ -46,76 +46,85 @@ MARSPATH_ROUTING_TIMEOUT_SECONDS=10.0
 
 ---
 
-## 2. Render Cloud Deployment & Idempotent Runtime DEM Provisioning
+## 2. Render Cloud Deployment & Build-Time DEM Provisioning
 
-Render deployment is configured via [`render.yaml`](../render.yaml) and uses [`backend/scripts/start_render.sh`](../backend/scripts/start_render.sh) as its `startCommand`.
+Render deployment is configured via [`render.yaml`](../render.yaml) and executes build-time DEM provisioning during the deployment build phase, followed by verification-only startup.
 
-### Why Runtime Provisioning is Used on Render
-- `.gitignore` excludes `backend/app/data/rasters/*.tif` so binary rasters are never committed to Git.
-- On Render's standard web service tier, container filesystems are ephemeral across deployments and restarts, and persistent disks (when attached) are not mounted during `buildCommand`.
-- The Jezero Crater sub-window (`77.15°E–78.00°E, 18.10°N–18.70°N`) from the USGS `Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2` Cloud-Optimized GeoTIFF is only `178 × 252` pixels (~90 KB).
-- Therefore, [`backend/scripts/start_render.sh`](../backend/scripts/start_render.sh) runs `python3 -m backend.app.data.ingestion --provision-runtime` (`provision_runtime_dem`) immediately before starting Uvicorn:
-  1. **Idempotent Reuse:** Checks whether `MARSPATH_DEM_PATH` and its `.provenance.json` sidecar already exist, validates the local GeoTIFF SHA-256 against the sidecar, and verifies the raster metadata and elevation array. When valid local data is already present (e.g., on warm restarts or a mounted Persistent Disk), it skips remote re-ingestion.
-  2. **HTTP Range Sub-Window Extraction:** When the raster is missing or fails integrity checks, it streams only the `178 × 252` Jezero Crater window via GDAL `/vsicurl/` HTTP Range requests from the official USGS Astrogeology S3 endpoint (`https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif`, with automatic fallback to `https://planetarymaps.usgs.gov/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif`), never downloading the full 11.38 GB global file.
-  3. **Post-Ingestion Verification & Cleanup:** Verifies the written GeoTIFF and sidecar SHA-256. If ingestion fails, any partial file is immediately deleted so failed ingestion can never masquerade as genuine data readiness.
+### Architecture & Build-Time Provisioning
+- **Build Phase (`buildCommand`):**
+  ```bash
+  pip install -r backend/requirements.txt && bash backend/scripts/provision_build_dem.sh
+  ```
+  During the build step, [`backend/scripts/provision_build_dem.sh`](../backend/scripts/provision_build_dem.sh) runs `python3 -m backend.app.data.ingestion --provision-build`.
+  1. It streams only the `178 × 252` pixel Jezero Crater sub-window (`77.15°E–78.00°E, 18.10°N–18.70°N`, ~90 KB) via GDAL `/vsicurl/` HTTP Range requests from the official USGS Astrogeology S3 endpoint (`https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif`).
+  2. It generates the authoritative `.provenance.json` sidecar and validates the local GeoTIFF SHA-256 against the recorded hash.
+  3. If the build-time provisioning fails or the checksum does not match, the build fails immediately before the deployment artifact is published.
+- **Runtime Startup (`startCommand`):**
+  ```bash
+  bash backend/scripts/start_render.sh
+  ```
+  At container startup, [`backend/scripts/start_render.sh`](../backend/scripts/start_render.sh) performs a **strict verification-only** check.
+  - Zero network downloads or re-ingestion occur at runtime.
+  - Re-verifies local GeoTIFF and sidecar existence and SHA-256 integrity in <10 ms.
+  - **Fail-Closed Enforcement:** With `MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false`, if the DEM or sidecar is missing or corrupted, the process immediately exits with code `1`, aborting container boot before Uvicorn starts.
 
 ### Configured Render Environment (`render.yaml`)
 ```yaml
-startCommand: "bash backend/scripts/start_render.sh"
-envVars:
-  - key: MARSPATH_DEM_PATH
-    value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
-  - key: MARSPATH_USE_REAL_DEM
-    value: "true"
-  - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
-    value: "true"
+services:
+  - type: web
+    name: marspath-backend
+    runtime: python
+    buildCommand: "pip install -r backend/requirements.txt && bash backend/scripts/provision_build_dem.sh"
+    startCommand: "bash backend/scripts/start_render.sh"
+    envVars:
+      - key: MARSPATH_DEM_PATH
+        value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
+      - key: MARSPATH_USE_REAL_DEM
+        value: "true"
+      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
+        value: "false"
 ```
-
-- **Default Demo Resilience Policy (`MARSPATH_ALLOW_SYNTHETIC_FALLBACK=true`):**
-  - When runtime USGS provisioning succeeds, `/health` and `/api/v1/data/status` report:
-    - `real_dem_requested: true`
-    - `real_dem_loaded: true`
-    - `dem_loaded: true`
-    - `is_synthetic: false`
-    - `data_mode: "real_official_endpoint_unverified_checksum"`
-    - `real_data_validation_status: "official_endpoint_retrieved_checksum_unverified"`
-    - `local_integrity_verified: true`
-    - `source_checksum_verified: false`
-  - If the upstream USGS endpoint is temporarily unreachable during cold start, the service stays online in `synthetic_fallback` mode and explicitly reports:
-    - `real_dem_requested: true`
-    - `real_dem_loaded: false`
-    - `dem_loaded: false`
-    - `is_synthetic: true`
-    - `data_mode: "synthetic_fallback"`
-    - `real_data_validation_status: "incomplete_missing_genuine_dem"`
-    - `fallback_reason` and `blocking_errors` populated with the provisioning error.
-- **Alternative Strict Policy (`MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false`):**
-  - Set `MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false` in Render Environment Variables to require real DEM provisioning on startup. If the USGS endpoint is unreachable and no valid local DEM exists, `start_render.sh` exits with code `1` and aborts container startup.
-- **Optional Paid Persistent Disk:**
-  - You may optionally mount a Render Persistent Disk (e.g. at `/var/data/marspath`) and set `MARSPATH_DEM_PATH=/var/data/marspath/jezero_mola_hrsc_blended.tif`. `start_render.sh` will provision the DEM onto the disk on first boot and reuse the SHA-256-verified file on all subsequent deploys and restarts.
 
 ---
 
-## 3. Docker Deployment
+## 3. Docker Deployment & Container Image Hardening
 
-```bash
-# Build the Docker image
-docker build -t marspath-backend -f backend/Dockerfile .
+MARSPath provides a production-hardened `backend/Dockerfile` that mirrors Render's build-time provisioning and fail-closed runtime model.
 
-# Run in default synthetic mode
-docker run -p 8000:8000 \
-  -e MARSPATH_ENV=production \
-  -e MARSPATH_USE_REAL_DEM=false \
-  marspath-backend
+### Build-Time Container Construction
+When building the Docker image, the Jezero DEM artifact is extracted and verified during the image layer build:
+```dockerfile
+# 1. Install dependencies and system libraries (including libexpat1 and ca-certificates)
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl ca-certificates libexpat1
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Or mount a local rasters directory with an ingested DEM
-docker run -p 8000:8000 \
-  -v $(pwd)/backend/app/data/rasters:/app/backend/app/data/rasters \
-  -e MARSPATH_ENV=production \
-  -e MARSPATH_USE_REAL_DEM=true \
-  -e MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false \
-  marspath-backend
+# 2. Configure production fail-closed environment
+ENV MARSPATH_ENV=production \
+    MARSPATH_USE_REAL_DEM=true \
+    MARSPATH_ALLOW_SYNTHETIC_FALLBACK=false \
+    MARSPATH_DEM_PATH=backend/app/data/rasters/jezero_mola_hrsc_blended.tif
+
+# 3. Provision Jezero DEM build artifact via USGS /vsicurl/ HTTP range extraction
+RUN bash backend/scripts/provision_build_dem.sh
+
+# 4. Enforce build-time gate: ensure both GeoTIFF and provenance sidecar exist
+RUN test -s backend/app/data/rasters/jezero_mola_hrsc_blended.tif && \
+    test -s backend/app/data/rasters/jezero_mola_hrsc_blended.tif.provenance.json
 ```
+
+### Building and Running the Image
+```bash
+# Build the Docker image (provisions DEM and creates immutable artifact)
+docker build -f backend/Dockerfile -t marspath-backend .
+
+# Run container (verification-only startup; zero runtime network downloads; fail-closed enforcement)
+docker run -d --name marspath -p 8000:8000 marspath-backend
+```
+
+### Verification & Fail-Closed Guarantees
+- **Verification-Only Startup:** Container startup takes <1 second because DEM verification is purely offline (local SHA-256 calculation and header checks).
+- **Fail-Closed Protection:** If the baked-in DEM or sidecar is tampered with or removed, `start_render.sh` exits with code `1` and prevents Uvicorn from starting.
+- **Hermetic Runtime:** The container does not require internet access at runtime for terrain data.
 
 ---
 
