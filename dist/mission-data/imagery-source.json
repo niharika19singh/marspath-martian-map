@@ -1,0 +1,24 @@
+{
+  "source": "NASA/JPL / USGS Mars CTX & Viking orbital mosaic",
+  "url": "https://astro.arcgis.com/arcgis/rest/services/OnMars/CTX/MapServer",
+  "tile_template": "https://astro.arcgis.com/arcgis/rest/services/OnMars/CTX/MapServer/tile/9/{y}/{x}",
+  "zoom": 9,
+  "bounds": [
+    77.14599609375,
+    18.0999755859375,
+    78.0029296875,
+    18.69873046875
+  ],
+  "image_size": [
+    1248,
+    872
+  ],
+  "visual_only": true,
+  "retrieved": "2026-11-13",
+  "terrain_bounds": [
+    77.1484967448119,
+    18.097485099040284,
+    78.00214931496407,
+    18.701452727725027
+  ]
+}

@@ -2,8 +2,14 @@ services:
   - type: web
     name: marspath-backend
     runtime: python
-    buildCommand: "pip install -r backend/requirements.txt"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend"
+    plan: free
+    # Build command: installs backend dependencies and provisions the official Jezero DEM
+    # artifact into the container image at build time (backend/scripts/provision_build_dem.sh).
+    # The build succeeds only if the real DEM is extracted, validated, and passes local SHA-256 integrity.
+    buildCommand: "pip install -r backend/requirements.txt && bash backend/scripts/provision_build_dem.sh"
+    # Start command: re-verifies local DEM integrity and provenance readiness (defense-in-depth)
+    # in <5 ms without re-downloading before launching Uvicorn (backend/scripts/start_render.sh).
+    startCommand: "bash backend/scripts/start_render.sh"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8
@@ -12,9 +18,18 @@ services:
       - key: MARSPATH_LOG_LEVEL
         value: INFO
       - key: MARSPATH_CORS_ORIGINS
-        value: "https://marspath.vercel.app,http://localhost:3000"
-      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
-        value: "true"
+        value: "https://marspath.vercel.app"
       - key: MARSPATH_DATA_DIR
         value: "backend/app/data"
+      - key: MARSPATH_DEM_PATH
+        value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
+      # Build-time DEM provisioning is active:
+      # start_render.sh is strictly verification-only and does zero runtime downloading or provisioning.
+      - key: MARSPATH_USE_REAL_DEM
+        value: "true"
+      # Fail-closed production policy: if the real DEM cannot be provisioned or verified,
+      # MARSPATH_ALLOW_SYNTHETIC_FALLBACK="false" aborts startup rather than serving
+      # synthetic fallback terrain in production.
+      - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
+        value: "false"
     healthCheckPath: /health
