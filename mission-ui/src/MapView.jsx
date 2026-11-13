@@ -45,10 +45,12 @@ export default function MapView(props) {
     fitToken,
     live,
     backendStatus,
+    provenance,
     showRoute = true,
     showAlternatives = false,
     hoveredRoute = null,
     view3d = false,
+    exaggeration = 6,
     layersOpen,
     onLayersToggle,
     onTiltToggle,
@@ -359,7 +361,6 @@ export default function MapView(props) {
           const isHighHazard = s.slope_deg > 12 || s.roughness > 0.5;
 
           if (isInvalidOrNoData) {
-            // Invalid or NoData segment rendered distinctly in dashed coral/red
             const segFeature = new Feature(
               new LineString([project(startCoord.lon, startCoord.lat), project(endCoord.lon, endCoord.lat)])
             );
@@ -370,7 +371,6 @@ export default function MapView(props) {
             );
             src.addFeature(segFeature);
           } else if (isNearNoData) {
-            // Near NoData boundary rendered in dashed amber
             const segFeature = new Feature(
               new LineString([project(startCoord.lon, startCoord.lat), project(endCoord.lon, endCoord.lat)])
             );
@@ -381,7 +381,6 @@ export default function MapView(props) {
             );
             src.addFeature(segFeature);
           } else if (isHighHazard) {
-            // High slope or high roughness
             const segFeature = new Feature(
               new LineString([project(startCoord.lon, startCoord.lat), project(endCoord.lon, endCoord.lat)])
             );
@@ -644,7 +643,12 @@ export default function MapView(props) {
           : base === 'imagery'
           ? 'NASA/JPL Mars Trek imagery'
           : 'USGS MOLA–HRSC terrain'}{' '}
-        · Routing DEM: 200 m{live ? ' · Reference basemap' : ''}
+        ·{' '}
+        {live
+          ? provenance?.isSynthetic
+            ? `Reference basemap only · Routing: Synthetic (${provenance.dataMode})`
+            : `Reference basemap · Routing: Python API (${provenance?.dataMode || 'real'})`
+          : 'Routing DEM: 200 m'}
       </div>
     </div>
   );

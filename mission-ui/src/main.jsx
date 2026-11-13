@@ -9,19 +9,17 @@ import Profile from './Profile.jsx';
 import { exportGeoJSON, exportCSV, exportJSON } from './export.js';
 import { buildTerrain } from './terrain.js';
 import Icon from './Icons.jsx';
+import {
+  resolveInitialApiUrl,
+  resolveTerrainProvenance,
+  resolveAlternativeShortfall,
+  canSubmitRoute,
+  validateRouteExecutionPreconditions
+} from './integration.js';
 
 const INITIAL = { start: { lon: 77.40, lat: 18.39 }, destination: { lon: 77.44, lat: 18.42 } };
 const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }) : '—');
 const pct = (n, d = 0) => (Number.isFinite(n) ? (n * 100).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }) + '%' : '—');
-
-const defaultRobustnessConfig = {
-  enabled: false,
-  vertical_sigma_m: 1.5,
-  correlation_length_m: 400.0,
-  scenario_count: 5,
-  seed: 42,
-  cost_regret_threshold_fraction: 0.05
-};
 
 const initialRequest = {
   ...INITIAL,
@@ -166,12 +164,12 @@ function App() {
   const [fitToken, setFitToken] = useState(0);
   const [sourceMode, setSourceMode] = useState('browser');
   const [api, setApi] = useState(null);
-  const [apiConnectionState, setApiConnectionState] = useState('disconnected'); // 'disconnected' | 'connecting' | 'connected' | 'connected_degraded'
-  const [analysisTab, setAnalysisTab] = useState('overview'); // 'overview' | 'evidence' | 'science' | 'robustness'
+  const [apiConnectionState, setApiConnectionState] = useState('disconnected');
+  const [analysisTab, setAnalysisTab] = useState('overview');
 
   // Settings & dialogs
   const [showSettings, setShowSettings] = useState(false);
-  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('marspath-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:8000');
+  const [apiUrl, setApiUrl] = useState(() => resolveInitialApiUrl() || 'http://localhost:8000');
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [exportFormat, setExportFormat] = useState('json');
@@ -204,6 +202,16 @@ function App() {
   const terrain = useMemo(() => (raw ? buildTerrain(raw) : null), [raw]);
   const active = result?.routes.find(r => r.route_id === selected) || result?.routes[0];
   const live = sourceMode === 'api';
+
+  const provenance = useMemo(
+    () => resolveTerrainProvenance({ live, raw, loadError, api, result, active }),
+    [live, raw, loadError, api, result, active]
+  );
+
+  const shortfall = useMemo(
+    () => resolveAlternativeShortfall(result, lastRequest.current?.num_alternatives),
+    [result]
+  );
 
   function accept(response, request) {
     if (!Array.isArray(response.routes) || !response.routes.length || response.routes.some(r => !Array.isArray(r.geometry?.coordinates))) {
@@ -348,7 +356,13 @@ function App() {
   }
 
   async function run() {
-    if (!raw && !live) return;
+    const preconditions = validateRouteExecutionPreconditions({ live, raw, loadError, api, algorithm });
+    if (!preconditions.ok) {
+      setError(preconditions.error);
+      setLeftOpen(true);
+      return;
+    }
+
     if (routeForm.current && !routeForm.current.checkValidity()) {
       setError('Enter valid latitude, longitude coordinates.');
       setLeftOpen(true);
@@ -361,7 +375,6 @@ function App() {
       return;
     }
 
-    // Retain previous result while computing new plan
     setPreviousResult(result);
     setError('');
     setNotice('');
@@ -373,12 +386,6 @@ function App() {
 
     if (!live) {
       worker.current?.postMessage({ id, raw, request: req });
-      return;
-    }
-
-    if (!api) {
-      setError('Connect a Python backend first.');
-      setBusy(false);
       return;
     }
 
@@ -489,7 +496,6 @@ function App() {
       const status = statusRes.data || {};
       const layers = layersRes.data || {};
 
-      // Determine transport vs readiness state
       const isDegraded = health.status === 'degraded' || (status.blocking_errors && status.blocking_errors.length > 0) || !status.dem_loaded;
       const connectionState = isDegraded ? 'connected_degraded' : 'connected';
 
@@ -573,14 +579,6 @@ function App() {
 
   const penaltyShare = active && active.total_cost > 0 ? Math.min(100, ((penalty || 0) / active.total_cost) * 100) : 0;
 
-  const dataName = live
-    ? active?.evidence_passport?.source?.dataset_name ||
-      active?.evidence_passport?.source_evidence?.dataset_name ||
-      api?.status?.active_dem_dataset_name ||
-      api?.status?.loaded_dem ||
-      'Backend DEM'
-    : raw?.source_name || 'Loading terrain';
-
   const effectiveGrid = live
     ? result?.source_selection?.effective_resolution_meters ||
       active?.evidence_passport?.resolution_assessment?.effective_resolution_meters ||
@@ -588,11 +586,6 @@ function App() {
     : terrain
     ? Math.max(terrain.dx, terrain.dy)
     : null;
-
-  // Detect alternative shortfall
-  const requestedAlternatives = lastRequest.current?.num_alternatives || 1;
-  const returnedAlternatives = result?.routes?.length || 0;
-  const hasShortfall = result && returnedAlternatives < requestedAlternatives;
 
   function swap() {
     invalidate();
@@ -611,6 +604,8 @@ function App() {
     setLayersOpen(false);
   }
 
+  const canSubmit = canSubmitRoute({ live, raw, api, busy });
+
   const commands = [
     { name: 'Swap start and destination', hint: 'Reverse A / B', icon: 'swap', run: swap },
     {
@@ -621,7 +616,7 @@ function App() {
         switchMission('planner');
         run();
       },
-      disabled: busy || (!raw && !live)
+      disabled: !canSubmit
     },
     { name: 'Add science waypoint', hint: 'Intermediate Mars coordinate', icon: 'plus', run: addWaypoint },
     { name: 'Toggle hazards', hint: hazards ? 'Hide overlay' : 'Show terrain heatmap', icon: 'layers', run: () => setHazards(v => !v) },
@@ -671,7 +666,6 @@ function App() {
   const activeRobustness = result?.robustness_assessment;
   const activeSourceSelection = result?.source_selection;
 
-  // Selected route robustness metrics if available
   const activeRouteRobustness = activeRobustness?.baseline_route_assessments?.find(
     b => b.route_id === (active?.route_id || selected)
   ) || activeRobustness?.baseline_route_assessments?.[0];
@@ -699,28 +693,20 @@ function App() {
           <span>Jezero Crater</span>
         </nav>
         <div className="header-actions">
-          <span className="status-chip" title="Data readiness and active compute source">
+          <span className={'status-chip ' + (provenance.isSynthetic ? 'synthetic' : '')} title="Data readiness and active compute source">
             <i
               className={
-                live
-                  ? apiConnectionState === 'connected'
-                    ? 'ready'
-                    : 'degraded'
-                  : raw
+                provenance.headerReady
                   ? 'ready'
+                  : provenance.isSynthetic
+                  ? 'synthetic'
+                  : apiConnectionState === 'connected_degraded'
+                  ? 'degraded'
                   : ''
               }
             />
-            {live
-              ? apiConnectionState === 'connected'
-                ? api?.status?.data_mode === 'synthetic_test_fixture'
-                  ? 'Synthetic fixture'
-                  : 'Terrain verified'
-                : 'API degraded'
-              : raw
-              ? 'Local terrain ready'
-              : 'Loading terrain'}
-            <b>{live ? 'Python API' : 'Local engine'}</b>
+            {provenance.headerStatusText}
+            <b>{provenance.headerEngineLabel}</b>
           </span>
           <button
             className="command-trigger"
@@ -746,11 +732,14 @@ function App() {
       </header>
 
       <main className="map-stage" aria-label="MarsPath mission planner">
-        {loadError ? (
+        {loadError && !live ? (
           <div className="load-error">
-            <h2>Terrain unavailable</h2>
+            <h2>Local terrain unavailable</h2>
             <p>{loadError}</p>
-            <button onClick={() => location.reload()}>Retry</button>
+            <div className="fallback-actions">
+              <button onClick={() => location.reload()}>Retry local DEM</button>
+              <button onClick={() => setShowSettings(true)}>Connect Python API</button>
+            </div>
           </div>
         ) : terrain || live ? (
           <MapView
@@ -780,6 +769,7 @@ function App() {
             fitToken={fitToken}
             live={live}
             backendStatus={api?.status}
+            provenance={provenance}
             showRoute={showRoute}
             showAlternatives={showAlternatives}
             hoveredRoute={hoveredRoute}
@@ -1159,7 +1149,7 @@ function App() {
                   </div>
                 </details>
 
-                <button className="plan-button" type="submit" disabled={busy || (!raw && !live)}>
+                <button className="plan-button" type="submit" disabled={!canSubmit}>
                   {busy ? (
                     <>
                       <span className="spinner" />
@@ -1202,17 +1192,15 @@ function App() {
             </div>
 
             <div className={'analysis-content ' + (busy ? 'calculating' : '')}>
-              {/* Shortfall banner */}
-              {hasShortfall && (
+              {shortfall.hasShortfall && (
                 <div className="shortfall-banner" role="status">
                   <strong>
-                    {returnedAlternatives} of {requestedAlternatives} alternatives found
+                    {shortfall.returnedCount} of {shortfall.requestedCount} alternatives found
                   </strong>
-                  <span>Terrain feasibility or corridor limits prevented secondary paths.</span>
+                  <span>{shortfall.message}</span>
                 </div>
               )}
 
-              {/* Status if previous result shown while busy */}
               {busy && previousResult && (
                 <div className="recomputing-notice">
                   <span className="spinner small" />
@@ -1220,7 +1208,6 @@ function App() {
                 </div>
               )}
 
-              {/* Key Metrics */}
               <div className="key-metrics">
                 <Metric
                   label="Distance"
@@ -1251,7 +1238,6 @@ function App() {
 
               {rightExpanded && (
                 <>
-                  {/* Analysis Sub-Navigation Tabs */}
                   <nav className="analysis-tabs" role="tablist" aria-label="Analysis perspectives">
                     <button
                       className={'tab-button ' + (analysisTab === 'overview' ? 'active' : '')}
@@ -1322,7 +1308,6 @@ function App() {
                         )}
                       </div>
 
-                      {/* Terrain Penalty & Cost Breakdown */}
                       <section className="penalty-gauge">
                         <div>
                           <span>Terrain penalty share</span>
@@ -1346,7 +1331,6 @@ function App() {
                         </small>
                       </section>
 
-                      {/* Physical Risk Section */}
                       <div className="metric-box physical-risk-box">
                         <div className="box-header">
                           <span>Physical Traversal Risk</span>
@@ -1368,7 +1352,6 @@ function App() {
                         </dl>
                       </div>
 
-                      {/* Cost Breakdown Accordion */}
                       <details className="analysis-details" open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
                         <summary>
                           <span>Cost & Terrain Breakdown</span>
@@ -1426,7 +1409,6 @@ function App() {
                         </p>
                       </div>
 
-                      {/* Quality flags */}
                       {Array.isArray(activeEvidence?.quality_flags) && activeEvidence.quality_flags.length > 0 && (
                         <div className="quality-flags-list">
                           <span>Quality flags:</span>
@@ -1440,7 +1422,6 @@ function App() {
                         </div>
                       )}
 
-                      {/* Coverage Progress Bars */}
                       <div className="coverage-block">
                         <div className="coverage-row">
                           <div className="coverage-labels">
@@ -1490,19 +1471,20 @@ function App() {
                         )}
                       </div>
 
-                      {/* Provenance & Integrity DL */}
                       <dl className="compact-dl">
                         <dt>Active Dataset</dt>
-                        <dd>{activeSource?.dataset_name || dataName}</dd>
+                        <dd>{provenance.datasetName}</dd>
                         <dt>Product ID</dt>
-                        <dd>{activeSource?.product_id || 'USGS Regional DEM'}</dd>
+                        <dd>{activeSource?.product_id || (provenance.isSynthetic ? 'Synthetic Fixture' : 'USGS Regional DEM')}</dd>
+                        <dt>Source Verification</dt>
+                        <dd>{provenance.sourceVerificationText}</dd>
                         <dt>Local File Integrity</dt>
-                        <dd className={activeSource?.local_integrity_verified ? 'text-ok' : ''}>
-                          {activeSource?.local_integrity_verified ? 'SHA-256 Verified' : 'Unverified / Fixture'}
+                        <dd className={provenance.localIntegrityVerified ? 'text-ok' : ''}>
+                          {provenance.fileIntegrityText}
                         </dd>
                         <dt>Upstream Checksum</dt>
-                        <dd className={activeSource?.source_checksum_verified ? 'text-ok' : 'text-muted'}>
-                          {activeSource?.source_checksum_verified ? 'Catalog Verified' : 'Unverified Checksum'}
+                        <dd className={provenance.sourceChecksumVerified ? 'text-ok' : 'text-muted'}>
+                          {provenance.upstreamChecksumText}
                         </dd>
                         <dt>Resolution (dx / dy)</dt>
                         <dd>
@@ -1517,11 +1499,22 @@ function App() {
                         <dd>{activeSource?.vertical_datum || 'Mars Areoid (MOLA)'}</dd>
                       </dl>
 
+                      {provenance.officialSourceUrl ? (
+                        <p>
+                          <a href={provenance.officialSourceUrl} target="_blank" rel="noopener">
+                            Official planetary dataset source ↗
+                          </a>
+                        </p>
+                      ) : (
+                        <p className="no-source-link">
+                          {provenance.isSynthetic ? 'Synthetic model — no external planetary archive.' : 'No upstream planetary archive link available.'}
+                        </p>
+                      )}
+
                       <p className="regional-disclaimer">
                         Regional corridor assessment only (~200 m). Does not resolve rover-scale rocks, ripples, or scarps.
                       </p>
 
-                      {/* Evidence Limitations */}
                       {(activeEvidence?.known_limitations?.length > 0 || activeSource?.source_limitations?.length > 0) && (
                         <details className="sub-details">
                           <summary>Known evidence limitations ({activeEvidence?.known_limitations?.length || 0})</summary>
@@ -1538,7 +1531,6 @@ function App() {
                   {/* TAB 3: SOURCE & SCIENCE */}
                   {analysisTab === 'science' && (
                     <div className="tab-pane science-pane" role="tabpanel">
-                      {/* Terrain Source Selection Report */}
                       <div className="metric-box">
                         <div className="box-header">
                           <span>Multi-Resolution Source Selection</span>
@@ -1546,7 +1538,7 @@ function App() {
                         </div>
                         <dl className="compact-dl">
                           <dt>Selected DEM</dt>
-                          <dd>{activeSourceSelection?.selected_dataset_name || dataName}</dd>
+                          <dd>{activeSourceSelection?.selected_dataset_name || provenance.datasetName}</dd>
                           <dt>Source ID</dt>
                           <dd>{activeSourceSelection?.selected_source_id || 'dem_mola_hrsc_jezero_200m'}</dd>
                           <dt>Selection Reason</dt>
@@ -1578,7 +1570,6 @@ function App() {
                         </dl>
                       </div>
 
-                      {/* Science Return & POIs */}
                       <div className="metric-box science-box">
                         <div className="box-header">
                           <span>Science Exploration Score</span>
@@ -1690,7 +1681,6 @@ function App() {
                             </p>
                           )}
 
-                          {/* Mandatory Non-Probabilistic Scientific Disclaimer */}
                           <div className="scientific-disclaimer-box">
                             <strong>Scientific Disclaimer</strong>
                             <p>
@@ -1840,7 +1830,7 @@ function App() {
               </div>
               <div className="status-row">
                 <span>Active Data Mode:</span>
-                <code>{api.status?.data_mode || 'unknown'}</code>
+                <code>{provenance.dataMode}</code>
               </div>
               <div className="status-row">
                 <span>Real DEM Loaded:</span>
@@ -1848,11 +1838,11 @@ function App() {
               </div>
               <div className="status-row">
                 <span>Local Integrity:</span>
-                <span>{api.status?.local_integrity_verified ? 'SHA-256 Verified' : 'Unverified'}</span>
+                <span>{provenance.fileIntegrityText}</span>
               </div>
               <div className="status-row">
                 <span>Upstream Checksum:</span>
-                <span>{api.status?.source_checksum_verified ? 'Verified' : 'Unverified'}</span>
+                <span>{provenance.upstreamChecksumText}</span>
               </div>
               <div className="status-row">
                 <span>HiRISE Status:</span>
