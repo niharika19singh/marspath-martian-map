@@ -261,3 +261,96 @@ MARSPath enforces strict computational boundaries to prevent runaway resource co
 - Large rasters and local extracts under `backend/app/data/rasters/` are excluded via `.gitignore` and `.dockerignore`.
 - Always use `python -m backend.app.data.ingestion` to reproducibly provision the Jezero Crater DEM window.
 
+---
+
+## 8. Full-Stack Single-Origin Production Deployment (Vercel + Render)
+
+MARSPath employs a unified single-origin production architecture combining Vercel edge hosting for the interactive frontend and Render for the authoritative planetary geospatial backend.
+
+### Architecture Overview
+
+```
+                                  PUBLIC USER
+                                       │
+                                       ▼
+                       https://marspath.vercel.app
+                                       │
+           ┌───────────────────────────┴───────────────────────────┐
+           │                                                       │
+           ▼                                                       ▼
+Static Routes & CDN                                     Vercel Edge Rewrites (/api/*, /health)
+├── /                          -> dist/index.html                  │
+├── /mission-control/          -> dist/mission-control/index.html  │ (transparent reverse-proxy)
+├── /mission-data/*            -> dist/mission-data/*              ▼
+└── /assets/*                  -> dist/assets/*         https://marspath-backend.onrender.com
+                                                                   │
+                                                                   ▼
+                                                        FastAPI Geospatial Engine
+                                                        ├── Build-time DEM provisioning
+                                                        ├── Verification-only runtime startup
+                                                        └── Fail-closed CORS (marspath.vercel.app)
+```
+
+### Component Breakdown
+
+| Layer | Host | Identifier / Branch | Build Command | Runtime Policy |
+|---|---|---|---|---|
+| **Frontend** | Vercel | Project: `marspath-frontend-dist`<br>Domain: `marspath.vercel.app` | `cd mission-ui && npm ci && npm run build` (outputs to `dist/mission-control`) | Vercel Global Edge CDN with rewrites in `vercel.json` |
+| **Backend** | Render | Service: `marspath-backend`<br>ID: `srv-dbrck4c9v7es73c6t2mg`<br>Branch: `feature/marspath-release-candidate` | `pip install -r backend/requirements.txt && bash backend/scripts/provision_build_dem.sh` | Verification-only runtime startup (`start_render.sh`); fail-closed (`ALLOW_SYNTHETIC_FALLBACK=false`) |
+
+### Vercel Edge Proxy Configuration (`vercel.json`)
+
+```json
+{
+  "version": 2,
+  "cleanUrls": false,
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://marspath-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "https://marspath-backend.onrender.com/health"
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "https://marspath-backend.onrender.com/openapi.json"
+    },
+    {
+      "source": "/docs",
+      "destination": "https://marspath-backend.onrender.com/docs"
+    }
+  ]
+}
+```
+
+### Frontend Environment & Centralized API Configuration
+
+- In `mission-ui/.env.production`:
+  ```bash
+  VITE_API_URL=https://marspath.vercel.app
+  ```
+- **Precedence & Fallback:**
+  1. User-configured override in browser `localStorage` (`marspath-api-url`)
+  2. Build-time environment variable `VITE_API_URL` (`https://marspath.vercel.app`)
+  3. Interactive manual connection dialog (`Connect Mission Control`)
+- **Same-Origin Benefits:** Browser requests to `https://marspath.vercel.app/api/...` require zero CORS preflight overhead and eliminate hardcoded backend URLs from client network traffic.
+
+### Deployment Reproduction & Automated Updates
+
+1. **Backend Deployment (Render):**
+   - Push to `feature/marspath-release-candidate`.
+   - Render automatically executes `buildCommand` (dependencies + `provision_build_dem.sh`) and boots Uvicorn with verification-only startup.
+2. **Frontend Deployment (Vercel):**
+   ```bash
+   cd mission-ui
+   npm ci
+   npm test
+   npm run build
+   cd ../dist
+   vercel deploy --prod --yes
+   vercel alias set <deployment-url> marspath.vercel.app
+   ```
+
+

@@ -97,3 +97,13 @@ ruff check backend
 # Verify bytecode compilation
 python3 -m compileall backend/
 ```
+
+---
+
+## 🌐 Live Production Deployment
+
+- **Single Public Application URL:** [https://marspath.vercel.app](https://marspath.vercel.app)
+- **Interactive Mission Control:** [https://marspath.vercel.app/mission-control/](https://marspath.vercel.app/mission-control/)
+- **Authoritative Backend API:** [https://marspath-backend.onrender.com](https://marspath-backend.onrender.com) (transparently proxied via `https://marspath.vercel.app/api/`)
+- **Planetary Data Readiness Gate:** [https://marspath.vercel.app/api/v1/data/status](https://marspath.vercel.app/api/v1/data/status)
+- **Service Health Check:** [https://marspath.vercel.app/health](https://marspath.vercel.app/health)
