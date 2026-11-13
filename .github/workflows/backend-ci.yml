@@ -28,11 +28,16 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pytest ruff
 
+      - name: Shell Script Syntax Validation
+        run: |
+          bash -n backend/scripts/provision_build_dem.sh
+          bash -n backend/scripts/start_render.sh
+
       - name: Run Ruff Lint Checks (Blocking)
         run: |
           ruff check backend/
 
-      - name: Run Pytest Suite
+      - name: Run Pytest Suite (Full Backend, Provenance, Provisioning, Runtime & API Tests)
         env:
           PYTHONPATH: .
         run: |

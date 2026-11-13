@@ -22,8 +22,8 @@ services:
         value: "backend/app/data"
       - key: MARSPATH_DEM_PATH
         value: "backend/app/data/rasters/jezero_mola_hrsc_blended.tif"
-      # Automatic runtime DEM provisioning is enabled:
-      # start_render.sh provisions and verifies the USGS 200m Jezero DEM before starting Uvicorn.
+      # Build-time DEM provisioning is active:
+      # start_render.sh is strictly verification-only and does zero runtime downloading or provisioning.
       - key: MARSPATH_USE_REAL_DEM
         value: "true"
       # Fail-closed production policy: if the real DEM cannot be provisioned or verified,
