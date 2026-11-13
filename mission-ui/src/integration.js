@@ -243,11 +243,11 @@ export function validateRouteExecutionPreconditions({ live, raw, loadError, api,
     return { ok: false, error: 'Connect a Python backend first.' };
   }
 
-  if (algorithm === 'dijkstra' && !api.algorithmSupported) {
+  if ((algorithm === 'dijkstra' || algorithm === 'compare') && !api.algorithmSupported) {
     return {
       ok: false,
       error:
-        'This backend only exposes A* through its API. Select A*, or use the bundled-grid planner for Dijkstra.',
+        'This backend only exposes A* through its API. Select A*, or use the bundled-grid planner for Dijkstra and Comparison mode.',
     };
   }
 

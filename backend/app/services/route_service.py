@@ -33,9 +33,12 @@ from backend.app.routing.alternatives import (
     reconstruct_route_summary,
 )
 from backend.app.routing.astar import astar_search
+from backend.app.routing.dijkstra import dijkstra_search
 from backend.app.routing.graph_builder import TerrainGridGraph
-from backend.app.schemas.mission import OptimizationMode
+from backend.app.schemas.mission import OptimizationMode, RoutingAlgorithm
 from backend.app.schemas.routes import (
+    AlgorithmComparisonReport,
+    AlgorithmRunMetrics,
     ComputationStats,
     RouteAlternative,
     RoutePlanRequest,
@@ -174,6 +177,94 @@ class RouteService:
         routes: list[RouteAlternative] = []
         baseline_route_nodes: dict[str, list[tuple[int, int]]] = {}
         waypoint_pixels: list[tuple[int, int]] = []
+        algorithm_comparison_report: AlgorithmComparisonReport | None = None
+
+        req_algo_raw = getattr(request, "algorithm", None) or RoutingAlgorithm.ASTAR
+        req_algo = str(
+            req_algo_raw.value if hasattr(req_algo_raw, "value") else req_algo_raw
+        ).lower()
+        search_fn = dijkstra_search if req_algo == "dijkstra" else astar_search
+
+        if req_algo == "compare":
+            logger.info(
+                "Executing A* vs Dijkstra comparative benchmark on corridor (%d,%d) -> (%d,%d)",
+                s_row,
+                s_col,
+                d_row,
+                d_col,
+            )
+            astar_nodes, astar_cost, astar_exp, astar_sec = astar_search(
+                graph,
+                (s_row, s_col),
+                (d_row, d_col),
+                max_expansions=request.constraints.max_search_nodes,
+                timeout_seconds=timeout_seconds,
+                deadline=deadline,
+                overall_start_time=search_start,
+            )
+            sum_astar, _, _, _, _ = reconstruct_route_summary(
+                astar_nodes, graph, cropped_meta, request.mode, science_targets=science_pois
+            )
+            metrics_astar = AlgorithmRunMetrics(
+                algorithm="A*",
+                path_length_km=round((sum_astar.total_distance_meters or 0.0) / 1000.0, 3),
+                total_cost=round(astar_cost, 2),
+                execution_time_seconds=round(astar_sec, 4),
+                nodes_expanded=astar_exp,
+                max_slope_deg=round(sum_astar.max_slope_deg or 0.0, 1),
+                risk_category=sum_astar.risk_category or "low_risk",
+                waypoint_count=len(astar_nodes),
+            )
+
+            dijkstra_nodes, dijkstra_cost, dijkstra_exp, dijkstra_sec = dijkstra_search(
+                graph,
+                (s_row, s_col),
+                (d_row, d_col),
+                max_expansions=request.constraints.max_search_nodes,
+                timeout_seconds=timeout_seconds,
+                deadline=deadline,
+                overall_start_time=search_start,
+            )
+            sum_dijkstra, _, _, _, _ = reconstruct_route_summary(
+                dijkstra_nodes, graph, cropped_meta, request.mode, science_targets=science_pois
+            )
+            metrics_dijkstra = AlgorithmRunMetrics(
+                algorithm="Dijkstra",
+                path_length_km=round((sum_dijkstra.total_distance_meters or 0.0) / 1000.0, 3),
+                total_cost=round(dijkstra_cost, 2),
+                execution_time_seconds=round(dijkstra_sec, 4),
+                nodes_expanded=dijkstra_exp,
+                max_slope_deg=round(sum_dijkstra.max_slope_deg or 0.0, 1),
+                risk_category=sum_dijkstra.risk_category or "low_risk",
+                waypoint_count=len(dijkstra_nodes),
+            )
+
+            cost_diff = round(abs(astar_cost - dijkstra_cost), 2)
+            costs_equal = cost_diff <= 0.05
+            ratio = round(dijkstra_exp / max(astar_exp, 1), 2)
+            faster = "A*" if astar_sec <= dijkstra_sec else "Dijkstra"
+            opt_statement = (
+                f"Both A* and Dijkstra achieved optimal cost equivalence ({astar_cost:.2f} vs {dijkstra_cost:.2f}). "
+                f"A* expanded {astar_exp} states in {astar_sec * 1000:.1f}ms, achieving a {ratio}x state reduction "
+                f"over Dijkstra ({dijkstra_exp} states in {dijkstra_sec * 1000:.1f}ms)."
+                if costs_equal
+                else (
+                    f"A* cost ({astar_cost:.2f}) and Dijkstra cost ({dijkstra_cost:.2f}) differ by {cost_diff:.2f} units. "
+                    f"A* expanded {astar_exp} states vs Dijkstra {dijkstra_exp} states."
+                )
+            )
+
+            algorithm_comparison_report = AlgorithmComparisonReport(
+                astar=metrics_astar,
+                dijkstra=metrics_dijkstra,
+                cost_difference=cost_diff,
+                costs_equal=costs_equal,
+                faster_algorithm=faster,
+                node_expansion_ratio=ratio,
+                optimality_verified=costs_equal,
+                comparison_statement=opt_statement,
+            )
+            total_nodes_expanded += astar_exp + dijkstra_exp
 
         # 10. Route Search Execution
         if request.science_waypoints:
@@ -207,7 +298,7 @@ class RouteService:
             for leg_idx in range(len(all_leg_pixels) - 1):
                 p_from = all_leg_pixels[leg_idx]
                 p_to = all_leg_pixels[leg_idx + 1]
-                leg_nodes, leg_cost, leg_expansions, _ = astar_search(
+                leg_nodes, leg_cost, leg_expansions, _ = search_fn(
                     graph,
                     p_from,
                     p_to,
@@ -270,6 +361,7 @@ class RouteService:
                     timeout_seconds=timeout_seconds,
                     deadline=deadline,
                     overall_start_time=search_start,
+                    algorithm=req_algo if req_algo != "compare" else "astar",
                 )
                 total_nodes_expanded += alt_nodes
                 for a in alts:
@@ -280,7 +372,7 @@ class RouteService:
             # Autonomous science detour evaluation
             logger.info("Evaluating science-first mode candidate detours.")
             # 1. Compute direct route
-            direct_nodes, direct_cost, dir_expansions, _ = astar_search(
+            direct_nodes, direct_cost, dir_expansions, _ = search_fn(
                 graph,
                 (s_row, s_col),
                 (d_row, d_col),
@@ -321,7 +413,7 @@ class RouteService:
 
                 try:
                     # Evaluate start -> poi -> dest honoring configured max expansions and deadline
-                    leg1_nodes, leg1_cost, exp1, _ = astar_search(
+                    leg1_nodes, leg1_cost, exp1, _ = search_fn(
                         graph,
                         (s_row, s_col),
                         (p_row, p_col),
@@ -330,7 +422,7 @@ class RouteService:
                         deadline=deadline,
                         overall_start_time=search_start,
                     )
-                    leg2_nodes, leg2_cost, exp2, _ = astar_search(
+                    leg2_nodes, leg2_cost, exp2, _ = search_fn(
                         graph,
                         (p_row, p_col),
                         (d_row, d_col),
@@ -459,6 +551,7 @@ class RouteService:
                     timeout_seconds=timeout_seconds,
                     deadline=deadline,
                     overall_start_time=search_start,
+                    algorithm=req_algo if req_algo != "compare" else "astar",
                 )
                 total_nodes_expanded += alt_nodes
         else:
@@ -477,6 +570,7 @@ class RouteService:
                 timeout_seconds=timeout_seconds,
                 deadline=deadline,
                 overall_start_time=search_start,
+                algorithm=req_algo if req_algo != "compare" else "astar",
             )
             total_nodes_expanded += alt_nodes
 
@@ -568,8 +662,15 @@ class RouteService:
 
         mission_id = f"mission_{uuid.uuid4().hex[:12]}"
 
+        if req_algo == "compare":
+            algo_label = "A* vs Dijkstra Comparative Benchmark"
+        elif req_algo == "dijkstra":
+            algo_label = "Dijkstra (uniform-cost search)"
+        else:
+            algo_label = "A* (with admissible Euclidean heuristic)"
+
         stats = ComputationStats(
-            algorithm_used="A* (with admissible Euclidean heuristic)",
+            algorithm_used=algo_label,
             search_duration_seconds=round(time.perf_counter() - search_start, 4),
             nodes_expanded=total_nodes_expanded,  # Real measured count of expanded states
             grid_rows=cropped_meta.height,
@@ -589,4 +690,5 @@ class RouteService:
             stats=stats,
             limitations=limitations,
             robustness_assessment=robustness_assessment,
+            algorithm_comparison=algorithm_comparison_report,
         )

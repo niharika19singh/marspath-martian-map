@@ -336,6 +336,44 @@ const apiPreNoRaw = validateRouteExecutionPreconditions({
 });
 assert.deepEqual(apiPreNoRaw, { ok: true, error: null });
 
+// Dijkstra and Compare require algorithmSupported on API
+assert.equal(
+  validateRouteExecutionPreconditions({
+    live: true,
+    raw: null,
+    api: { url: 'http://localhost:8000', algorithmSupported: false },
+    algorithm: 'dijkstra',
+  }).ok,
+  false
+);
+assert.equal(
+  validateRouteExecutionPreconditions({
+    live: true,
+    raw: null,
+    api: { url: 'http://localhost:8000', algorithmSupported: false },
+    algorithm: 'compare',
+  }).ok,
+  false
+);
+assert.equal(
+  validateRouteExecutionPreconditions({
+    live: true,
+    raw: null,
+    api: { url: 'http://localhost:8000', algorithmSupported: true },
+    algorithm: 'dijkstra',
+  }).ok,
+  true
+);
+assert.equal(
+  validateRouteExecutionPreconditions({
+    live: true,
+    raw: null,
+    api: { url: 'http://localhost:8000', algorithmSupported: true },
+    algorithm: 'compare',
+  }).ok,
+  true
+);
+
 const browserPreNoRaw = validateRouteExecutionPreconditions({
   live: false,
   raw: null,

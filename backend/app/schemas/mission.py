@@ -11,6 +11,12 @@ class OptimizationMode(str, Enum):
     SCIENCE_FIRST = "science_first"
 
 
+class RoutingAlgorithm(str, Enum):
+    ASTAR = "astar"
+    DIJKSTRA = "dijkstra"
+    COMPARE = "compare"
+
+
 class RouteConstraints(BaseModel):
     """Configurable physical constraints for route viability."""
 

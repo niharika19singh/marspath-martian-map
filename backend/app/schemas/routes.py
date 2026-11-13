@@ -5,7 +5,11 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo, MarsCoordinate
-from backend.app.schemas.mission import OptimizationMode, RouteConstraints
+from backend.app.schemas.mission import (
+    OptimizationMode,
+    RouteConstraints,
+    RoutingAlgorithm,
+)
 
 
 class EvidenceQualityTier(str, Enum):
@@ -307,6 +311,10 @@ class RoutePlanRequest(BaseModel):
     crs_identifier: str = Field(
         default="IAU2000:49900",
         description="Planetary Coordinate Reference System identifier (default IAU2000:49900 Mars Sphere)",
+    )
+    algorithm: RoutingAlgorithm = Field(
+        default=RoutingAlgorithm.ASTAR,
+        description="Pathfinding algorithm: 'astar' (heuristic search), 'dijkstra' (uniform-cost search), or 'compare' (comparative benchmark)",
     )
     mode: OptimizationMode = Field(
         default=OptimizationMode.BALANCED,
@@ -1047,6 +1055,42 @@ class TerrainSourceSelectionReport(BaseModel):
     )
 
 
+class AlgorithmRunMetrics(BaseModel):
+    """Execution metrics and route results for a single search algorithm."""
+
+    algorithm: str = Field(..., description="Algorithm name ('A*' or 'Dijkstra')")
+    path_length_km: float = Field(..., description="Total 3D path distance in kilometers")
+    total_cost: float = Field(..., description="Total weighted traversal cost")
+    execution_time_seconds: float = Field(..., description="Search duration in seconds")
+    nodes_expanded: int = Field(..., description="Total graph search states expanded")
+    max_slope_deg: float = Field(..., description="Maximum slope along path in degrees")
+    risk_category: str = Field(..., description="Assessed route risk category")
+    waypoint_count: int = Field(..., description="Total coordinates in the generated path")
+
+
+class AlgorithmComparisonReport(BaseModel):
+    """Deterministic comparative evaluation between A* and Dijkstra graph search."""
+
+    astar: AlgorithmRunMetrics = Field(..., description="Metrics for A* with admissible heuristic")
+    dijkstra: AlgorithmRunMetrics = Field(..., description="Metrics for Dijkstra uniform-cost search")
+    cost_difference: float = Field(
+        ..., description="Absolute cost difference: |cost_astar - cost_dijkstra|"
+    )
+    costs_equal: bool = Field(
+        ...,
+        description="True if both algorithms found paths of equal minimum cost (within 0.05 units tolerance)",
+    )
+    faster_algorithm: str = Field(..., description="Algorithm that executed faster in wall-clock time")
+    node_expansion_ratio: float = Field(
+        ...,
+        description="Ratio of Dijkstra states expanded to A* states expanded (>= 1.0 expected)",
+    )
+    optimality_verified: bool = Field(
+        ..., description="True if cost equality is confirmed, proving A* optimality"
+    )
+    comparison_statement: str = Field(..., description="Authoritative analytical comparison statement")
+
+
 class RoutePlanResponse(BaseModel):
     """Complete route intelligence response."""
 
@@ -1069,6 +1113,10 @@ class RoutePlanResponse(BaseModel):
     limitations: list[str] = Field(
         default_factory=list,
         description="Explicit engineering limitations (e.g. resolution limitations, sub-pixel obstacle disclaimer)",
+    )
+    algorithm_comparison: AlgorithmComparisonReport | None = Field(
+        default=None,
+        description="Side-by-side performance and optimality comparison when algorithm is 'compare'; None otherwise",
     )
     robustness_assessment: RouteRobustnessAssessment | None = Field(
         default=None,

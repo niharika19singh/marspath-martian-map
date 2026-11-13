@@ -150,9 +150,9 @@ def test_openapi_exposes_evidence_passport_schemas():
         "science_waypoints",
         "num_alternatives",
         "robustness_config",
+        "algorithm",
     ]:
         assert field_name in req_props, f"Missing RoutePlanRequest property: {field_name}"
-    assert "algorithm" not in req_props
 
 
 def test_route_plan_with_robustness_stress_testing():

@@ -1,1 +1,17 @@
-{"source": "https://mars.nasa.gov/mmgis-maps/M20/Layers/M20_HiRISE_RGB_mosaic_25cm_v4p2", "source_title": "M20 HiRISE RGB mosaic 25cm v4p2", "tile_metadata": "https://mars.nasa.gov/mmgis-maps/M20/Layers/M20_HiRISE_RGB_mosaic_25cm_v4p2/tilemapresource.xml", "bounds": [77.18994140625, 18.354525529126644, 77.49755859375, 18.542116654448996], "width": 3584, "height": 2304, "tile_zoom": 14, "retrieved_utc": "2026-11-06T13:48:41Z", "missing_tiles": [[11705, 7333, "HTTP Error 403: Forbidden"], [11705, 7334, "HTTP Error 403: Forbidden"], [11705, 7335, "HTTP Error 403: Forbidden"], [11705, 7336, "HTTP Error 403: Forbidden"], [11705, 7337, "HTTP Error 403: Forbidden"], [11705, 7338, "HTTP Error 403: Forbidden"], [11705, 7339, "HTTP Error 403: Forbidden"], [11705, 7340, "HTTP Error 403: Forbidden"], [11705, 7341, "HTTP Error 403: Forbidden"]], "note": "Grayscale display derivative, downsampled from source pyramid; reference imagery only. Does not change the 200 m routing DEM."}
+{
+  "source": "https://mars.nasa.gov/mmgis-maps/M20/Layers/M20_HiRISE_RGB_mosaic_25cm_v4p2",
+  "source_title": "M20 HiRISE RGB mosaic 25cm v4p2",
+  "tile_metadata": "https://mars.nasa.gov/mmgis-maps/M20/Layers/M20_HiRISE_RGB_mosaic_25cm_v4p2/tilemapresource.xml",
+  "bounds": [
+    77.267962,
+    18.354526,
+    77.497559,
+    18.542117
+  ],
+  "width": 2675,
+  "height": 2304,
+  "tile_zoom": 14,
+  "retrieved_utc": "2026-11-06T13:48:41Z",
+  "missing_tiles": [],
+  "note": "Grayscale HiRISE RGB mosaic derivative, cropped to non-transparent observed delta extent (minx=77.267962). Reference imagery only; does not alter 200 m routing DEM."
+}

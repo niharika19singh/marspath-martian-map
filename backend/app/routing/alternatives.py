@@ -17,6 +17,7 @@ from backend.app.geospatial.crs import (
 from backend.app.geospatial.raster_loader import RasterMetadata
 from backend.app.routing.astar import astar_search
 from backend.app.routing.cost_model import MODE_WEIGHTS, calculate_edge_cost
+from backend.app.routing.dijkstra import dijkstra_search
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode, ScienceTarget
 from backend.app.schemas.routes import GeoJSONGeometry, RouteAlternative, RouteSummary
@@ -358,6 +359,7 @@ def generate_route_alternatives(
     timeout_seconds: float | None = None,
     deadline: float | None = None,
     overall_start_time: float | None = None,
+    algorithm: str = "astar",
 ) -> tuple[list[RouteAlternative], int]:
     """
     Computes 1 to 3 distinct candidate routes and attaches a structured
@@ -374,8 +376,10 @@ def generate_route_alternatives(
     effective_master_meta = master_meta or meta
     effective_prov = provenance or {}
 
+    search_fn = dijkstra_search if str(algorithm).lower() == "dijkstra" else astar_search
+
     # 1. Primary route
-    primary_nodes, primary_cost, nodes_1, _ = astar_search(
+    primary_nodes, primary_cost, nodes_1, _ = search_fn(
         graph,
         start_px,
         dest_px,
@@ -428,7 +432,7 @@ def generate_route_alternatives(
         penalized_edges[(v, u)] = 1500.0
 
     try:
-        alt_nodes, alt_cost, nodes_2, _ = astar_search(
+        alt_nodes, alt_cost, nodes_2, _ = search_fn(
             graph,
             start_px,
             dest_px,
@@ -516,7 +520,7 @@ def generate_route_alternatives(
                 mode=alt_mode,
             )
             try:
-                safety_nodes, safety_cost, nodes_3, _ = astar_search(
+                safety_nodes, safety_cost, nodes_3, _ = search_fn(
                     graph_safety,
                     start_px,
                     dest_px,
