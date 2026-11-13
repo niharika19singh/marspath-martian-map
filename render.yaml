@@ -2,6 +2,7 @@ services:
   - type: web
     name: marspath-backend
     runtime: python
+    plan: free
     # Build command: installs backend dependencies and provisions the official Jezero DEM
     # artifact into the container image at build time (backend/scripts/provision_build_dem.sh).
     # The build succeeds only if the real DEM is extracted, validated, and passes local SHA-256 integrity.
