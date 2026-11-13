@@ -400,6 +400,12 @@ def test_render_startup_reuses_already_provisioned_valid_dem():
             / "rasters"
             / "jezero_mola_hrsc_blended.tif"
         )
+        if not genuine_dem.exists() or not Path(f"{genuine_dem}.provenance.json").exists():
+            provision_runtime_dem(
+                dem_path=genuine_dem,
+                use_real_dem=True,
+                allow_fallback=False,
+            )
         shutil.copy(genuine_dem, out_path)
         shutil.copy(f"{genuine_dem}.provenance.json", f"{out_path}.provenance.json")
 

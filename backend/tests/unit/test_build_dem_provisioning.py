@@ -190,6 +190,12 @@ def _copy_genuine_jezero_dem(target_path: str | Path) -> tuple[str, str]:
     """Copies the genuine Jezero DEM raster and sidecar to target_path."""
     t_path = Path(target_path)
     t_path.parent.mkdir(parents=True, exist_ok=True)
+    if not GENUINE_DEM_PATH.exists() or not GENUINE_SIDECAR_PATH.exists():
+        provision_runtime_dem(
+            dem_path=GENUINE_DEM_PATH,
+            use_real_dem=True,
+            allow_fallback=False,
+        )
     shutil.copy(GENUINE_DEM_PATH, t_path)
     shutil.copy(GENUINE_SIDECAR_PATH, f"{t_path}.provenance.json")
 

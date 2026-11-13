@@ -33,6 +33,10 @@ jobs:
           bash -n backend/scripts/provision_build_dem.sh
           bash -n backend/scripts/start_render.sh
 
+      - name: Provision Jezero DEM Build Artifact
+        run: |
+          bash backend/scripts/provision_build_dem.sh
+
       - name: Run Ruff Lint Checks (Blocking)
         run: |
           ruff check backend/
