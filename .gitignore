@@ -36,6 +36,7 @@ htmlcov/
 backend/app/data/rasters/
 backend/app/data/downloads/
 backend/app/data/cache/
+backend/app/data/storage/
 *.tif
 *.tiff
 *.dem
