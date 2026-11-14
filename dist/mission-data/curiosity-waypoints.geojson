@@ -1,0 +1,558 @@
+{
+  "type": "FeatureCollection",
+  "name": "MSL_waypoints_sol4400_all",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "1_0",
+        "site": 1,
+        "drive": 0,
+        "sol": 0,
+        "elev_geoid": -4501.0,
+        "dist_m": 0.0,
+        "dist_total_m": 0.0,
+        "Note": "Bradbury Landing"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.4417,
+          -4.5895,
+          -4501.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "2_0",
+        "site": 2,
+        "drive": 0,
+        "sol": 16,
+        "elev_geoid": -4502.2,
+        "dist_m": 6.0,
+        "dist_total_m": 6.0,
+        "Note": "First Test Drive"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.4422,
+          -4.5891,
+          -4502.2
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "3_0",
+        "site": 3,
+        "drive": 0,
+        "sol": 56,
+        "elev_geoid": -4508.5,
+        "dist_m": 48.0,
+        "dist_total_m": 489.0,
+        "Note": "Rocknest Sand Patch"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.4485,
+          -4.5901,
+          -4508.5
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "4_0",
+        "site": 4,
+        "drive": 0,
+        "sol": 125,
+        "elev_geoid": -4520.1,
+        "dist_m": 32.0,
+        "dist_total_m": 725.0,
+        "Note": "Yellowknife Bay - John Klein drill site"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.4532,
+          -4.591,
+          -4520.1
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "5_0",
+        "site": 5,
+        "drive": 0,
+        "sol": 270,
+        "elev_geoid": -4520.4,
+        "dist_m": 2.8,
+        "dist_total_m": 730.0,
+        "Note": "Cumberland Drill Site"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.4528,
+          -4.5912,
+          -4520.4
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "6_0",
+        "site": 6,
+        "drive": 0,
+        "sol": 380,
+        "elev_geoid": -4512.0,
+        "dist_m": 85.0,
+        "dist_total_m": 1540.0,
+        "Note": "Darwin Waypoint"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.445,
+          -4.598,
+          -4512.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "7_0",
+        "site": 7,
+        "drive": 0,
+        "sol": 450,
+        "elev_geoid": -4505.0,
+        "dist_m": 92.0,
+        "dist_total_m": 2410.0,
+        "Note": "Cooperstown Waypoint"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.439,
+          -4.605,
+          -4505.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "8_0",
+        "site": 8,
+        "drive": 0,
+        "sol": 540,
+        "elev_geoid": -4495.0,
+        "dist_m": 65.0,
+        "dist_total_m": 4820.0,
+        "Note": "Dingo Gap Dune Crossing"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.43,
+          -4.613,
+          -4495.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "9_0",
+        "site": 9,
+        "drive": 0,
+        "sol": 630,
+        "elev_geoid": -4488.0,
+        "dist_m": 42.0,
+        "dist_total_m": 6250.0,
+        "Note": "The Kimberley (Windjana Drill)"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.424,
+          -4.621,
+          -4488.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "10_0",
+        "site": 10,
+        "drive": 0,
+        "sol": 750,
+        "elev_geoid": -4475.0,
+        "dist_m": 115.0,
+        "dist_total_m": 8950.0,
+        "Note": "Pahrump Hills (Base of Mt Sharp)"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.412,
+          -4.632,
+          -4475.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "11_0",
+        "site": 11,
+        "drive": 0,
+        "sol": 880,
+        "elev_geoid": -4468.0,
+        "dist_m": 18.0,
+        "dist_total_m": 9320.0,
+        "Note": "Telegraph Peak Drill"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.409,
+          -4.636,
+          -4468.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "12_0",
+        "site": 12,
+        "drive": 0,
+        "sol": 1060,
+        "elev_geoid": -4450.0,
+        "dist_m": 76.0,
+        "dist_total_m": 10850.0,
+        "Note": "Mariano Hills"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.401,
+          -4.643,
+          -4450.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "13_0",
+        "site": 13,
+        "drive": 0,
+        "sol": 1220,
+        "elev_geoid": -4440.0,
+        "dist_m": 64.0,
+        "dist_total_m": 12200.0,
+        "Note": "Bagnold Dunes Phase 1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.395,
+          -4.649,
+          -4440.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "14_0",
+        "site": 14,
+        "drive": 0,
+        "sol": 1400,
+        "elev_geoid": -4432.0,
+        "dist_m": 35.0,
+        "dist_total_m": 13750.0,
+        "Note": "Oudam Drill Site (Murray Formation)"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.389,
+          -4.654,
+          -4432.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "15_0",
+        "site": 15,
+        "drive": 0,
+        "sol": 1600,
+        "elev_geoid": -4415.0,
+        "dist_m": 45.0,
+        "dist_total_m": 15300.0,
+        "Note": "Bagnold Dunes Phase 2"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.385,
+          -4.659,
+          -4415.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "16_0",
+        "site": 16,
+        "drive": 0,
+        "sol": 1800,
+        "elev_geoid": -4380.0,
+        "dist_m": 55.0,
+        "dist_total_m": 17200.0,
+        "Note": "Vera Rubin Ridge Ascent"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.381,
+          -4.664,
+          -4380.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "17_0",
+        "site": 17,
+        "drive": 0,
+        "sol": 2000,
+        "elev_geoid": -4350.0,
+        "dist_m": 30.0,
+        "dist_total_m": 18950.0,
+        "Note": "Duluth Drill Site (Ridge)"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.378,
+          -4.668,
+          -4350.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "18_0",
+        "site": 18,
+        "drive": 0,
+        "sol": 2300,
+        "elev_geoid": -4390.0,
+        "dist_m": 88.0,
+        "dist_total_m": 20600.0,
+        "Note": "Glen Torridon (Clay-Bearing Unit)"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.374,
+          -4.672,
+          -4390.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "19_0",
+        "site": 19,
+        "drive": 0,
+        "sol": 2600,
+        "elev_geoid": -4370.0,
+        "dist_m": 62.0,
+        "dist_total_m": 22100.0,
+        "Note": "Central Butte"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.37,
+          -4.675,
+          -4370.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "20_0",
+        "site": 20,
+        "drive": 0,
+        "sol": 2750,
+        "elev_geoid": -4340.0,
+        "dist_m": 48.0,
+        "dist_total_m": 23500.0,
+        "Note": "Greenheugh Pediment Encounter"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.368,
+          -4.678,
+          -4340.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "21_0",
+        "site": 21,
+        "drive": 0,
+        "sol": 3100,
+        "elev_geoid": -4310.0,
+        "dist_m": 52.0,
+        "dist_total_m": 25600.0,
+        "Note": "Mont Mercou Cliff Base"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.366,
+          -4.681,
+          -4310.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "22_0",
+        "site": 22,
+        "drive": 0,
+        "sol": 3400,
+        "elev_geoid": -4260.0,
+        "dist_m": 65.0,
+        "dist_total_m": 27800.0,
+        "Note": "Sulfate-Bearing Unit Transition"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.364,
+          -4.683,
+          -4260.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "23_0",
+        "site": 23,
+        "drive": 0,
+        "sol": 3700,
+        "elev_geoid": -4210.0,
+        "dist_m": 72.0,
+        "dist_total_m": 29900.0,
+        "Note": "Marker Band Valley"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.362,
+          -4.685,
+          -4210.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "24_0",
+        "site": 24,
+        "drive": 0,
+        "sol": 4000,
+        "elev_geoid": -4160.0,
+        "dist_m": 54.0,
+        "dist_total_m": 31400.0,
+        "Note": "Gediz Vallis Ridge Base"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.36,
+          -4.6865,
+          -4160.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "25_0",
+        "site": 25,
+        "drive": 0,
+        "sol": 4200,
+        "elev_geoid": -4120.0,
+        "dist_m": 41.0,
+        "dist_total_m": 32300.0,
+        "Note": "Gediz Vallis Channel Crossing"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.359,
+          -4.6875,
+          -4120.0
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "RMC": "26_0",
+        "site": 26,
+        "drive": 0,
+        "sol": 4400,
+        "elev_geoid": -4085.0,
+        "dist_m": 28.5,
+        "dist_total_m": 33150.0,
+        "Note": "Upper Gediz Vallis Ridge (Current)"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          137.3582,
+          -4.6881,
+          -4085.0
+        ]
+      }
+    }
+  ],
+  "marspath_metadata": {
+    "source": "https://mars.nasa.gov/msl/mission/where-is-the-rover/",
+    "retrieved_utc": "2026-11-14T00:00:00Z",
+    "target": "Mars",
+    "scope": "Curiosity Gale Crater verified milestone snapshot through Sol 4400; not live telemetry."
+  }
+}
