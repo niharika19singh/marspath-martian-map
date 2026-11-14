@@ -33,7 +33,19 @@ jobs:
           bash -n backend/scripts/provision_build_dem.sh
           bash -n backend/scripts/start_render.sh
 
-      - name: Provision Jezero DEM Build Artifact
+      - name: Cache Jezero and HiRISE DEM Rasters
+        uses: actions/cache@v4
+        id: dem-cache
+        with:
+          path: backend/app/data/rasters/
+          key: dem-rasters-${{ runner.os }}-${{ hashFiles('backend/app/data/manifest.py', 'backend/app/data/ingestion.py', 'backend/scripts/provision_build_dem.sh') }}
+          restore-keys: |
+            dem-rasters-${{ runner.os }}-
+            dem-rasters-
+
+      - name: Provision Jezero and HiRISE DEM Build Artifacts
+        env:
+          MARSPATH_PROVISION_HIRISE: "true"
         run: |
           bash backend/scripts/provision_build_dem.sh
 
