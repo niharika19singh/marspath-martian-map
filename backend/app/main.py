@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.v1.data_status import router as data_status_router
 from backend.app.api.v1.health import router as health_router
+from backend.app.api.v1.intelligence import router as intelligence_router
 from backend.app.api.v1.layers import router as layers_router
 from backend.app.api.v1.routes import router as routes_router
 from backend.app.core.config import Settings, get_settings, validate_cors_origins
@@ -62,6 +63,7 @@ app.include_router(health_router)
 app.include_router(layers_router)
 app.include_router(data_status_router)
 app.include_router(routes_router)
+app.include_router(intelligence_router)
 
 
 @app.get("/", summary="Root landing index")
@@ -74,4 +76,9 @@ def root_index():
         "api_v1_layers": "/api/v1/layers",
         "api_v1_data_status": "/api/v1/data/status",
         "api_v1_route_plan": "/api/v1/routes/plan",
+        "api_v1_intelligence_status": "/api/v1/intelligence/status",
+        "api_v1_intelligence_spacecraft": "/api/v1/intelligence/spacecraft",
+        "api_v1_intelligence_rovers": "/api/v1/intelligence/rovers",
+        "api_v1_intelligence_observations": "/api/v1/intelligence/observations",
+        "api_v1_intelligence_timeline": "/api/v1/intelligence/timeline",
     }

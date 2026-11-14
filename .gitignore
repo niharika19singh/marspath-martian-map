@@ -10,7 +10,6 @@ venv/
 .deps/
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -25,6 +24,7 @@ wheels/
 *.egg
 
 # Testing & Coverage
+marspath-contract-response.json
 .pytest_cache/
 .coverage
 .coverage.*
@@ -49,6 +49,7 @@ backend/app/data/cache/
 !backend/tests/fixtures/*.json
 
 # Node & Frontend
+.vercel/
 node_modules/
 npm-debug.log*
 yarn-debug.log*
