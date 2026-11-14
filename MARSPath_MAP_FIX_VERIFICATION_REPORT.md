@@ -24,20 +24,20 @@ A final browser-based verification was conducted on the production build of `fix
 
 ## 2. Visual Acceptance Tests Pass/Fail Matrix
 
-All 10 required views were captured at 1440×900 using deterministic map coordinates and zoom levels. Screenshots are persisted in the artifact directory under `final_browser_verification/`.
+All 10 required views were captured at 1440×900 using deterministic map coordinates and zoom levels. Screenshots are persisted in the repository under `docs/evidence/map-fix/`.
 
 | ID | Test Scenario | Coordinates & Resolution | Acceptance Criteria | Result | Artifact Screenshot |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| **V-01** | **Global Viking Imagery** | `[0.0°E, 0.0°N]`<br>`14,500 m/px` | Continuous global NASA Viking MDIM 2.1 color mosaic; zero rectangular grey patches or NoData cutouts. | **PASS** | [`final_01_global_viking.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_01_global_viking.png) |
-| **V-02** | **Jezero CTX Overview** | `[77.4508°E, 18.4447°N]`<br>`65.0 m/px` | Regional 6 m/px CTX orthomosaic active over crater floor and western delta rim; seamless transition. | **PASS** | [`final_02_jezero_ctx_overview.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_02_jezero_ctx_overview.png) |
-| **V-03** | **HiRISE Local Imagery** | `[77.4200°E, 18.4060°N]`<br>`3.5 m/px` | Local 0.25 m/px HiRISE orthomosaic resolving rover-scale dune ripples and layered scarp facies. | **PASS** | [`final_03_hirise_local.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_03_hirise_local.png) |
-| **V-04** | **CTX to Viking Feathered Boundary** | `[77.7000°E, 18.4500°N]`<br>`30.0 m/px` | Eastern border of CTX (`77.699°E`) dissolves smoothly over 64 px (`destination-out`) into Viking; no knife-edge seam. | **PASS** | [`final_04_ctx_to_viking_feathered_boundary.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_04_ctx_to_viking_feathered_boundary.png) |
-| **V-05** | **HiRISE to CTX Feathered Boundary** | `[77.5840°E, 18.4400°N]`<br>`7.5 m/px` | Eastern border of HiRISE (`77.584°E`) dissolves smoothly over 48 px into CTX regional mosaic without rectangular cutouts. | **PASS** | [`final_05_hirise_to_ctx_feathered_boundary.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_05_hirise_to_ctx_feathered_boundary.png) |
-| **V-06** | **Return-Time Overlay with NoData** | `[77.4200°E, 18.4050°N]`<br>`12.0 m/px` | Reachable return-time overlay active; valid cells shaded with green/amber ($\alpha = 48\dots82$), while all unreached / NoData cells have $\alpha = 0$ (transparent). Basemap 100% visible beneath invalid cells. | **PASS** | [`final_06_returntime_nodata.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_06_returntime_nodata.png) |
-| **V-07** | **Coverage Disabled** | `[77.4500°E, 18.4200°N]`<br>`45.0 m/px` | "Data coverage" checkbox unchecked. Clean basemap with zero footprint outlines or grey bounding boxes. | **PASS** | [`final_07_coverage_disabled.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_07_coverage_disabled.png) |
-| **V-08** | **Coverage Enabled** | `[77.4500°E, 18.4200°N]`<br>`45.0 m/px` | "Data coverage" checkbox checked. Renders crisp, thin dashed green vector footprint outline (`#5cffb088`, width 1.6 px); no solid grey fill. | **PASS** | [`final_08_coverage_enabled.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_08_coverage_enabled.png) |
-| **V-09** | **Repeated Zoom/Pan Stability** | Varied across 10 zoom/pan cycles | Executed 10 consecutive pan-drag and mouse-wheel zoom cycles. Canvas compositing restored (`ctx.restore()`); no tile erasure or memory leakage. | **PASS** | [`final_09_zoom_pan_stability.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_09_zoom_pan_stability.png) |
-| **V-10** | **Route Planning with Markers** | `[77.4200°E, 18.4050°N]`<br>`14.0 m/px` | Start pin A, Destination pin B, turquoise route trajectory, midpoint ETA badge (3.28 km · 0.8 h), and elevation profile drawer cleanly rendered. | **PASS** | [`final_10_route_planning_markers.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_10_route_planning_markers.png) |
+| **V-01** | **Global Viking Imagery** | `[0.0°E, 0.0°N]`<br>`14,500 m/px` | Continuous global NASA Viking MDIM 2.1 color mosaic; zero rectangular grey patches or NoData cutouts. | **PASS** | [`V-01-global-viking.png`](./docs/evidence/map-fix/V-01-global-viking.png) |
+| **V-02** | **Jezero CTX Overview** | `[77.4508°E, 18.4447°N]`<br>`65.0 m/px` | Regional 6 m/px CTX orthomosaic active over crater floor and western delta rim; seamless transition. | **PASS** | [`V-02-CTX-regional.png`](./docs/evidence/map-fix/V-02-CTX-regional.png) |
+| **V-03** | **HiRISE Local Imagery** | `[77.4200°E, 18.4060°N]`<br>`3.5 m/px` | Local 0.25 m/px HiRISE orthomosaic resolving rover-scale dune ripples and layered scarp facies. | **PASS** | [`V-03-HiRISE-local.png`](./docs/evidence/map-fix/V-03-HiRISE-local.png) |
+| **V-04** | **CTX to Viking Feathered Boundary** | `[77.7000°E, 18.4500°N]`<br>`30.0 m/px` | Eastern border of CTX (`77.699°E`) dissolves smoothly over 64 px (`destination-out`) into Viking; no knife-edge seam. | **PASS** | [`V-04-CTX-to-viking-boundary.png`](./docs/evidence/map-fix/V-04-CTX-to-viking-boundary.png) |
+| **V-05** | **HiRISE to CTX Feathered Boundary** | `[77.5840°E, 18.4400°N]`<br>`7.5 m/px` | Eastern border of HiRISE (`77.584°E`) dissolves smoothly over 48 px into CTX regional mosaic without rectangular cutouts. | **PASS** | [`V-05-HiRISE-to-CTX-boundary.png`](./docs/evidence/map-fix/V-05-HiRISE-to-CTX-boundary.png) |
+| **V-06** | **Return-Time Overlay with NoData** | `[77.4200°E, 18.4050°N]`<br>`12.0 m/px` | Reachable return-time overlay active; valid cells shaded with green/amber ($\alpha = 48\dots82$), while all unreached / NoData cells have $\alpha = 0$ (transparent). Basemap 100% visible beneath invalid cells. | **PASS** | [`V-06-time-overlay-nodata.png`](./docs/evidence/map-fix/V-06-time-overlay-nodata.png) |
+| **V-07** | **Coverage Disabled** | `[77.4500°E, 18.4200°N]`<br>`45.0 m/px` | "Data coverage" checkbox unchecked. Clean basemap with zero footprint outlines or grey bounding boxes. | **PASS** | [`V-07-coverage-disabled.png`](./docs/evidence/map-fix/V-07-coverage-disabled.png) |
+| **V-08** | **Coverage Enabled** | `[77.4500°E, 18.4200°N]`<br>`45.0 m/px` | "Data coverage" checkbox checked. Renders crisp, thin dashed green vector footprint outline (`#5cffb088`, width 1.6 px); no solid grey fill. | **PASS** | [`V-08-coverage-enabled.png`](./docs/evidence/map-fix/V-08-coverage-enabled.png) |
+| **V-09** | **Repeated Zoom/Pan Stability** | Varied across 10 zoom/pan cycles | Executed 10 consecutive pan-drag and mouse-wheel zoom cycles. Canvas compositing restored (`ctx.restore()`); no tile erasure or memory leakage. | **PASS** | [`V-09-zoom-pan-stability.png`](./docs/evidence/map-fix/V-09-zoom-pan-stability.png) |
+| **V-10** | **Route Planning with Markers** | `[77.4200°E, 18.4050°N]`<br>`14.0 m/px` | Start pin A, Destination pin B, turquoise route trajectory, midpoint ETA badge (3.28 km · 0.8 h), and elevation profile drawer cleanly rendered. | **PASS** | [`V-10-route-planning.png`](./docs/evidence/map-fix/V-10-route-planning.png) |
 
 ---
 
@@ -66,7 +66,7 @@ All 10 required views were captured at 1440×900 using deterministic map coordin
 
 ## 4. Authoritative WMTS Telemetry & External Imagery Audit
 
-During browser verification, 389 live WMTS tile requests and GetCapabilities requests were captured and recorded in [`wmts_network_audit.json`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/wmts_network_audit.json).
+During browser verification, 389 live WMTS tile requests and GetCapabilities requests were captured and recorded in [`wmts_network_audit.json`](./docs/evidence/map-fix/wmts_network_audit.json).
 
 ### Imagery Tier Catalog & Request Metadata
 
@@ -81,7 +81,7 @@ During browser verification, 389 live WMTS tile requests and GetCapabilities req
 To verify fallback behavior without false claims, a genuine network failure was injected using Playwright:
 - **Simulation:** Injected `HTTP 500` server errors on 6 regional CTX tiles (`default028mm/11/814/*.png`).
 - **Observed Behavior:** OpenLayers caught the HTTP 500 tile errors via `recordTileErr('ctx')`. The map did **not** crash, unhandled exceptions were zero, and the continuous Viking global mosaic layer underneath rendered seamlessly in place of the missing regional tiles.
-- **Visual Evidence:** Captured in [`final_fallback_simulated_ctx_error.png`](file:///Users/user/.gemini/antigravity/brain/f9025004-a488-449d-947c-219230fab331/final_browser_verification/final_fallback_simulated_ctx_error.png).
+- **Visual Evidence:** Captured in [`V-fallback-simulated-ctx-error.png`](./docs/evidence/map-fix/V-fallback-simulated-ctx-error.png).
 
 ---
 
