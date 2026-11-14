@@ -11,6 +11,7 @@ import { buildTerrain } from './terrain.js';
 import Icon from './Icons.jsx';
 import { resolveInitialApiUrl, resolveTerrainProvenance, resolveAlternativeShortfall, canSubmitRoute, validateRouteExecutionPreconditions } from './integration.js';
 import IntelligencePanel from './IntelligencePanel.jsx';
+import NasaDataPanel from './NasaDataPanel.jsx';
 import {
   fetchSpacecraftList,
   fetchGroundTrack,
@@ -41,7 +42,7 @@ function Dialog({ onClose, children, label = 'Close dialog' }) {
 function App() {
   const [missionView, setMissionView] = useState(() => {
     const v = new URLSearchParams(location.search).get('view');
-    return v === 'planner' ? 'planner' : v === 'intelligence' ? 'intelligence' : 'history';
+    return v === 'planner' ? 'planner' : v === 'intelligence' ? 'intelligence' : v === 'nasa-data' ? 'nasa-data' : 'history';
   });
 
   const [traverse, setTraverse] = useState(null);
@@ -52,9 +53,11 @@ function App() {
   const [showWaypoints, setShowWaypoints] = useState(true);
   const [historyFit, setHistoryFit] = useState(0);
   const [waypoint, setWaypoint] = useState(null);
+  const [focusedProduct, setFocusedProduct] = useState(null);
 
   const historyMode = missionView === 'history';
   const intelligenceMode = missionView === 'intelligence';
+  const nasaDataMode = missionView === 'nasa-data';
   const plannerMode = missionView === 'planner';
 
   const drives = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
@@ -126,6 +129,7 @@ function App() {
     const url = new URL(window.location);
     if (mode === 'planner') url.searchParams.set('view', 'planner');
     else if (mode === 'intelligence') url.searchParams.set('view', 'intelligence');
+    else if (mode === 'nasa-data') url.searchParams.set('view', 'nasa-data');
     else url.searchParams.delete('view');
     window.history.replaceState({}, '', url);
 
@@ -663,6 +667,7 @@ function App() {
             }}
             curiosityTraverse={curiosityTraverse}
             curiosityWaypoints={curiosityWaypoints}
+            focusedProduct={focusedProduct}
           />
         ) : loadError ? (
           live ? (
@@ -695,13 +700,13 @@ function App() {
         {!leftOpen && (
           <button className="route-reopen glass" onClick={() => setLeftOpen(true)} aria-label="Open mission panel">
             <Icon name="sliders"/>
-            {historyMode ? 'Rover traverse' : intelligenceMode ? 'Live Intelligence' : 'Route design'}
+            {historyMode ? 'Rover traverse' : intelligenceMode ? 'Live Intelligence' : nasaDataMode ? 'NASA Data & Intelligence' : 'Route design'}
           </button>
         )}
 
-        <aside className={'floating-left glass ' + (leftOpen ? '' : 'collapsed')} inert={!leftOpen} aria-label="Mission Controls">
+        <aside className={'floating-left glass ' + (leftOpen ? '' : 'collapsed') + (nasaDataMode ? ' nasa-mode' : '')} inert={!leftOpen} aria-label="Mission Controls">
           <div className="panel-heading">
-            <h1>{historyMode ? 'Rover traverse' : intelligenceMode ? 'Live Mars Intelligence' : 'Route design'}</h1>
+            <h1>{historyMode ? 'Rover traverse' : intelligenceMode ? 'Live Mars Intelligence' : nasaDataMode ? 'NASA Data & Intelligence' : 'Route design'}</h1>
             <button className="icon-button" onClick={() => setLeftOpen(false)} aria-label="Collapse panel">
               <Icon name="left"/>
             </button>
@@ -716,9 +721,29 @@ function App() {
             <button className={intelligenceMode ? 'active' : ''} aria-pressed={intelligenceMode} onClick={() => switchMission('intelligence')}>
               Live Mars Intelligence
             </button>
+            <button className={nasaDataMode ? 'active' : ''} aria-pressed={nasaDataMode} onClick={() => switchMission('nasa-data')}>
+              NASA Data &amp; Intelligence
+            </button>
           </div>
 
-          {intelligenceMode ? (
+          {nasaDataMode ? (
+            <NasaDataPanel
+              apiUrl={api?.url || ''}
+              onFocusProduct={prod => {
+                setFocusedProduct(prod);
+                if (prod.bounds) {
+                  const centerLon = (prod.bounds.min_lon + prod.bounds.max_lon) / 2;
+                  const centerLat = (prod.bounds.min_lat + prod.bounds.max_lat) / 2;
+                  mapActions.current?.focus({ lon: centerLon, lat: centerLat, zoom: 10 });
+                } else if (prod.footprint_geojson?.geometry?.coordinates) {
+                  const c = prod.footprint_geojson.geometry.coordinates;
+                  const pt = Array.isArray(c[0]) ? c[0][0] : c;
+                  if (pt) mapActions.current?.focus({ lon: pt[0], lat: pt[1], zoom: 10 });
+                }
+              }}
+              onClose={() => setLeftOpen(false)}
+            />
+          ) : intelligenceMode ? (
             <IntelligencePanel
               spacecraftList={spacecraftList}
               selectedSpacecraft={selectedSpacecraft}
