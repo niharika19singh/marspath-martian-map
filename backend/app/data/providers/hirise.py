@@ -108,10 +108,10 @@ class HiRISERasterProvider(BaseRasterProvider):
       most once per file version across all route, status, and layer requests.
     """
 
-    DELTA_REGION_MIN_LON = 77.30
-    DELTA_REGION_MAX_LON = 77.55
+    DELTA_REGION_MIN_LON = 77.22
+    DELTA_REGION_MAX_LON = 77.59
     DELTA_REGION_MIN_LAT = 18.30
-    DELTA_REGION_MAX_LAT = 18.52
+    DELTA_REGION_MAX_LAT = 18.67
 
     MIN_RESOLUTION_METERS = 0.15
     MAX_RESOLUTION_METERS = 25.0
@@ -131,7 +131,15 @@ class HiRISERasterProvider(BaseRasterProvider):
         self._cached_validation: HiRISEValidationResult | None = None
         self._cached_file_identity: tuple[str, int, int, int, int, int] | None = None
         self._manifest_entry = next(
-            (p for p in DATA_CATALOG_MANIFEST if p["id"] == "dem_hirise_jezero_delta_1m"),
+            (
+                p
+                for p in DATA_CATALOG_MANIFEST
+                if p["id"]
+                in (
+                    "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40",
+                    "dem_hirise_jezero_delta_1m",
+                )
+            ),
             {},
         )
 
@@ -626,7 +634,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                 prov_dict: dict[str, Any] = {
                     "dataset_name": matched_manifest.get("product_name")
                     or matched_manifest.get("title")
-                    or "HiRISE Jezero Crater Western Delta Digital Terrain Model (DTM)",
+                    or "Mars 2020 Terrain Relative Navigation HiRISE DTM Mosaic",
                     "official_product_id": matched_manifest["id"],
                     "mission_instruments": matched_manifest.get(
                         "mission_instruments", ["MRO HiRISE Stereo Processing"]
@@ -645,6 +653,62 @@ class HiRISERasterProvider(BaseRasterProvider):
                     "local_integrity_verified": True,
                     "source_checksum_verified": True,
                     "real_data_validation_status": "verified_source",
+                    "provenance_verification_method": ver_method,
+                    "fallback_reason": None,
+                    "dem_file_path": self.dem_path,
+                    "file_format": file_format,
+                    "file_sha256": file_sha,
+                    "crs": meta.crs_str,
+                    "coordinate_type": meta.coordinate_type,
+                    "units": meta.vertical_units,
+                    "vertical_datum": meta.vertical_datum,
+                    "resolution_meters": native_res_m,
+                    "native_resolution_meters": native_res_m,
+                    "effective_resolution_meters": native_res_m,
+                    "aggregation_applied": False,
+                    "aggregation_factor": 1,
+                    "aggregation_method": "none",
+                    "bounds": {
+                        "min_lon": round(meta.min_lon, 6),
+                        "min_lat": round(meta.min_lat, 6),
+                        "max_lon": round(meta.max_lon, 6),
+                        "max_lat": round(meta.max_lat, 6),
+                    },
+                    "nodata_value": meta.nodata_value,
+                    "pds3_label_metadata": pds3_meta,
+                    "vertical_unit_conversion": conv_note,
+                    "raster_statistics": stats,
+                    "provenance_limitations": limitations,
+                }
+            elif ver_method == "official_endpoint_retrieved_checksum_unverified" and matched_manifest:
+                limitations.insert(
+                    0,
+                    "Retrieved from official USGS/PDS HTTPS endpoint via HTTP Range extraction; local GeoTIFF and extracted float32 array SHA-256 integrity are verified.",
+                )
+                prov_dict = {
+                    "dataset_name": matched_manifest.get("product_name")
+                    or matched_manifest.get("title")
+                    or "Mars 2020 Terrain Relative Navigation HiRISE DTM Mosaic",
+                    "official_product_id": matched_manifest["id"],
+                    "mission_instruments": matched_manifest.get(
+                        "mission_instruments",
+                        ["MRO HiRISE", "Mars Global Surveyor MOLA", "USGS ISIS3/SOCET SET"],
+                    ),
+                    "data_publisher": matched_manifest.get(
+                        "publisher", "USGS Astrogeology Science Center / NASA PDS"
+                    ),
+                    "pds_doi": matched_manifest.get("pds_doi") or matched_manifest.get("doi"),
+                    "official_source_url": matched_manifest.get("landing_page")
+                    or matched_manifest.get("official_url")
+                    or matched_manifest.get("upstream_url"),
+                    "data_mode": "real_official_endpoint_unverified_checksum",
+                    "source_tier": "localized_high_resolution_dtm",
+                    "hirise_enabled": self.enabled,
+                    "real_dem_requested": True,
+                    "real_dem_loaded": True,
+                    "local_integrity_verified": True,
+                    "source_checksum_verified": False,
+                    "real_data_validation_status": "official_endpoint_retrieved_checksum_unverified",
                     "provenance_verification_method": ver_method,
                     "fallback_reason": None,
                     "dem_file_path": self.dem_path,

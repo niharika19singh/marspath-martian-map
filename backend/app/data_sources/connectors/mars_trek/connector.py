@@ -12,71 +12,79 @@ from backend.app.data_sources.schemas.models import (
     DataSourceEntry,
 )
 
-# Authoritative NASA Mars Trek WMTS configurations
+# Authoritative NASA Mars Trek WMTS configurations (verified against live OGC WMTS 1.0.0 capabilities)
 MARS_TREK_WMTS_ENDPOINT = "https://trek.nasa.gov/tiles/Mars/EQ/"
 MARS_TREK_ENDPOINT = MARS_TREK_WMTS_ENDPOINT
-MARS_TREK_CAPABILITIES_URL = "https://trek.nasa.gov/tiles/Mars/EQ/WMTSCapabilities.xml"
+MARS_TREK_CAPABILITIES_URL = (
+    "https://trek.nasa.gov/tiles/Mars/EQ/"
+    "Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw/1.0.0/WMTSCapabilities.xml"
+)
 
 MARS_TREK_OFFICIAL_LAYERS = [
     {
-        "product_id": "TREK_JEZERO_HIRISE_MOSAIC_25CM",
-        "title": "NASA Mars Trek Jezero Crater Controlled HiRISE Mosaic",
-        "layer_identifier": "Mars_MRO_HiRISE_Mosaic_Jezero_25cm",
-        "format": "image/png",
-        "spatial_resolution_m": 0.25,
-        "min_zoom": 10,
-        "max_zoom": 18,
-        "bounds": [77.20, 18.25, 77.60, 18.60],
-        "description": "Controlled orthorectified high-resolution HiRISE mosaic of the Jezero Crater delta fan, landing ellipse, and western rim.",
-        "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MRO_HiRISE_Mosaic_Jezero_25cm/1.0.0/default/default028mm/{z}/{y}/{x}.png",
+        "product_id": "TREK_HRSC_MOLA_BLEND_DEM",
+        "title": "NASA Mars Trek HRSC–MOLA Blended Global Shaded Relief (200m)",
+        "layer_identifier": "Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw",
+        "format": "image/jpeg",
+        "spatial_resolution_m": 200.0,
+        "min_zoom": 0,
+        "max_zoom": 8,
+        "bounds": [-180.0, -90.0, 180.0, 90.0],
+        "capabilities_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw/1.0.0/WMTSCapabilities.xml",
+        "description": "Global 200 m/pixel blended digital elevation model color hillshade merging Mars Express HRSC stereo and MGS MOLA topography (EPSG:104905 / default028mm).",
+        "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
     },
     {
         "product_id": "TREK_MOLA_COLOR_HILLSHADE",
-        "title": "NASA Mars Trek MGS MOLA Colour Shaded Relief",
+        "title": "NASA Mars Trek MGS MOLA Global Colour Shaded Relief (463m)",
         "layer_identifier": "Mars_MGS_MOLA_ClrShade_merge_global_463m",
         "format": "image/jpeg",
         "spatial_resolution_m": 463.0,
         "min_zoom": 0,
         "max_zoom": 7,
         "bounds": [-180.0, -90.0, 180.0, 90.0],
+        "capabilities_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MGS_MOLA_ClrShade_merge_global_463m/1.0.0/WMTSCapabilities.xml",
         "description": "Global color shaded topography derived from the Mars Orbiter Laser Altimeter (MOLA) aboard Mars Global Surveyor.",
         "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MGS_MOLA_ClrShade_merge_global_463m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
     },
     {
-        "product_id": "TREK_HRSC_MOLA_BLEND_DEM",
-        "title": "NASA Mars Trek HRSC–MOLA Blended DEM Shaded Relief",
-        "layer_identifier": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
-        "format": "image/jpeg",
-        "spatial_resolution_m": 200.0,
-        "min_zoom": 0,
-        "max_zoom": 9,
-        "bounds": [-180.0, -90.0, 180.0, 90.0],
-        "description": "Global 200 m/pixel blended digital elevation model hillshade merging Mars Express HRSC stereo and MGS MOLA topography.",
-        "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
-    },
-    {
         "product_id": "TREK_VIKING_MDIM21_COLOR",
-        "title": "NASA Mars Trek Viking Orbiter MDIM 2.1 Global Mosaic",
+        "title": "NASA Mars Trek Viking Orbiter MDIM 2.1 Global Mosaic (232m)",
         "layer_identifier": "Mars_Viking_MDIM21_ClrMosaic_global_232m",
         "format": "image/jpeg",
         "spatial_resolution_m": 232.0,
         "min_zoom": 0,
         "max_zoom": 7,
         "bounds": [-180.0, -90.0, 180.0, 90.0],
+        "capabilities_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/WMTSCapabilities.xml",
         "description": "Standard Mars Digital Image Model (MDIM 2.1) global visual albedo colour mosaic from Viking Orbiter cameras.",
         "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
     },
     {
+        "product_id": "TREK_JEZERO_HIRISE_MOSAIC_25CM",
+        "title": "Mars 2020 TRN HiRISE Orthorectified Image Mosaic (0.25m, DOI: 10.5066/P9QJDP48)",
+        "layer_identifier": "JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd",
+        "format": "image/png",
+        "spatial_resolution_m": 0.25,
+        "min_zoom": 0,
+        "max_zoom": 17,
+        "bounds": [77.2229331, 18.3067994, 77.583964, 18.669315],
+        "capabilities_url": "https://trek.nasa.gov/tiles/Mars/EQ/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd/1.0.0/WMTSCapabilities.xml",
+        "description": "Official USGS Mars 2020 Terrain Relative Navigation HiRISE Orthorectified Image Mosaic (0.25 m/px, DOI: 10.5066/P9QJDP48) covering the Jezero Crater landing region and Western Delta.",
+        "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd/1.0.0/default/default028mm/{z}/{y}/{x}.png",
+    },
+    {
         "product_id": "TREK_MRO_CTX_JEZERO_REGIONAL",
-        "title": "NASA Mars Trek MRO CTX Jezero Regional Context Mosaic",
-        "layer_identifier": "Mars_MRO_CTX_Mosaic_Jezero_6m",
-        "format": "image/jpeg",
+        "title": "Mars 2020 TRN CTX Orthorectified Image Mosaic (6m, DOI: 10.5066/P9GV1ND3)",
+        "layer_identifier": "JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0",
+        "format": "image/png",
         "spatial_resolution_m": 6.0,
-        "min_zoom": 6,
-        "max_zoom": 14,
-        "bounds": [76.5, 17.5, 78.5, 19.2],
-        "description": "Controlled 6 m/pixel Context Camera (CTX) regional mosaic covering Jezero Crater, Nili Fossae, and Isidis Planitia border.",
-        "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MRO_CTX_Mosaic_Jezero_6m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
+        "min_zoom": 0,
+        "max_zoom": 13,
+        "bounds": [77.1604655, 18.2110274, 77.6991776, 18.7211945],
+        "capabilities_url": "https://trek.nasa.gov/tiles/Mars/EQ/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0/1.0.0/WMTSCapabilities.xml",
+        "description": "Official USGS Mars 2020 Terrain Relative Navigation CTX Orthorectified Image Mosaic (6.0 m/px, DOI: 10.5066/P9GV1ND3) covering Jezero Crater.",
+        "tile_url": "https://trek.nasa.gov/tiles/Mars/EQ/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0/1.0.0/default/default028mm/{z}/{y}/{x}.png",
     },
 ]
 
@@ -90,14 +98,19 @@ class MarsTrekConnector(BaseDataSourceConnector):
 
     async def check_connection(self) -> tuple[ConnectionState, str | None]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                res = await client.head(MARS_TREK_ENDPOINT)
-                if res.status_code in (200, 301, 302, 403):
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+                res = await client.get(MARS_TREK_CAPABILITIES_URL)
+                if res.status_code == 200 and "Capabilities" in res.text:
                     return ConnectionState.CONNECTED, None
-                return ConnectionState.CONNECTED, None
-        except Exception:
-            # Fallback to connected via cached OGC capabilities
-            return ConnectionState.CONNECTED, None
+                return (
+                    ConnectionState.STALE,
+                    f"Mars Trek WMTS returned HTTP {res.status_code}; using cached WMTS descriptors.",
+                )
+        except Exception as exc:
+            return (
+                ConnectionState.STALE,
+                f"Mars Trek WMTS network probe failed ({type(exc).__name__}); using cached WMTS descriptors.",
+            )
 
     async def fetch_metadata(self) -> dict[str, Any]:
         if self._capabilities_cache:

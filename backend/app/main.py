@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.app.api.v1.conditions import router as conditions_router
 from backend.app.api.v1.data_status import router as data_status_router
 from backend.app.api.v1.health import router as health_router
 from backend.app.api.v1.intelligence import router as intelligence_router
@@ -67,7 +68,10 @@ app.include_router(layers_router)
 app.include_router(data_status_router)
 app.include_router(routes_router)
 app.include_router(intelligence_router)
+app.include_router(conditions_router, prefix="/api")
+app.include_router(conditions_router, prefix="/api/v1")
 app.include_router(data_sources_router, prefix="/api/v1")
+app.include_router(data_sources_router, prefix="/api")
 app.include_router(cloud_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
 

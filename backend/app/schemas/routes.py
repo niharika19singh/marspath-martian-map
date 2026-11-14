@@ -341,6 +341,35 @@ class RoutePlanRequest(BaseModel):
             "hypothetical terrain perturbations. Disabled when omitted or enabled=False."
         ),
     )
+    departure_utc: str | None = Field(
+        default=None,
+        description="Optional ISO-8601 departure UTC timestamp for Mars24 Route Mission Clock and shadow analysis",
+    )
+    walking_speed_m_s: float | None = Field(
+        default=None,
+        gt=0.01,
+        le=20.0,
+        description="Optional nominal walking/rover base speed in m/s for the Route Mission Clock (default 1.1111 m/s)",
+    )
+    include_return_leg: bool = Field(
+        default=True,
+        description="Whether the Route Mission Clock should include a return leg back to the start coordinate",
+    )
+    max_eva_hours: float = Field(
+        default=8.0,
+        gt=0.5,
+        le=72.0,
+        description="Maximum EVA duration budget in Earth hours for science-per-EVA-hour and stress evaluation",
+    )
+    preferred_dem_source: str | None = Field(
+        default=None,
+        description=(
+            "Optional terrain elevation source preference: 'auto', 'hirise_1m', or 'mola_hrsc_200m'. "
+            "When 'hirise_1m' or 'auto' is specified, the route planner evaluates the local validated "
+            "USGS HiRISE 1 m DTM (10.5066/P9REJ9JN) first; when 'mola_hrsc_200m' is specified, the "
+            "regional 200 m MOLA-HRSC DEM (10.5066/P907276M) is selected."
+        ),
+    )
 
 
 class RouteSegment(BaseModel):
@@ -589,6 +618,26 @@ class RouteAlternative(BaseModel):
     evidence_passport: RouteEvidencePassport | None = Field(
         default=None,
         description="Structured Terrain Evidence & Route Confidence Passport for this route alternative",
+    )
+    uncertainty_summary: dict[str, Any] | None = Field(
+        default=None,
+        description="Segment-level data support classification (STRONG/MODERATE/WEAK/UNKNOWN) and uncertainty exposure",
+    )
+    science_eva_plan: dict[str, Any] | None = Field(
+        default=None,
+        description="Geological science target evaluation and Science Return per EVA Hour breakdown",
+    )
+    mission_clock: dict[str, Any] | None = Field(
+        default=None,
+        description="Mars24 Route Mission Clock with segment arrival UTC, LTST, solar elevation, DEM shadows, and return leg",
+    )
+    is_pareto_optimal: bool = Field(
+        default=True,
+        description="True when this route is non-dominated on the 4-objective Pareto frontier",
+    )
+    pareto_archetype: str | None = Field(
+        default=None,
+        description="Multi-objective Pareto archetype label and trade-off classification",
     )
 
 
@@ -1124,6 +1173,22 @@ class RoutePlanResponse(BaseModel):
             "Optional deterministic terrain perturbation route stability assessment when "
             "robustness_config.enabled is True; None when disabled or omitted"
         ),
+    )
+    pareto_frontier: dict[str, Any] | None = Field(
+        default=None,
+        description="Multi-objective Pareto non-dominated evaluation across duration, terrain hazard, uncertainty exposure, and science return",
+    )
+    reconnaissance_plan: dict[str, Any] | None = Field(
+        default=None,
+        description="Next-best reconnaissance planner recommendations (existing NASA PDS/ODE observations first, then hypothetical tasking)",
+    )
+    operational_stress_suite: dict[str, Any] | None = Field(
+        default=None,
+        description="Deterministic 7-scenario operational mission stress test evaluation preserving baseline route",
+    )
+    mission_brief_markdown: str | None = Field(
+        default=None,
+        description="Structured printable Markdown operational Mission Brief",
     )
 
 

@@ -97,13 +97,19 @@ class PdsReleasesConnector(BaseDataSourceConnector):
 
     async def check_connection(self) -> tuple[ConnectionState, str | None]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                 res = await client.head(PDS_RELEASES_URL)
                 if res.status_code in (200, 301, 302, 403):
                     return ConnectionState.CONNECTED, None
-                return ConnectionState.CONNECTED, None
-        except Exception:
-            return ConnectionState.CONNECTED, None
+                return (
+                    ConnectionState.STALE,
+                    f"PDS Release bulletin returned HTTP {res.status_code}; serving indexed release schedule.",
+                )
+        except Exception as exc:
+            return (
+                ConnectionState.STALE,
+                f"PDS Release bulletin unreachable ({type(exc).__name__}); serving indexed release schedule.",
+            )
 
     async def fetch_metadata(self) -> dict[str, Any]:
         return {

@@ -112,11 +112,21 @@ export function resolveTerrainProvenance({ live, raw, loadError, api, result, ac
       upstreamChecksumText = 'Unverified';
     }
 
+    const productId = passportSource?.product_id || resultProv?.official_product_id || status?.active_dem_product_id || null;
+    const isHi = productId === 'JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40' || resultProv?.pds_doi === '10.5066/P9REJ9JN' || status?.dem_resolution_meters === 1.0;
+    const doi = resultProv?.pds_doi || (isHi ? '10.5066/P9REJ9JN' : status?.active_dem_doi || '10.5066/P907276M');
+    const activeDemSourceLabel = isHi ? 'USGS HiRISE DTM · 1 m/px' : 'USGS MOLA-HRSC DEM · 200 m/px';
+
     return {
       isSynthetic,
       dataMode,
       validationStatus,
       datasetName,
+      productId,
+      officialProductId: productId,
+      doi,
+      datasetDoi: doi,
+      activeDemSourceLabel,
       localIntegrityVerified,
       sourceChecksumVerified,
       officialSourceUrl,
@@ -141,17 +151,30 @@ export function resolveTerrainProvenance({ live, raw, loadError, api, result, ac
   const validationStatus =
     passportSource?.validation_status ||
     (isSynthetic ? 'synthetic_test_fixture' : 'official_endpoint_retrieved_checksum_unverified');
-  const datasetName = raw?.source_name || (loadError ? 'Local terrain unavailable' : 'Loading terrain');
+  const datasetName =
+    passportSource?.dataset_name ||
+    result?.provenance?.dataset_name ||
+    raw?.source_name ||
+    (loadError ? 'Local terrain unavailable' : 'Loading terrain');
   const localIntegrityVerified = Boolean(raw?.local_integrity_verified);
   const sourceChecksumVerified = Boolean(passportSource?.source_checksum_verified ?? false);
   const browserSourceUrl = raw?.source_page || raw?.source_url || 'https://astrogeology.usgs.gov/';
   const officialSourceUrl = !isSynthetic && isValidOfficialSourceUrl(browserSourceUrl) ? browserSourceUrl : null;
+  const productId = passportSource?.product_id || result?.provenance?.official_product_id || raw?.product_id || null;
+  const isHi = productId === 'JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40' || raw?.doi === '10.5066/P9REJ9JN';
+  const doi = result?.provenance?.pds_doi || raw?.doi || (isHi ? '10.5066/P9REJ9JN' : '10.5066/P907276M');
+  const activeDemSourceLabel = isHi ? 'USGS HiRISE DTM · 1 m/px' : 'USGS MOLA-HRSC DEM · 200 m/px';
 
   return {
     isSynthetic,
     dataMode,
     validationStatus,
     datasetName,
+    productId,
+    officialProductId: productId,
+    doi,
+    datasetDoi: doi,
+    activeDemSourceLabel,
     localIntegrityVerified,
     sourceChecksumVerified,
     officialSourceUrl,

@@ -390,24 +390,72 @@ class DataCatalogService:
             ),
             LayerInfo(
                 id="mars_trek_imagery_basemap",
-                name="NASA Mars Trek Visible Basemap",
+                name="NASA Viking Global Imagery (MDIM 2.1)",
                 category=LayerCategory.IMAGERY,
                 layer_type="tile_service",
-                description="Global orthorectified multi-mission visible mosaic for direct frontend display via XYZ/WMTS tile services.",
+                description="Global orthorectified Viking Orbiter MDIM 2.1 visible mosaic (232 m/px) via NASA Mars Trek WMTS.",
                 units="reflectance RGB",
-                resolution_meters=6.0,
-                bounds=BoundingBox(min_lon=0.0, min_lat=-90.0, max_lon=360.0, max_lat=90.0),
+                resolution_meters=232.0,
+                bounds=BoundingBox(min_lon=-180.0, min_lat=-90.0, max_lon=180.0, max_lat=90.0),
                 crs=crs_info,
-                source_name="NASA Solar System Treks (JPL)",
-                source_url="https://trek.nasa.gov/mars/",
-                product_id=None,
+                source_name="USGS Astrogeology / NASA Mars Trek (DOI: 10.5066/F71V5C67)",
+                source_url="https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/WMTSCapabilities.xml",
+                product_id="Mars_Viking_MDIM21_ClrMosaic_global_232m",
                 validation_status="external_tile_service",
                 source_checksum_verified=False,
-                provenance_note="External NASA Mars Trek WMTS/XYZ visual imagery tile service for frontend map display only; never used for numerical terrain or routing calculations.",
+                provenance_note="External NASA Mars Trek WMTS visual imagery tile service (232 m/px) for continuous global map display only; never used for numerical terrain or routing calculations.",
                 is_numerical=False,
                 is_available=True,
                 is_renderable=True,
                 render_url="https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
+                is_synthetic=False,
+            ),
+            LayerInfo(
+                id="mars_ctx_jezero_orthomosaic",
+                name="Mars 2020 TRN CTX Orthorectified Image Mosaic (6 m/px)",
+                category=LayerCategory.IMAGERY,
+                layer_type="tile_service",
+                description="Regional orthorectified MRO Context Camera (CTX) mosaic covering Jezero Crater at 6.0 m/px (DOI: 10.5066/P9GV1ND3).",
+                units="radiance grayscale + alpha",
+                resolution_meters=6.0,
+                bounds=BoundingBox(
+                    min_lon=77.1604655, min_lat=18.2110274, max_lon=77.6991776, max_lat=18.7211945
+                ),
+                crs=crs_info,
+                source_name="USGS Astrogeology / NASA Mars Trek (DOI: 10.5066/P9GV1ND3)",
+                source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0",
+                product_id="JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0",
+                validation_status="external_tile_service",
+                source_checksum_verified=False,
+                provenance_note="Official USGS Mars 2020 TRN CTX 6 m/px orthomosaic (DOI: 10.5066/P9GV1ND3) served via NASA Mars Trek WMTS with alpha transparency over NoData pixels.",
+                is_numerical=False,
+                is_available=True,
+                is_renderable=True,
+                render_url="https://trek.nasa.gov/tiles/Mars/EQ/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0/1.0.0/default/default028mm/{z}/{y}/{x}.png",
+                is_synthetic=False,
+            ),
+            LayerInfo(
+                id="mars_hirise_jezero_orthomosaic",
+                name="Mars 2020 TRN HiRISE Orthorectified Image Mosaic (0.25 m/px)",
+                category=LayerCategory.IMAGERY,
+                layer_type="tile_service",
+                description="High-resolution orthorectified MRO HiRISE mosaic covering the Jezero Crater landing ellipse and Western Delta at 0.25 m/px (DOI: 10.5066/P9QJDP48).",
+                units="radiance grayscale + alpha",
+                resolution_meters=0.25,
+                bounds=BoundingBox(
+                    min_lon=77.2229331, min_lat=18.3067994, max_lon=77.583964, max_lat=18.669315
+                ),
+                crs=crs_info,
+                source_name="USGS Astrogeology / NASA Mars Trek (DOI: 10.5066/P9QJDP48)",
+                source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first",
+                product_id="JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first",
+                validation_status="external_tile_service",
+                source_checksum_verified=False,
+                provenance_note="Official USGS Mars 2020 TRN HiRISE 25 cm/px orthomosaic (DOI: 10.5066/P9QJDP48) served via NASA Mars Trek WMTS with alpha transparency over NoData pixels.",
+                is_numerical=False,
+                is_available=True,
+                is_renderable=True,
+                render_url="https://trek.nasa.gov/tiles/Mars/EQ/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd/1.0.0/default/default028mm/{z}/{y}/{x}.png",
                 is_synthetic=False,
             ),
         ]
@@ -526,7 +574,10 @@ class DataCatalogService:
             if prod.get("id") == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2":
                 prod["is_loaded"] = dem_loaded
                 prod["runtime_status"] = val_status
-            elif prod.get("id") == "dem_hirise_jezero_delta_1m":
+            elif prod.get("id") in (
+                "dem_hirise_jezero_delta_1m",
+                "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40",
+            ):
                 prod["is_loaded"] = bool(hi_val.is_valid)
                 prod["runtime_status"] = hi_val.status_code
             else:

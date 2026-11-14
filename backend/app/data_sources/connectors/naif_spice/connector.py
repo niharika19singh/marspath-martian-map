@@ -71,13 +71,19 @@ class NaifSpiceConnector(BaseDataSourceConnector):
 
     async def check_connection(self) -> tuple[ConnectionState, str | None]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                 res = await client.head(NAIF_BASE_URL)
                 if res.status_code in (200, 301, 302, 403):
                     return ConnectionState.CONNECTED, None
-                return ConnectionState.CONNECTED, None
-        except Exception:
-            return ConnectionState.CONNECTED, None
+                return (
+                    ConnectionState.STALE,
+                    f"NAIF server returned HTTP {res.status_code}; local Mars24/SPICE analytical engine active.",
+                )
+        except Exception as exc:
+            return (
+                ConnectionState.STALE,
+                f"NAIF server unreachable ({type(exc).__name__}); local Mars24/SPICE analytical engine active.",
+            )
 
     async def fetch_metadata(self) -> dict[str, Any]:
         return {
@@ -99,27 +105,20 @@ class NaifSpiceConnector(BaseDataSourceConnector):
         }
 
     def compute_geometry(self, spacecraft_id: str = "mro", epoch: datetime | None = None) -> SpiceGeometryResult:
-        """Calculates authentic observation and illumination geometry."""
+        """Calculates authentic observation and illumination geometry using NASA GISS Mars24."""
+        from backend.app.conditions.mars24 import compute_mars24
+
         dt = epoch or datetime.now(UTC)
         t_sec = dt.timestamp()
         j2000_sec = 946728000.0  # 2000-01-01T12:00:00Z
         dt_sec = t_sec - j2000_sec
 
-        # 1. Mars orbital motion & Sub-solar point calculation
-        mars_mean_motion = 2.0 * math.pi / (686.98 * 86400.0)
-        mars_orbit_angle = (mars_mean_motion * dt_sec + 0.44) % (2.0 * math.pi)
-        mars_obliquity = 25.19 * math.pi / 180.0
+        # Canonical Mars24 solar geometry at Jezero reference
+        m24_jezero = compute_mars24(18.4447, 77.4508, dt)
+        sub_solar_lat = m24_jezero.solar_declination_deg
+        sub_solar_lon = m24_jezero.subsolar_lon_east_deg
 
-        sub_solar_lat = math.degrees(math.asin(math.sin(mars_obliquity) * math.sin(mars_orbit_angle)))
-        mars_spin_rate = 7.088218e-5  # rad/s
-        mars_prime_meridian = (math.radians(176.63) + mars_spin_rate * dt_sec) % (2.0 * math.pi)
-
-        solar_lon_rad = (math.atan2(math.sin(mars_orbit_angle) * math.cos(mars_obliquity), math.cos(mars_orbit_angle)) - mars_prime_meridian) % (2.0 * math.pi)
-        sub_solar_lon = math.degrees(solar_lon_rad)
-        if sub_solar_lon > 180.0:
-            sub_solar_lon -= 360.0
-
-        # 2. Spacecraft coordinates (MRO default polar orbit)
+        # Spacecraft coordinates (MRO default polar sun-synchronous orbit vs rover surface)
         if spacecraft_id.lower() == "mro":
             period = 111.8 * 60.0
             phase = (dt_sec % period) / period * 2.0 * math.pi
@@ -129,22 +128,13 @@ class NaifSpiceConnector(BaseDataSourceConnector):
                 sc_lon -= 360.0
             sc_alt = 295.0 + 20.0 * math.cos(phase)
         else:
-            sc_lat = 18.4356
-            sc_lon = 77.2332
+            sc_lat = 18.4447
+            sc_lon = 77.4508
             sc_alt = 0.0
 
-        # 3. Solar incidence angle at sub-spacecraft point
-        phi1, lam1 = math.radians(sc_lat), math.radians(sc_lon)
-        phi2, lam2 = math.radians(sub_solar_lat), math.radians(sub_solar_lon)
-        cos_inc = math.sin(phi1) * math.sin(phi2) + math.cos(phi1) * math.cos(phi2) * math.cos(lam1 - lam2)
-        inc_angle = math.degrees(math.acos(max(-1.0, min(1.0, cos_inc))))
-
-        # 4. Local Solar Time (LST)
-        lst_hours = ((sc_lon - sub_solar_lon) * 24.0 / 360.0 + 12.0) % 24.0
-        lst_h = int(lst_hours)
-        lst_m = int((lst_hours - lst_h) * 60)
-        lst_s = int(((lst_hours - lst_h) * 60 - lst_m) * 60)
-        lst_str = f"{lst_h:02d}:{lst_m:02d}:{lst_s:02d}"
+        m24_sc = compute_mars24(sc_lat, sc_lon, dt)
+        inc_angle = m24_sc.solar_zenith_deg
+        lst_str = f"{m24_sc.ltst_hms} LTST (Ls={m24_sc.ls_deg:.2f}°)"
 
         return SpiceGeometryResult(
             spacecraft_id=spacecraft_id.upper(),

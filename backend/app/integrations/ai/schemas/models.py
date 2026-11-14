@@ -51,6 +51,10 @@ class RouteExplanationRequest(BaseModel):
         description="Specific question regarding route optimality or cost penalties",
     )
     include_algorithm_comparison: bool = Field(default=True)
+    route_metrics: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional actual computed route summary and cost breakdown from the routing engine",
+    )
 
 
 class RouteExplanationResponse(BaseModel):
