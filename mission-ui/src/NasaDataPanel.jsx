@@ -148,13 +148,18 @@ export default function NasaDataPanel(props) {
     <div className="nasa-data-panel">
       {/* Global Status Bar */}
       <div className="nasa-status-bar">
-        <div className="status-meta">
-          <span className="live-pulse-dot" />
+        <div className="status-meta" style={{flexWrap:'wrap',gap:'6px'}}>
+          <span className="live-pulse-dot" style={{background:status?.is_fallback?'#ffb867':'#5cffb0'}} />
           <span className="status-text">
-            {status?.connected_sources || 7} / {status?.total_sources || 7} NASA SOURCES CONNECTED
+            {status?.is_fallback
+              ? '7 / 7 NASA SOURCES (STATIC DEMO FALLBACK — BACKEND OFFLINE)'
+              : `${status?.connected_sources ?? 0} / ${status?.total_sources ?? 7} LIVE CONNECTED · ${status?.degraded_sources ?? 0} CACHED`}
           </span>
           <span className="products-tag">
-            {(status?.total_indexed_products || 47310).toLocaleString()} PRODUCTS
+            {(status?.total_indexed_products ?? 23).toLocaleString()} PRODUCTS
+          </span>
+          <span className="products-tag" style={{color:status?.is_fallback?'#ffb867':'#9becbf'}}>
+            {status?.data_mode || 'STATIC_DEMO_FALLBACK'}
           </span>
         </div>
         <button

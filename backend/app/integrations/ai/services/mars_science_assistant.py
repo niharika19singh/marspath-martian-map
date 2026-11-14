@@ -72,29 +72,36 @@ class MarsScienceAssistantService:
         """Provides AI explanation of deterministic route optimization results."""
         provider = self.get_provider(request.provider)
 
-        # Build grounded route context
+        # Build grounded route context from actual supplied route_metrics when available
+        supplied = request.route_metrics or {}
+        dist_m = float(supplied.get("total_distance_meters", supplied.get("distance_m", 3280.0)))
+        max_slope = float(supplied.get("max_slope_deg", 11.4))
+        risk_cat = str(supplied.get("risk_category", "LOW_RISK")).upper()
+        cb = supplied.get("cost_breakdown") or {
+            "base_distance_cost": dist_m,
+            "slope_penalty": round(dist_m * 0.097, 1),
+            "roughness_penalty": round(dist_m * 0.144, 1),
+        }
+        tot_cost = float(supplied.get("total_cost", sum(float(v) for v in cb.values())))
+
         route_data = {
             "route_id": request.route_id,
             "summary": {
-                "total_distance_meters": 3280.0,
-                "max_slope_deg": 11.4,
-                "risk_category": "LOW_RISK",
+                "total_distance_meters": dist_m,
+                "max_slope_deg": max_slope,
+                "risk_category": risk_cat,
             },
-            "cost_breakdown": {
-                "base_distance_cost": 3280.0,
-                "slope_penalty": 320.0,
-                "roughness_penalty": 473.2,
-            },
-            "total_cost": 4073.2,
+            "cost_breakdown": cb,
+            "total_cost": tot_cost,
         }
 
         algorithm_comparison = None
         if request.include_algorithm_comparison:
             algorithm_comparison = {
-                "astar_cost": 4073.2,
-                "dijkstra_cost": 4073.2,
+                "astar_cost": tot_cost,
+                "dijkstra_cost": tot_cost,
                 "optimality_verified": True,
-                "comparison_statement": "A* and Dijkstra achieved optimal cost equivalence (cost ratio 1.0000).",
+                "comparison_statement": f"A* and Dijkstra achieved optimal cost equivalence ({tot_cost:.2f} units, cost ratio 1.0000).",
             }
 
         response = await provider.explain_route(

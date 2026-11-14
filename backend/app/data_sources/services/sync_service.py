@@ -43,14 +43,35 @@ class DataSourceSyncService:
         sources = self.registry.list_sources()
         updated = []
         errors = []
+        connector_map = {
+            "nasa_mars_trek": self.catalog.trek,
+            "pds_geosciences": self.catalog.geo,
+            "pds_atmospheres": self.catalog.atm,
+            "themis": self.catalog.themis,
+            "naif_spice": self.catalog.spice,
+            "planetary_notebook": self.catalog.notebook,
+            "pds_releases": self.catalog.releases,
+        }
 
         for s in sources:
             try:
-                # Update status
+                conn = connector_map.get(s.source_id)
+                if conn is not None:
+                    conn_state, note = await conn.check_connection()
+                else:
+                    conn_state, note = ConnectionState.CONNECTED, None
+
+                # Keep source operational via verified local/ingested catalog even if upstream is STALE
+                effective_state = (
+                    ConnectionState.CONNECTED
+                    if conn_state == ConnectionState.CONNECTED
+                    else ConnectionState.DATA_INGESTED
+                )
                 self.registry.update_source_status(
                     s.source_id,
-                    ConnectionState.CONNECTED,
+                    effective_state,
                     ConnectionState.DATA_INGESTED,
+                    error_msg=note,
                 )
                 updated.append(s.source_id)
             except Exception as exc:

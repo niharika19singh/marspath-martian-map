@@ -88,13 +88,19 @@ class ThemisConnector(BaseDataSourceConnector):
 
     async def check_connection(self) -> tuple[ConnectionState, str | None]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                 res = await client.head(ASU_THEMIS_DATA_URL)
                 if res.status_code in (200, 301, 302, 403):
                     return ConnectionState.CONNECTED, None
-                return ConnectionState.CONNECTED, None
-        except Exception:
-            return ConnectionState.CONNECTED, None
+                return (
+                    ConnectionState.STALE,
+                    f"ASU THEMIS portal returned HTTP {res.status_code}; serving verified regional THEMIS archive.",
+                )
+        except Exception as exc:
+            return (
+                ConnectionState.STALE,
+                f"ASU THEMIS portal unreachable ({type(exc).__name__}); serving verified regional THEMIS archive.",
+            )
 
     async def fetch_metadata(self) -> dict[str, Any]:
         return {

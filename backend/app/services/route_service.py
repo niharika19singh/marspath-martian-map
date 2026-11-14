@@ -1,7 +1,9 @@
 import logging
+import os
 import time
 import uuid
 
+from backend.app.conditions.mission_clock import evaluate_route_mission_clock
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import (
     ComputationalBoundExceededError,
@@ -14,6 +16,7 @@ from backend.app.data.providers.hirise import (
     get_shared_hirise_provider,
 )
 from backend.app.data.providers.mola_hrsc import (
+    MOLAHRSCRasterProvider,
     get_shared_mola_provider,
 )
 from backend.app.geospatial.crs import (
@@ -45,6 +48,14 @@ from backend.app.schemas.routes import (
     RoutePlanResponse,
 )
 from backend.app.services.evidence_service import EvidenceService
+from backend.app.services.planning_intelligence import (
+    classify_route_uncertainty,
+    evaluate_mission_stress_suite,
+    evaluate_pareto_frontier,
+    evaluate_science_eva_plan,
+    generate_mission_brief_markdown,
+    plan_next_best_reconnaissance,
+)
 from backend.app.services.risk_service import RiskService
 from backend.app.services.robustness_service import RobustnessService
 from backend.app.services.terrain_source_service import TerrainSourceSelector
@@ -82,9 +93,53 @@ class RouteService:
         validate_constraints(request.constraints)
         RobustnessService.validate_config(request.robustness_config)
 
-        # 3. Early bounds validation & MAX_SEARCH_RADIUS_METERS guard
+        # 3. Resolve per-request DEM source preference if explicitly supplied by the caller
+        active_regional_provider = self.provider
+        active_hirise_provider = self.hirise_provider
+        pref_dem = (getattr(request, "preferred_dem_source", None) or "").strip().lower()
+        if pref_dem in (
+            "hirise_1m",
+            "auto",
+            "hirise",
+            "jez_hirise_soc_006_dtm_molatopography_deltageoid_1m_eqc_latts0_lon0_blend40",
+            "dem_hirise_jezero_delta_1m",
+        ):
+            if os.path.exists(self.settings.DEM_PATH) and getattr(
+                active_regional_provider, "is_synthetic", lambda: False
+            )():
+                active_regional_provider = MOLAHRSCRasterProvider(
+                    dem_path=self.settings.DEM_PATH, use_real_dem=True
+                )
+            hi_path = (
+                active_hirise_provider.dem_path
+                if active_hirise_provider is not None
+                else self.settings.HIRISE_DEM_PATH
+            )
+            if active_hirise_provider is None or not active_hirise_provider.enabled:
+                active_hirise_provider = HiRISERasterProvider(dem_path=hi_path, enabled=True)
+        elif pref_dem in (
+            "mola_hrsc_200m",
+            "mola",
+            "regional",
+            "mars_hrsc_mola_blenddem_global_200mp_v2",
+            "dem_mola_hrsc_blended_200m",
+        ):
+            if os.path.exists(self.settings.DEM_PATH) and getattr(
+                active_regional_provider, "is_synthetic", lambda: False
+            )():
+                active_regional_provider = MOLAHRSCRasterProvider(
+                    dem_path=self.settings.DEM_PATH, use_real_dem=True
+                )
+            hi_path = (
+                active_hirise_provider.dem_path
+                if active_hirise_provider is not None
+                else self.settings.HIRISE_DEM_PATH
+            )
+            active_hirise_provider = HiRISERasterProvider(dem_path=hi_path, enabled=False)
+
+        # Early bounds validation & MAX_SEARCH_RADIUS_METERS guard
         # Validate that start, destination, and all waypoints lie within pilot region bounds before any expensive operations.
-        regional_master_meta = self.provider.get_dem_raster().metadata
+        regional_master_meta = active_regional_provider.get_dem_raster().metadata
         validate_coordinates_in_bounds(request.start, regional_master_meta, "Start point")
         validate_coordinates_in_bounds(request.destination, regional_master_meta, "Destination point")
         for idx, wp in enumerate(request.science_waypoints or []):
@@ -115,8 +170,8 @@ class RouteService:
             start=request.start,
             destination=request.destination,
             waypoints=request.science_waypoints,
-            regional_provider=self.provider,
-            hirise_provider=self.hirise_provider,
+            regional_provider=active_regional_provider,
+            hirise_provider=active_hirise_provider,
             max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
             corridor_padding_meters=self.corridor_padding_meters,
         )
@@ -678,6 +733,119 @@ class RouteService:
             cell_size_meters=round((dx_meters + dy_meters) / 2.0, 2),
         )
 
+        # 12. Phase 2-4 Mission Intelligence Enrichment (Uncertainty, Science/EVA, Mars24 Clock, Pareto, Recon, Stress)
+        dep_utc = getattr(request, "departure_utc", None) or "2026-06-15T08:00:00Z"
+        walk_speed = getattr(request, "walking_speed_m_s", None) or 1.1111
+        inc_return = bool(getattr(request, "include_return_leg", True))
+        max_eva_h = float(getattr(request, "max_eva_hours", 8.0) or 8.0)
+        eff_res_m = float(selection_report.effective_resolution_meters or round((dx_meters + dy_meters) / 2.0, 2))
+        wp_tuples = [(wp.lon, wp.lat) for wp in (request.science_waypoints or [])]
+        wp_dicts = [{"lon": wp.lon, "lat": wp.lat, "stop_minutes": 20.0} for wp in (request.science_waypoints or [])]
+
+        pareto_inputs: list[dict] = []
+        for r_alt in routes:
+            coords = r_alt.geometry.coordinates if r_alt.geometry else []
+            segs_raw = []
+            if r_alt.evidence_passport and r_alt.evidence_passport.segments:
+                for s in r_alt.evidence_passport.segments:
+                    segs_raw.append(
+                        {
+                            "start_lon": s.from_coord.lon,
+                            "start_lat": s.from_coord.lat,
+                            "end_lon": s.to_coord.lon,
+                            "end_lat": s.to_coord.lat,
+                            "length_meters": s.step_distance_meters,
+                            "is_valid_data": s.is_valid_data,
+                            "slope_deg": s.slope_deg,
+                            "roughness": s.roughness,
+                            "quality_flags": s.quality_flags,
+                        }
+                    )
+            unc = classify_route_uncertainty(
+                segments=segs_raw,
+                coordinates=coords,
+                dem_resolution_m=eff_res_m,
+                dem_source_id=selection_report.selected_source_id,
+            )
+            dur_h = float(
+                r_alt.summary.estimated_duration_hours
+                or r_alt.summary.observed_duration_hours_partial
+                or ((r_alt.summary.total_distance_meters or 1000.0) / (walk_speed * 3600.0))
+            )
+            sci_plan = evaluate_science_eva_plan(
+                coordinates=coords,
+                duration_hours=dur_h,
+                user_waypoints=wp_dicts,
+                max_eva_hours=max_eva_h,
+            )
+            m_clock = evaluate_route_mission_clock(
+                coordinates=coords,
+                departure_utc=dep_utc,
+                base_speed_m_s=walk_speed,
+                waypoint_coords=wp_tuples,
+                include_return_leg=inc_return,
+                max_eva_duration_hours=max_eva_h,
+            )
+            r_alt.uncertainty_summary = unc
+            r_alt.science_eva_plan = sci_plan
+            r_alt.mission_clock = m_clock
+
+            cb = r_alt.cost_breakdown or {}
+            hazard_idx = float(cb.get("slope_penalty", 0.0)) + float(cb.get("roughness_penalty", 0.0)) + float(cb.get("hazard_penalty", 0.0))
+            pareto_inputs.append(
+                {
+                    "route_id": r_alt.route_id,
+                    "label": r_alt.name,
+                    "duration_hours": float(m_clock["outbound_leg"]["walking_duration_hours"]),
+                    "distance_m": float(r_alt.summary.total_distance_meters or 0.0),
+                    "terrain_hazard_score": round(hazard_idx, 2),
+                    "uncertainty_exposure_score": float(unc["uncertainty_exposure_score"]),
+                    "science_return_score": float(sci_plan["total_science_score"]),
+                    "science_return_per_eva_hour": float(sci_plan["science_return_per_eva_hour"]),
+                }
+            )
+
+        pareto_frontier = evaluate_pareto_frontier(pareto_inputs)
+        pareto_by_id = {c["route_id"]: c for c in pareto_frontier.get("candidates", [])}
+        for r_alt in routes:
+            p_info = pareto_by_id.get(r_alt.route_id)
+            if p_info:
+                r_alt.is_pareto_optimal = bool(p_info["is_pareto_optimal"])
+                r_alt.pareto_archetype = p_info["pareto_archetype"]
+
+        primary_route = routes[0] if routes else None
+        if primary_route and primary_route.uncertainty_summary and primary_route.science_eva_plan and primary_route.mission_clock:
+            recon_plan = plan_next_best_reconnaissance(
+                uncertainty_summary=primary_route.uncertainty_summary,
+                coordinates=primary_route.geometry.coordinates,
+            )
+            stress_suite = evaluate_mission_stress_suite(
+                coordinates=primary_route.geometry.coordinates,
+                baseline_duration_hours=float(primary_route.mission_clock["total_duration_hours"]),
+                baseline_cost=float(primary_route.total_cost),
+                max_slope_deg=float(request.constraints.max_slope_deg),
+                uncertainty_summary=primary_route.uncertainty_summary,
+                science_plan=primary_route.science_eva_plan,
+                departure_utc=dep_utc,
+                base_speed_m_s=walk_speed,
+                max_eva_hours=max_eva_h,
+                alternative_routes_count=max(0, len(routes) - 1),
+            )
+            brief_md = generate_mission_brief_markdown(
+                mission_title=f"Jezero Traverse ({request.start.lon:.4f}°E, {request.start.lat:.4f}°N -> {request.destination.lon:.4f}°E, {request.destination.lat:.4f}°N)",
+                route_summary=primary_route.summary.model_dump(),
+                mission_clock=primary_route.mission_clock,
+                uncertainty=primary_route.uncertainty_summary,
+                science_plan=primary_route.science_eva_plan,
+                pareto=pareto_frontier,
+                recon=recon_plan,
+                stress_suite=stress_suite,
+            )
+        else:
+            recon_plan = None
+            stress_suite = None
+            brief_md = None
+
         return RoutePlanResponse(
             mission_id=mission_id,
             status="success",
@@ -691,4 +859,8 @@ class RouteService:
             limitations=limitations,
             robustness_assessment=robustness_assessment,
             algorithm_comparison=algorithm_comparison_report,
+            pareto_frontier=pareto_frontier,
+            reconnaissance_plan=recon_plan,
+            operational_stress_suite=stress_suite,
+            mission_brief_markdown=brief_md,
         )

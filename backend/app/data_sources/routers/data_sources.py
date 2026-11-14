@@ -213,8 +213,61 @@ async def get_sync_status() -> dict[str, Any]:
         "last_sync_utc": global_status.last_sync_utc.isoformat(),
         "total_sources_monitored": global_status.total_sources,
         "connected_sources": global_status.connected_count,
+        "connected_count": global_status.connected_count,
         "total_indexed_products": global_status.total_indexed_products,
         "active_map_layers": global_status.active_map_layers_count,
+    }
+
+
+@router.get(
+    "/nasa/imagery",
+    response_model=dict[str, Any],
+    summary="Discover NASA Mars Trek WMTS layers and PDS orbital imagery footprints",
+)
+async def get_nasa_imagery(
+    instrument: str | None = Query(None, description="Filter by instrument (HiRISE, CTX, CRISM, THEMIS, MOLA)"),
+    min_lon: float | None = Query(None, description="Bounding box min East longitude"),
+    min_lat: float | None = Query(None, description="Bounding box min North latitude"),
+    max_lon: float | None = Query(None, description="Bounding box max East longitude"),
+    max_lat: float | None = Query(None, description="Bounding box max North latitude"),
+    probe_upstream: bool = Query(False, description="Perform live HTTP WMTS capability probe"),
+) -> dict[str, Any]:
+    """Return WMTS tile layer configurations, orbital observation footprints, and upstream status."""
+    from backend.app.data_sources.connectors.mars_trek.connector import MARS_TREK_OFFICIAL_LAYERS
+
+    upstream_state = "CACHED_VERIFIED"
+    upstream_note = None
+    if probe_upstream:
+        st, note = await _catalog.trek.check_connection()
+        upstream_state = "LIVE_CONNECTED" if st.value == "CONNECTED" else "CACHED_FALLBACK"
+        upstream_note = note
+
+    search_res = await _catalog.search_products(
+        ProductSearchQuery(
+            instrument=instrument,
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            limit=100,
+            offset=0,
+        )
+    )
+    imagery_products = [
+        p.model_dump(mode="json")
+        for p in search_res.products
+        if p.map_layer_supported or p.footprint_geojson is not None
+    ]
+
+    return {
+        "status": "ok",
+        "upstream_status": upstream_state,
+        "upstream_note": upstream_note,
+        "wmts_projection": "EPSG:104905",
+        "wmts_tile_matrix_set": "default028mm",
+        "wmts_layers": MARS_TREK_OFFICIAL_LAYERS,
+        "total_matched": len(imagery_products),
+        "products": imagery_products,
     }
 
 

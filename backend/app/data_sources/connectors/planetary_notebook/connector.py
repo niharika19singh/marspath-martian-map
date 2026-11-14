@@ -96,13 +96,19 @@ class PlanetaryNotebookConnector(BaseDataSourceConnector):
 
     async def check_connection(self) -> tuple[ConnectionState, str | None]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
                 res = await client.head(NOTEBOOK_BASE_URL)
                 if res.status_code in (200, 301, 302, 403):
                     return ConnectionState.CONNECTED, None
-                return ConnectionState.CONNECTED, None
-        except Exception:
-            return ConnectionState.CONNECTED, None
+                return (
+                    ConnectionState.STALE,
+                    f"Analyst's Notebook returned HTTP {res.status_code}; serving verified Sol 0-2022 local archive.",
+                )
+        except Exception as exc:
+            return (
+                ConnectionState.STALE,
+                f"Analyst's Notebook unreachable ({type(exc).__name__}); serving verified Sol 0-2022 local archive.",
+            )
 
     async def fetch_metadata(self) -> dict[str, Any]:
         return {

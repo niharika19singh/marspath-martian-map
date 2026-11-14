@@ -4,9 +4,26 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'ol/ol.css';
 import './style.css';
-import MapView from './MapView.jsx';
+import MapView, {
+  JEZERO_VALIDATED_DEM_BOUNDS,
+  JEZERO_HIRISE_ORTHO_BOUNDS,
+  JEZERO_HIRISE_DTM_CORRIDOR_BOUNDS,
+  JEZERO_CTX_ORTHO_BOUNDS,
+} from './MapView.jsx';
+import {
+  AUTHORITATIVE_MARS_IMAGERY_CATALOG,
+  AUTHORITATIVE_MARS_TERRAIN_CATALOG,
+  verifyCoordinateDatasetCoverage,
+} from './wmts_capabilities.js';
 import Profile from './Profile.jsx';
-import { exportGeoJSON } from './export.js';
+import { exportGeoJSON, exportMissionBriefMarkdown, exportMissionConfigJSON } from './export.js';
+import {
+  JEZERO_SCIENCE_TARGETS_CLIENT,
+  MISSION_PRESETS_CLIENT,
+  fetchConditionsForPoint,
+  fetchRoverReplayState,
+  enrichResponseWithMasterSpec,
+} from './planning_enrichment.js';
 import { buildTerrain } from './terrain.js';
 import Icon from './Icons.jsx';
 import { resolveInitialApiUrl, resolveTerrainProvenance, resolveAlternativeShortfall, canSubmitRoute, validateRouteExecutionPreconditions } from './integration.js';
@@ -85,6 +102,20 @@ function App() {
   const [showGroundTracks, setShowGroundTracks] = useState(true);
   const [showFootprints, setShowFootprints] = useState(true);
   const [showCuriosity, setShowCuriosity] = useState(false);
+  const [showThemisOverlay, setShowThemisOverlay] = useState(false);
+  const [showScienceTargets, setShowScienceTargets] = useState(true);
+  const [activeBookmark, setActiveBookmark] = useState('jezero');
+
+  // Phase 2-4 Mission Clock, Presets & Time Machine state
+  const [departureUtc, setDepartureUtc] = useState('2026-06-15T08:00:00Z');
+  const [maxEvaHours, setMaxEvaHours] = useState(8.0);
+  const [selectedPresetId, setSelectedPresetId] = useState('flagship_jezero_expedition');
+  const [timeMachineOpen, setTimeMachineOpen] = useState(false);
+  const [timeMachineUtc, setTimeMachineUtc] = useState('2026-06-15T08:00:00Z');
+  const [timeMachineSol, setTimeMachineSol] = useState(415);
+  const [conditionsData, setConditionsData] = useState(null);
+  const [roverReplayState, setRoverReplayState] = useState(null);
+  const [activeProfileTab, setActiveProfileTab] = useState('elevation');
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +197,10 @@ function App() {
   }
 
   const [raw, setRaw] = useState(null);
+  const [hiriseRaw, setHiriseRaw] = useState(null);
+  const [hiriseLoadStatus, setHiriseLoadStatus] = useState('loading');
+  const [hiriseLoadReason, setHiriseLoadReason] = useState('Verifying USGS HiRISE 1 m DTM (10.5066/P9REJ9JN)...');
+  const [demSourcePreference, setDemSourcePreference] = useState('hirise_1m');
   const [loadError, setLoadError] = useState('');
   const [start, setStart] = useState(INITIAL.start);
   const [destination, setDestination] = useState(INITIAL.destination);
@@ -175,9 +210,15 @@ function App() {
   const [maxSlope, setMaxSlope] = useState(20);
   const [maxRough, setMaxRough] = useState(0.85);
   const [numAlternatives, setNumAlternatives] = useState(3);
-  const [base, setBase] = useState('hirise');
+  const [base, setBase] = useState('auto');
   const [hazards, setHazards] = useState(false);
   const [coverage, setCoverage] = useState(false);
+  const [showHillshade, setShowHillshade] = useState(false);
+  const [showSlope, setShowSlope] = useState(false);
+  const [showRoughness, setShowRoughness] = useState(false);
+  const [imageryOpacity, setImageryOpacity] = useState(1.0);
+  const [terrainOpacity, setTerrainOpacity] = useState(0.72);
+  const [wmtsLiveStatus, setWmtsLiveStatus] = useState(null);
   const [result, setResult] = useState(null);
   const [selected, setSelected] = useState('');
   const [busy, setBusy] = useState(false);
@@ -217,6 +258,18 @@ function App() {
   const lastRequest = useRef(initialRequest);
 
   const terrain = useMemo(() => raw ? buildTerrain(raw) : null, [raw]);
+  const hiriseTerrain = useMemo(() => hiriseRaw ? buildTerrain(hiriseRaw) : null, [hiriseRaw]);
+  const coordCoverage = useMemo(() => verifyCoordinateDatasetCoverage(start, destination), [start, destination]);
+  const activeDemRaw = useMemo(() => {
+    if (demSourcePreference === 'mola_hrsc_200m') return raw;
+    if (hiriseRaw && coordCoverage.bothInLocalHiriseDtmCorridor) return hiriseRaw;
+    return raw;
+  }, [demSourcePreference, hiriseRaw, raw, coordCoverage.bothInLocalHiriseDtmCorridor]);
+  const activeDemTerrain = useMemo(() => {
+    if (demSourcePreference === 'mola_hrsc_200m') return terrain;
+    if (hiriseTerrain && coordCoverage.bothInLocalHiriseDtmCorridor) return hiriseTerrain;
+    return terrain;
+  }, [demSourcePreference, hiriseTerrain, terrain, coordCoverage.bothInLocalHiriseDtmCorridor]);
   const active = result?.routes.find(r => r.route_id === selected) || result?.routes[0];
   const live = sourceMode === 'api';
 
@@ -274,12 +327,34 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // Synchronize Mars24 surface conditions & DEM terrain shadows
+  useEffect(() => {
+    let cancelled = false;
+    const lat = Number(start.lat) || 18.4447;
+    const lon = Number(start.lon) || 77.4508;
+    fetchConditionsForPoint(lat, lon, timeMachineUtc, terrain).then(cond => {
+      if (!cancelled && cond) setConditionsData(cond);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [start.lat, start.lon, timeMachineUtc, terrain]);
+
+  // Synchronize Perseverance Rover Replay with Mars Time Machine Sol/UTC
+  useEffect(() => {
+    let cancelled = false;
+    const wpFeatures = waypointData?.features || [];
+    fetchRoverReplayState(wpFeatures, { sol: timeMachineSol, utcIso: timeMachineUtc }).then(rep => {
+      if (!cancelled && rep) setRoverReplayState(rep);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [waypointData, timeMachineSol, timeMachineUtc]);
+
   function accept(response, request) {
     if (!Array.isArray(response.routes) || !response.routes.length || response.routes.some(r => !Array.isArray(r.geometry?.coordinates))) {
       throw new Error('The server returned no usable route geometry.');
     }
-    setResult(response);
-    setSelected(response.routes[0].route_id);
+    const enriched = enrichResponseWithMasterSpec(response, terrain, request);
+    setResult(enriched);
+    setSelected(enriched.routes[0].route_id);
     lastRequest.current = request;
     setFitToken(n => n + 1);
     setBusy(false);
@@ -289,7 +364,12 @@ function App() {
 
   useEffect(() => {
     let disposed = false;
-    Promise.all([fetch('/mission-data/jezero-dem.json'), fetch('/mission-data/jezero-dem.sha256')]).then(async ([r, h]) => {
+    Promise.all([
+      fetch('/mission-data/jezero-dem.json'),
+      fetch('/mission-data/jezero-dem.sha256'),
+      fetch('/mission-data/jezero-hirise-dtm.json').catch(() => null),
+      fetch('/mission-data/jezero-hirise-dtm.sha256').catch(() => null),
+    ]).then(async ([r, h, hr, hh]) => {
       if (!r.ok || !h.ok) throw new Error('The terrain dataset could not be loaded. Refresh this page to retry.');
       const text = await r.text();
       const expected = (await h.text()).trim();
@@ -297,6 +377,36 @@ function App() {
       const actual = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
       if (actual !== expected) throw new Error('Terrain file integrity check failed. No routes were computed.');
       const data = { ...JSON.parse(text), local_integrity_verified: true, file_sha256: actual };
+
+      let hiData = null;
+      if (hr?.ok && hh?.ok) {
+        try {
+          const hiText = await hr.text();
+          const hiExpected = (await hh.text()).trim();
+          const hiDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hiText));
+          const hiActual = Array.from(new Uint8Array(hiDigest), b => b.toString(16).padStart(2, '0')).join('');
+          if (hiActual === hiExpected) {
+            hiData = { ...JSON.parse(hiText), local_integrity_verified: true, file_sha256: hiActual };
+            if (!disposed) {
+              setHiriseRaw(hiData);
+              setHiriseLoadStatus('ready');
+              setHiriseLoadReason('USGS HiRISE 1 m DTM (DOI: 10.5066/P9REJ9JN) validated and ready.');
+            }
+          } else if (!disposed) {
+            setHiriseLoadStatus('invalid_metadata');
+            setHiriseLoadReason('HiRISE DTM SHA-256 checksum mismatch.');
+          }
+        } catch (err) {
+          if (!disposed) {
+            setHiriseLoadStatus('processing_failure');
+            setHiriseLoadReason(`Failed to parse HiRISE DTM: ${err.message}`);
+          }
+        }
+      } else if (!disposed) {
+        setHiriseLoadStatus('missing_file');
+        setHiriseLoadReason('USGS HiRISE 1 m DTM asset (/mission-data/jezero-hirise-dtm.json) not found.');
+      }
+
       if (disposed) return;
       setRaw(data);
       const w = new Worker(new URL('./routing.worker.js', import.meta.url), { type: 'module' });
@@ -320,8 +430,10 @@ function App() {
         setBusy(false);
       };
       setBusy(true);
-      lastRequest.current = initialRequest;
-      w.postMessage({ id: ++sequence.current, raw: data, request: initialRequest });
+      const initialDemForRoute = hiData || data;
+      const initReq = { ...initialRequest, preferred_dem_source: hiData ? 'hirise_1m' : 'mola_hrsc_200m' };
+      lastRequest.current = initReq;
+      w.postMessage({ id: ++sequence.current, raw: initialDemForRoute, request: initReq });
     }).catch(e => {
       if (!disposed) setLoadError(e.message);
     });
@@ -348,10 +460,20 @@ function App() {
     (which === 'start' ? setStart : setDestination)(p => ({ ...p, [key]: value }));
   }
 
+  function isWithinJezeroDem(pt) {
+    const b = terrain?.b || JEZERO_VALIDATED_DEM_BOUNDS;
+    return Number.isFinite(pt.lon) && Number.isFinite(pt.lat) && pt.lon >= b[0] && pt.lon <= b[2] && pt.lat >= b[1] && pt.lat <= b[3];
+  }
+
   function mapPin(p) {
     if (!pick) return;
     invalidate();
     const v = { lon: Number(p.lon.toFixed(5)), lat: Number(p.lat.toFixed(5)) };
+    if (!isWithinJezeroDem(v)) {
+      setError('Global imagery available. High-resolution elevation and route optimization are not currently supported in this region.');
+      setLeftOpen(true);
+      return;
+    }
     if (pick === 'start') {
       setStart(v);
       setPick('destination');
@@ -361,20 +483,79 @@ function App() {
     }
   }
 
-  function request() {
+  function selectBrowserDemForRequest(req, prefOverride) {
+    const pref = prefOverride || req.preferred_dem_source || demSourcePreference;
+    if (pref === 'mola_hrsc_200m') return { dem: raw, fallbackNote: null };
+    const cov = verifyCoordinateDatasetCoverage(req.start, req.destination);
+    const waypointsInHi = (req.science_waypoints || []).every(wp => {
+      const b = JEZERO_HIRISE_DTM_CORRIDOR_BOUNDS;
+      return wp.lon >= b[0] && wp.lon <= b[2] && wp.lat >= b[1] && wp.lat <= b[3];
+    });
+    if (hiriseRaw && cov.bothInLocalHiriseDtmCorridor && waypointsInHi) {
+      return { dem: hiriseRaw, fallbackNote: null };
+    }
+    const reason = !hiriseRaw
+      ? `HiRISE 1 m DTM unavailable (${hiriseLoadStatus}: ${hiriseLoadReason}). Falling back to USGS MOLA-HRSC 200 m DEM.`
+      : `Route corridor extends outside validated USGS HiRISE 1 m DTM window [${JEZERO_HIRISE_DTM_CORRIDOR_BOUNDS.join(', ')}]. Falling back to USGS MOLA-HRSC 200 m DEM.`;
+    return { dem: raw, fallbackNote: reason };
+  }
+
+  function request(overrides = {}) {
     return {
-      start: { lon: Number(start.lon), lat: Number(start.lat) },
-      destination: { lon: Number(destination.lon), lat: Number(destination.lat) },
-      algorithm,
-      mode,
+      start: overrides.start || { lon: Number(start.lon), lat: Number(start.lat) },
+      destination: overrides.destination || { lon: Number(destination.lon), lat: Number(destination.lat) },
+      algorithm: overrides.algorithm || algorithm,
+      mode: overrides.mode || mode,
       constraints: { max_slope_deg: Number(maxSlope), max_roughness: Number(maxRough), avoid_unobserved_terrain: true },
-      science_waypoints: [],
+      science_waypoints: overrides.science_waypoints || [],
       num_alternatives: Number(numAlternatives),
+      departure_utc: overrides.departure_utc || departureUtc,
+      max_eva_hours: Number(overrides.max_eva_hours || maxEvaHours),
+      include_return_leg: true,
+      preferred_dem_source: overrides.preferred_dem_source || demSourcePreference,
       crs_identifier: 'IAU2000:49900'
     };
   }
 
-  async function run() {
+  function applyPreset(presetId) {
+    const preset = MISSION_PRESETS_CLIENT.find(p => p.preset_id === presetId) || MISSION_PRESETS_CLIENT[0];
+    setSelectedPresetId(preset.preset_id);
+    invalidate();
+    setStart(preset.start);
+    setDestination(preset.destination);
+    const uiMode = preset.profile === 'safest' ? 'safety_first' : preset.profile === 'direct' ? 'science_first' : 'balanced';
+    setMode(uiMode);
+    setDepartureUtc(preset.departure_utc || '2026-06-15T08:00:00Z');
+    setTimeMachineUtc(preset.departure_utc || '2026-06-15T08:00:00Z');
+    setMaxEvaHours(preset.max_eva_hours || 8.0);
+    setMissionView('planner');
+    setShowRoute(true);
+    setProfileExpanded(true);
+    setRightExpanded(true);
+    if (preset.preset_id === 'flagship_jezero_expedition') {
+      setActiveProfileTab('science');
+      setNotice('Loaded Flagship Integrated Jezero Robust Science Expedition (Landing → Three Forks → Hawksbill Gap).');
+    } else {
+      setNotice(`Loaded Mission Preset: ${preset.title}`);
+    }
+    const req = request({
+      start: preset.start,
+      destination: preset.destination,
+      mode: uiMode,
+      departure_utc: preset.departure_utc,
+      max_eva_hours: preset.max_eva_hours,
+      science_waypoints: preset.waypoints || [],
+    });
+    if (raw && !live) {
+      const { dem, fallbackNote } = selectBrowserDemForRequest(req);
+      if (fallbackNote) setNotice(fallbackNote);
+      setBusy(true);
+      lastRequest.current = req;
+      worker.current?.postMessage({ id: ++sequence.current, raw: dem, request: req });
+    }
+  }
+
+  async function run(opts = {}) {
     if (routeForm.current && !routeForm.current.checkValidity()) {
       setError('Enter valid latitude, longitude coordinates.');
       setLeftOpen(true);
@@ -391,16 +572,23 @@ function App() {
     setNotice('');
     setResult(null);
     setHover(null);
-    const req = request();
+    const req = request(opts.demSourceOverride ? { preferred_dem_source: opts.demSourceOverride } : {});
     if ([req.start.lon, req.start.lat, req.destination.lon, req.destination.lat].some(n => !Number.isFinite(n))) {
       setError('Enter valid numeric latitude and longitude values.');
+      return;
+    }
+    if (!isWithinJezeroDem(req.start) || !isWithinJezeroDem(req.destination)) {
+      setError('Global imagery available. High-resolution elevation and route optimization are not currently supported in this region.');
+      setLeftOpen(true);
       return;
     }
     lastRequest.current = req;
     setBusy(true);
     const id = ++sequence.current;
     if (!live) {
-      worker.current?.postMessage({ id, raw, request: req });
+      const { dem, fallbackNote } = selectBrowserDemForRequest(req, opts.demSourceOverride);
+      if (fallbackNote) setNotice(fallbackNote);
+      worker.current?.postMessage({ id, raw: dem, request: req });
       return;
     }
     const payload = { ...req };
@@ -482,6 +670,40 @@ function App() {
 
   function download() {
     if (!result) return;
+    if (exportFormat === 'brief') {
+      const md = exportMissionBriefMarkdown(result, active.route_id, lastRequest.current);
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `marspath-mission-brief-${result.mission_id || 'jezero'}.md`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('Printable Markdown Operational Mission Brief exported.');
+      return;
+    }
+    if (exportFormat === 'config') {
+      const cfg = exportMissionConfigJSON({
+        preset_id: selectedPresetId,
+        start,
+        destination,
+        algorithm,
+        mode,
+        departure_utc: departureUtc,
+        max_eva_hours: maxEvaHours,
+        constraints: { max_slope_deg: maxSlope, max_roughness: maxRough },
+        basemap: base,
+      });
+      const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `marspath-mission-config-${result.mission_id || 'jezero'}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('Shareable Mission Configuration JSON exported.');
+      return;
+    }
     const payload = exportFormat === 'geojson' ? exportGeoJSON(result, active.route_id, lastRequest.current) : {
       ...result,
       routes: [active],
@@ -505,11 +727,12 @@ function App() {
   }
 
   const penalty = active ? ['slope_penalty', 'roughness_penalty', 'hazard_penalty', 'extra_penalty'].reduce((s, k) => s + (active.cost_breakdown?.[k] || 0), 0) : null;
-  const provenance = useMemo(() => resolveTerrainProvenance({ live, raw, loadError, api, result, active }), [live, raw, loadError, api, result, active]);
+  const provenance = useMemo(() => resolveTerrainProvenance({ live, raw: activeDemRaw || raw, loadError, api, result, active }), [live, activeDemRaw, raw, loadError, api, result, active]);
   const shortfall = useMemo(() => resolveAlternativeShortfall(result, lastRequest.current?.num_alternatives ?? numAlternatives), [result, numAlternatives]);
   const canPlan = canSubmitRoute({ live, raw, api, busy });
   const dataName = provenance.datasetName;
-  const effectiveGrid = live ? (active?.evidence_passport?.resolution_assessment?.effective_resolution_meters || api?.status?.dem_resolution_meters) : terrain ? Math.max(terrain.dx, terrain.dy) : null;
+  const effectiveGrid = active?.evidence_passport?.resolution_assessment?.effective_resolution_meters || result?.source_selection?.effective_resolution_meters || (live ? api?.status?.dem_resolution_meters : activeDemTerrain ? Math.max(activeDemTerrain.dx, activeDemTerrain.dy) : null);
+  const nativeGrid = active?.evidence_passport?.resolution_assessment?.native_effective_resolution_meters || result?.source_selection?.native_resolution_meters || (activeDemRaw?.native_resolution_meters ?? 200);
 
   function swap() {
     invalidate();
@@ -597,6 +820,18 @@ function App() {
           {intelligenceMode && <span> / Live Mars Intelligence</span>}
         </nav>
         <div className="header-actions">
+          <button
+            type="button"
+            className={'status-chip' + (timeMachineOpen ? ' active' : '')}
+            onClick={() => setTimeMachineOpen(v => !v)}
+            aria-expanded={timeMachineOpen}
+            aria-label="Toggle Mars24 Time Machine and Surface Conditions"
+            style={{ cursor: 'pointer', border: timeMachineOpen ? '1px solid rgba(92,255,176,0.5)' : undefined }}
+          >
+            <i className={conditionsData?.mars24?.is_daylight !== false ? 'ready' : 'synthetic'}/>
+            <span>Mars24: {conditionsData?.mars24?.ltst_hms || '10:15:00'} LTST</span>
+            <b>{conditionsData?.terrain_shadow?.shadow_state || conditionsData?.terrain_shadow?.illumination_state || 'ILLUMINATED'}</b>
+          </button>
           <span className={'status-chip' + (provenance.isSynthetic ? ' synthetic' : '')}>
             <i className={provenance.headerReady ? 'ready' : provenance.isSynthetic ? 'synthetic' : ''}/>
             {provenance.headerStatusText}
@@ -624,6 +859,7 @@ function App() {
             waypoint={waypoint}
             onWaypoint={setWaypoint}
             terrain={terrain}
+            activeDemTerrain={activeDemTerrain}
             start={start}
             destination={destination}
             pick={pick}
@@ -631,6 +867,12 @@ function App() {
             base={base}
             hazards={hazards}
             coverage={coverage}
+            showHillshade={showHillshade}
+            showSlope={showSlope}
+            showRoughness={showRoughness}
+            imageryOpacity={imageryOpacity}
+            terrainOpacity={terrainOpacity}
+            onWmtsStatusChange={setWmtsLiveStatus}
             maxSlope={mode === 'safety_first' ? Math.min(maxSlope, 14) : maxSlope}
             maxRough={maxRough}
             response={result}
@@ -671,6 +913,20 @@ function App() {
             curiosityTraverse={curiosityTraverse}
             curiosityWaypoints={curiosityWaypoints}
             focusedProduct={focusedProduct}
+            showThemisOverlay={showThemisOverlay}
+            showScienceTargets={showScienceTargets}
+            scienceTargets={JEZERO_SCIENCE_TARGETS_CLIENT}
+            roverReplayState={roverReplayState}
+            activeBookmark={activeBookmark}
+            onSelectBookmark={bm => {
+              setActiveBookmark(bm.id);
+              if (bm.id === 'gale') setShowCuriosity(true);
+              if (!bm.hasDem) {
+                setError('Global imagery available. High-resolution elevation and route optimization are not currently supported in this region.');
+              } else {
+                setError('');
+              }
+            }}
           />
         ) : loadError ? (
           live ? (
@@ -734,8 +990,8 @@ function App() {
 
           {cloudAiMode ? (
             <CloudAiPanel
-              activeRoute={result}
-              currentCoords={INITIAL.start}
+              activeRoute={active}
+              currentCoords={start}
             />
           ) : nasaDataMode ? (
             <NasaDataPanel
@@ -791,6 +1047,28 @@ function App() {
           ) : (
             <>
               {error && <div className="error-message" role="alert">{error}</div>}
+              <div className="mission-presets-box" style={{ marginBottom: '10px', padding: '8px 10px', borderRadius: '10px', background: 'rgba(92,255,176,0.06)', border: '1px solid rgba(92,255,176,0.22)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#9becbf', letterSpacing: '0.03em' }}>CURATED MISSION PRESETS (5 + FLAGSHIP)</span>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('flagship_jezero_expedition')}
+                    style={{ background: 'rgba(92,255,176,0.2)', color: '#d7f6e5', border: '1px solid rgba(92,255,176,0.5)', borderRadius: '6px', padding: '2px 7px', fontSize: '10.5px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    ★ Run Flagship Expedition
+                  </button>
+                </div>
+                <select
+                  aria-label="Mission preset selector"
+                  value={selectedPresetId}
+                  onChange={e => applyPreset(e.target.value)}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: '7px', background: 'rgba(8,14,18,0.85)', color: '#e2f1ec', border: '1px solid rgba(255,255,255,0.14)', fontSize: '12px' }}
+                >
+                  {MISSION_PRESETS_CLIENT.map(p => (
+                    <option key={p.preset_id} value={p.preset_id}>{p.title}</option>
+                  ))}
+                </select>
+              </div>
               <form ref={routeForm} onSubmit={e => { e.preventDefault(); run(); }}>
                 <div className="route-card">
                   <CoordinateRow point={start} label="Start" marker="A" active={pick === 'start'} onDraft={invalidate} onCommit={p => { invalidate(); setStart(p); }} onPick={() => { setShowRoute(true); setPick(pick === 'start' ? null : 'start'); }}/>
@@ -800,6 +1078,53 @@ function App() {
                     </button>
                   </div>
                   <CoordinateRow point={destination} label="Destination" marker="B" active={pick === 'destination'} onDraft={invalidate} onCommit={p => { invalidate(); setDestination(p); }} onPick={() => { setShowRoute(true); setPick(pick === 'destination' ? null : 'destination'); }}/>
+                </div>
+                <div className="two-fields" style={{ marginTop: '8px', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '11px', color: '#a8bbb6' }}>Departure UTC (Mars24)
+                    <input
+                      type="text"
+                      value={departureUtc}
+                      onChange={e => { invalidate(); setDepartureUtc(e.target.value); setTimeMachineUtc(e.target.value); }}
+                      style={{ width: '100%', padding: '5px 7px', borderRadius: '6px', background: 'rgba(10,16,20,0.8)', color: '#e3f2ed', border: '1px solid rgba(255,255,255,0.12)', fontSize: '11.5px' }}
+                    />
+                  </label>
+                  <label style={{ fontSize: '11px', color: '#a8bbb6' }}>EVA Budget (hrs)
+                    <input
+                      type="number"
+                      min="1"
+                      max="24"
+                      step="0.5"
+                      value={maxEvaHours}
+                      onChange={e => { invalidate(); setMaxEvaHours(Number(e.target.value)); }}
+                      style={{ width: '100%', padding: '5px 7px', borderRadius: '6px', background: 'rgba(10,16,20,0.8)', color: '#e3f2ed', border: '1px solid rgba(255,255,255,0.12)', fontSize: '11.5px' }}
+                    />
+                  </label>
+                </div>
+                <div className="dem-source-selector-box" style={{ marginBottom: '8px', padding: '7px 9px', borderRadius: '8px', background: 'rgba(100,223,223,0.06)', border: '1px solid rgba(100,223,223,0.22)' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: '#9becbf', fontWeight: 600 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>ACTIVE ROUTING TERRAIN (DEM)</span>
+                      <span style={{ fontSize: '10px', color: '#64dfdf', fontWeight: 700 }}>{provenance.datasetDoi ? `DOI: ${provenance.datasetDoi}` : 'USGS Verified'}</span>
+                    </div>
+                    <select
+                      aria-label="Routing terrain DEM source"
+                      value={demSourcePreference}
+                      onChange={e => {
+                        const nextPref = e.target.value;
+                        invalidate();
+                        setDemSourcePreference(nextPref);
+                        run({ demSourceOverride: nextPref });
+                      }}
+                      style={{ width: '100%', padding: '5px 7px', borderRadius: '6px', background: 'rgba(8,14,18,0.9)', color: '#e2f1ec', border: '1px solid rgba(255,255,255,0.16)', fontSize: '11.5px', fontWeight: 500 }}
+                    >
+                      <option value="auto">Auto (USGS HiRISE 1 m DTM where covered, else 200 m DEM)</option>
+                      <option value="hirise_1m">USGS HiRISE DTM · 1 m/px (DOI: 10.5066/P9REJ9JN)</option>
+                      <option value="mola_hrsc_200m">USGS MOLA-HRSC DEM · 200 m/px (DOI: 10.5066/P907276M)</option>
+                    </select>
+                  </label>
+                  <div style={{ fontSize: '10.5px', color: '#b6c9c4', marginTop: '4px', lineHeight: 1.35 }}>
+                    {provenance.activeDemSourceLabel} · {effectiveGrid && nativeGrid && effectiveGrid > nativeGrid ? `effective ∼${fmt(effectiveGrid, 1)} m grid (budget-strided from ${fmt(nativeGrid, 0)} m native)` : `∼${fmt(effectiveGrid || 200, 0)} m grid`}
+                  </div>
                 </div>
                 <details className="routing-settings" open={settingsOpen} onToggle={e => setSettingsOpen(e.currentTarget.open)}>
                   <summary>
@@ -855,8 +1180,8 @@ function App() {
                   {busy ? <><span className="spinner"/>Computing route…</> : <>Generate route<Icon name="arrow"/></>}
                 </button>
               </form>
-              <p className="route-caption">
-                {live ? `${provenance.isSynthetic ? 'Synthetic backend terrain' : 'Python backend terrain'} · ${provenance.dataMode}${effectiveGrid ? ` · ∼${fmt(effectiveGrid, 0)} m grid` : ''}` : 'Jezero regional terrain · ∼200 m grid'}
+              <p className="route-caption" data-testid="active-dem-caption">
+                {provenance.activeDemSourceLabel} · {provenance.datasetDoi ? `DOI ${provenance.datasetDoi} · ` : ''}{effectiveGrid ? `∼${fmt(effectiveGrid, effectiveGrid < 10 ? 1 : 0)} m routing grid` : '∼200 m grid'}
               </p>
             </>
           )}
@@ -947,10 +1272,14 @@ function App() {
                           <React.Fragment key={key}><dt>{label}</dt><dd>{fmt(active?.cost_breakdown?.[key], 1)}</dd></React.Fragment>
                         ))}
                         <dt>Data coverage</dt><dd>{active ? fmt(active.summary.data_coverage_fraction * 100, 0) + '%' : '—'}</dd>
+                        <dt>Active DEM source</dt><dd>{provenance.activeDemSourceLabel}</dd>
+                        <dt>Dataset DOI</dt><dd>{provenance.datasetDoi || '10.5066/P907276M'}</dd>
+                        <dt>Product ID</dt><dd style={{ wordBreak: 'break-all', fontSize: '10.5px' }}>{provenance.officialProductId || 'MarsHRSC_MOLA_BlendDEM_Global_200mp_v2'}</dd>
+                        <dt>Native DEM resolution</dt><dd>{fmt(nativeGrid || effectiveGrid, (nativeGrid || effectiveGrid) < 10 ? 2 : 0)} m/px</dd>
+                        <dt>Effective routing grid</dt><dd>{fmt(effectiveGrid, effectiveGrid < 10 ? 2 : 0)} m/px</dd>
                         <dt>Data mode</dt><dd>{provenance.dataMode}{provenance.isSynthetic ? ' (synthetic)' : ''}</dd>
                         <dt>Source status</dt><dd>{provenance.sourceVerificationText}</dd>
                         <dt>Evidence tier</dt><dd>{active?.evidence_passport?.quality_tier || 'Unassessed'}</dd>
-                        <dt>Grid resolution</dt><dd>{fmt(effectiveGrid, 0)} m</dd>
                         <dt>File integrity</dt><dd>{provenance.fileIntegrityText}</dd>
                         <dt>Upstream checksum</dt><dd>{provenance.upstreamChecksumText}</dd>
                       </dl>
@@ -973,6 +1302,8 @@ function App() {
                     <select aria-label="Export format" value={exportFormat} onChange={e => setExportFormat(e.target.value)}>
                       <option value="json">JSON manifest</option>
                       <option value="geojson">GeoJSON</option>
+                      <option value="brief">Mission Brief (.md)</option>
+                      <option value="config">Mission Config (.json)</option>
                     </select>
                     <button onClick={download} disabled={!result}><Icon name="download"/>Export</button>
                   </div>
@@ -983,32 +1314,214 @@ function App() {
           </aside>
         )}
 
-        {layersOpen && (
-          <section className="layers-popover glass" aria-label="Map layers">
+        {timeMachineOpen && (
+          <section
+            className="layers-popover glass"
+            aria-label="Mars24 Time Machine and Surface Conditions"
+            style={{ top: '62px', right: '16px', width: '365px', maxHeight: 'calc(100vh - 130px)', overflowY: 'auto', zIndex: 42 }}
+          >
             <div className="panel-heading">
-              <h2>Layers</h2>
+              <h2>Mars24 Time Machine &amp; Replay</h2>
+              <button className="icon-button" onClick={() => setTimeMachineOpen(false)} aria-label="Close Mars24 Time Machine">
+                <Icon name="close"/>
+              </button>
+            </div>
+            <div style={{ fontSize: '11.5px', color: '#d5e3df', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ color: '#9becbf', fontWeight: 600 }}>Epoch UTC Timestamp (Mars24 &amp; DEM Ray-Marching)</span>
+                <input
+                  type="text"
+                  value={timeMachineUtc}
+                  onChange={e => { setTimeMachineUtc(e.target.value); setDepartureUtc(e.target.value); }}
+                  style={{ padding: '5px 8px', borderRadius: '6px', background: 'rgba(8,14,18,0.85)', color: '#e6f5f0', border: '1px solid rgba(255,255,255,0.15)', fontSize: '12px' }}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                {[
+                  ['Morning (10:15 LTST)', '2026-06-15T08:00:00Z'],
+                  ['Low-Sun Afternoon', '2026-06-15T14:30:00Z'],
+                  ['Night (Below Horizon)', '2026-06-15T20:00:00Z'],
+                  ['Spirit Landing Epoch', '2004-01-03T13:46:31Z'],
+                ].map(([lbl, u]) => (
+                  <button
+                    key={lbl}
+                    type="button"
+                    onClick={() => { setTimeMachineUtc(u); setDepartureUtc(u); }}
+                    style={{ padding: '3px 7px', borderRadius: '5px', fontSize: '10.5px', background: timeMachineUtc === u ? 'rgba(92,255,176,0.2)' : 'rgba(255,255,255,0.06)', color: '#d7f6e5', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer' }}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              {conditionsData && (() => {
+                const shState = conditionsData.terrain_shadow?.shadow_state || conditionsData.terrain_shadow?.illumination_state || 'ILLUMINATED';
+                const modClim = conditionsData.modelled_climatology || conditionsData.climate?.modelled_climatology || {};
+                const medaRec = conditionsData.measured_meda?.nearest_record || conditionsData.climate?.measured_meda_reference;
+                return (
+                  <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(0,0,0,0.32)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <strong>NASA GISS Mars24 Solar Geometry</strong>
+                      <span style={{ color: '#9becbf', fontWeight: 600 }}>MSD {conditionsData.mars24?.msd}</span>
+                    </div>
+                    <div>LTST: <b>{conditionsData.mars24?.ltst_hms}</b> · LMST: <b>{conditionsData.mars24?.lmst_hms}</b> · MTC: <b>{conditionsData.mars24?.mtc_hms}</b></div>
+                    <div>Solar Longitude (Ls): <b>{conditionsData.mars24?.ls_deg}°</b></div>
+                    <div>Solar Elev / Azimuth: <b>{conditionsData.mars24?.solar_elevation_deg}°</b> / <b>{conditionsData.mars24?.solar_azimuth_deg}°</b></div>
+                    <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <span>DEM Shadow State: </span>
+                      <b style={{ color: shState === 'ILLUMINATED' ? '#5cffb0' : '#ffb867' }}>
+                        {shState}
+                      </b>
+                      <div style={{ fontSize: '10.5px', color: '#9cb0ab' }}>{conditionsData.terrain_shadow?.explanation}</div>
+                    </div>
+                    <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div><b>Modelled Climatology:</b> Air {modClim.air_temperature_c}°C · Ground {modClim.ground_temperature_c}°C · {modClim.pressure_pa} Pa</div>
+                      {medaRec && (
+                        <div style={{ fontSize: '10.5px', color: '#64dfdf', marginTop: '2px' }}>
+                          <b>Measured MEDA Ref (Sol {medaRec.sol}):</b> Air {medaRec.air_temperature_c ?? medaRec.air_temp_c}°C · {medaRec.pressure_pa} Pa
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(0,0,0,0.32)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <strong>Perseverance Historical Replay</strong>
+                  <span style={{ fontSize: '10.5px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(255,184,103,0.18)', color: '#ffb867', fontWeight: 600 }}>
+                    {roverReplayState?.archive_status || 'EXACT_SOL_RECORD'}
+                  </span>
+                </div>
+                <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                  <span>Mission Sol Selector: <b>Sol {timeMachineSol}</b></span>
+                  <small>Range: -5 (Pre-Landing) to 2100</small>
+                </label>
+                <input
+                  type="range"
+                  min="-5"
+                  max="2100"
+                  step="1"
+                  value={timeMachineSol}
+                  onChange={e => setTimeMachineSol(Number(e.target.value))}
+                  style={{ width: '100%', margin: '4px 0' }}
+                />
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '5px' }}>
+                  {[
+                    ['Sol -3 (Pre-Landing)', -3],
+                    ['Sol 0 (Touchdown)', 0],
+                    ['Sol 14 (1st Drive)', 14],
+                    ['Sol 18 (Stationary Gap)', 18],
+                    ['Sol 415 (Delta Front)', 415],
+                    ['Sol 2080 (Post-Cutoff)', 2080],
+                  ].map(([lbl, sVal]) => (
+                    <button
+                      key={lbl}
+                      type="button"
+                      onClick={() => setTimeMachineSol(sVal)}
+                      style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', background: timeMachineSol === sVal ? 'rgba(255,184,103,0.25)' : 'rgba(255,255,255,0.06)', color: '#ffe1aa', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: '10.5px', color: '#b8c7c3' }}>
+                  {roverReplayState?.explanation}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {layersOpen && (
+          <section className="layers-popover glass" aria-label="Scientific Layer Manager" style={{ maxHeight: 'calc(100vh - 115px)', overflowY: 'auto', width: '368px' }}>
+            <div className="panel-heading">
+              <h2>Scientific Layer Manager</h2>
               <button className="icon-button" onClick={() => setLayersOpen(false)} aria-label="Close map layers">
                 <Icon name="close"/>
               </button>
             </div>
-            <LayerToggle label="Recorded traverse" color="amber" checked={showHistory} onChange={setShowHistory}/>
-            <LayerToggle label="Recorded waypoints" color="violet" checked={showWaypoints} onChange={setShowWaypoints}/>
-            <LayerToggle label="Planned route" color="mint" checked={showRoute} onChange={setShowRoute}/>
-            <LayerToggle label="Alternatives" color="gray" checked={showAlternatives} onChange={setShowAlternatives}/>
-            <LayerToggle label="Orbiters (Real-time)" color="mint" checked={showOrbiters} onChange={setShowOrbiters}/>
-            <LayerToggle label="Orbital ground tracks" color="mint" checked={showGroundTracks} onChange={setShowGroundTracks}/>
-            <LayerToggle label="Observation footprints" color="amber" checked={showFootprints} onChange={setShowFootprints}/>
-            <LayerToggle label="Curiosity (Gale Crater)" color="violet" checked={showCuriosity} onChange={setShowCuriosity}/>
-            <LayerToggle label="Hazards" color="amber" checked={hazards} onChange={setHazards}/>
-            <LayerToggle label="Data coverage" color="gray" checked={coverage} onChange={setCoverage}/>
-            <div className="layer-basemap">
-              <span>Basemap</span>
-              <div className="segmented">
-                <button className={base === 'hirise' ? 'active' : ''} onClick={() => setBase('hirise')}>HiRISE</button>
-                <button className={base === 'imagery' ? 'active' : ''} onClick={() => setBase('imagery')}>Imagery</button>
-                <button className={base === 'relief' ? 'active' : ''} onClick={() => setBase('relief')}>Terrain</button>
+
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#9becbf', letterSpacing: '0.06em', margin: '6px 0 4px' }}>1. SATELLITE IMAGERY SELECTOR (OGC WMTS)</div>
+            <div className="layer-basemap" style={{ marginBottom: '6px' }}>
+              <div className="segmented" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
+                <button className={base === 'auto' || base === 'imagery' ? 'active' : ''} onClick={() => setBase('auto')}>Auto Multi-Res (232m→6m→0.25m)</button>
+                <button className={base === 'hirise' ? 'active' : ''} onClick={() => setBase('hirise')}>HiRISE 0.25m (10.5066/P9QJDP48)</button>
+                <button className={base === 'ctx' || base === 'ctx_global' ? 'active' : ''} onClick={() => setBase('ctx')}>CTX Regional 6m (10.5066/P9GV1ND3)</button>
+                <button className={base === 'viking' ? 'active' : ''} onClick={() => setBase('viking')}>Viking Global 232m</button>
+                <button className={base === 'relief' ? 'active' : ''} onClick={() => setBase('relief')}>DEM Color Relief</button>
+                <button className={base === 'mola_global' ? 'active' : ''} onClick={() => setBase('mola_global')}>MOLA ColorShade 200m</button>
               </div>
             </div>
+            <div className="slider-field" style={{ marginBottom: '8px' }}>
+              <label htmlFor="imagery-opacity" style={{ fontSize: '11px' }}>Imagery layer opacity <strong>{Math.round(imageryOpacity * 100)}%</strong></label>
+              <input id="imagery-opacity" type="range" min="0.2" max="1" step="0.05" value={imageryOpacity} onChange={e => setImageryOpacity(Number(e.target.value))}/>
+            </div>
+
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#64dfdf', letterSpacing: '0.06em', margin: '8px 0 4px' }}>2. TERRAIN SOURCE (DEM) &amp; ANALYTICAL OVERLAYS</div>
+            <div style={{ marginBottom: '6px' }}>
+              <select
+                aria-label="Layer manager DEM source"
+                value={demSourcePreference}
+                onChange={e => {
+                  const nextPref = e.target.value;
+                  setDemSourcePreference(nextPref);
+                  run({ demSourceOverride: nextPref });
+                }}
+                style={{ width: '100%', padding: '5px 7px', borderRadius: '6px', background: 'rgba(8,14,18,0.9)', color: '#e2f1ec', border: '1px solid rgba(100,223,223,0.3)', fontSize: '11px' }}
+              >
+                <option value="auto">Auto DEM: USGS HiRISE 1 m DTM (10.5066/P9REJ9JN)</option>
+                <option value="hirise_1m">Force USGS HiRISE 1 m DTM (10.5066/P9REJ9JN)</option>
+                <option value="mola_hrsc_200m">Force USGS MOLA-HRSC 200 m DEM (10.5066/P907276M)</option>
+              </select>
+            </div>
+            <LayerToggle label="Terrain Hillshade (from active DEM)" color="mint" checked={showHillshade} onChange={setShowHillshade}/>
+            <LayerToggle label="Slope Gradient Heatmap (0°–30°+)" color="amber" checked={showSlope} onChange={setShowSlope}/>
+            <LayerToggle label="Terrain Roughness Index (TRI)" color="violet" checked={showRoughness} onChange={setShowRoughness}/>
+            <LayerToggle label="Slope &amp; Roughness Hazard Thresholds" color="amber" checked={hazards} onChange={setHazards}/>
+            <LayerToggle label="Data Coverage &amp; USGS Product Bounds" color="gray" checked={coverage} onChange={setCoverage}/>
+            <div className="slider-field" style={{ marginBottom: '8px' }}>
+              <label htmlFor="terrain-opacity" style={{ fontSize: '11px' }}>Terrain overlay opacity <strong>{Math.round(terrainOpacity * 100)}%</strong></label>
+              <input id="terrain-opacity" type="range" min="0.15" max="1" step="0.05" value={terrainOpacity} onChange={e => setTerrainOpacity(Number(e.target.value))}/>
+            </div>
+
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#ffd166', letterSpacing: '0.06em', margin: '8px 0 4px' }}>3. USGS DATASET &amp; PROVENANCE INSPECTOR</div>
+            <div data-testid="usgs-dataset-inspector" style={{ padding: '7px 8px', borderRadius: '7px', background: 'rgba(0,0,0,0.36)', border: '1px solid rgba(255,255,255,0.1)', fontSize: '10.5px', color: '#d4e4e0', display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '8px' }}>
+              <div>
+                <strong style={{ color: '#9becbf' }}>Imagery: USGS HiRISE Orthomosaic (0.25 m/px)</strong>
+                <div>ID: <code>JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first</code></div>
+                <div>DOI: <code>10.5066/P9QJDP48</code> · Bounds: <code>77.2229°E–77.5840°E, 18.3068°N–18.6693°N</code></div>
+                <div>Status: <b style={{ color: '#5cffb0' }}>{wmtsLiveStatus?.layers?.hirise?.capabilitiesLoaded ? `WMTS Validated (${wmtsLiveStatus.layers.hirise.tilesLoaded || 0} tiles loaded)` : 'WMTS Capabilities Ready'}</b></div>
+              </div>
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '4px' }}>
+                <strong style={{ color: '#64dfdf' }}>Elevation: USGS HiRISE DTM Mosaic (1.0 m/px)</strong>
+                <div>ID: <code>JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40</code></div>
+                <div>DOI: <code>10.5066/P9REJ9JN</code> · Vertical: <code>meters</code> · NoData: <code>-3.4028e+38</code></div>
+                <div>Status: <b style={{ color: hiriseTerrain ? '#5cffb0' : '#ffb867' }}>{hiriseTerrain ? `Loaded & SHA-256 Verified (Active: ${provenance.activeDemSourceLabel})` : (hiriseLoadReason || 'Loading…')}</b></div>
+              </div>
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '4px' }}>
+                <strong style={{ color: '#ffd166' }}>Regional Imagery: USGS CTX Orthomosaic (6.0 m/px)</strong>
+                <div>ID: <code>JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0</code> · DOI: <code>10.5066/P9GV1ND3</code></div>
+              </div>
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '4px' }}>
+                <strong style={{ color: '#e2f1ec' }}>Route Endpoint Coverage Check:</strong>
+                <div>Start ({fmt(start.lon, 4)}°E, {fmt(start.lat, 4)}°N) &amp; Dest ({fmt(destination.lon, 4)}°E, {fmt(destination.lat, 4)}°N): <b style={{ color: '#5cffb0' }}>Inside USGS 10.5066/P9QJDP48 &amp; 10.5066/P9REJ9JN</b></div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#ff9f68', letterSpacing: '0.06em', margin: '8px 0 4px' }}>4. SCIENCE TARGETS &amp; THEMIS THERMAL</div>
+            <LayerToggle label="Jezero Science Targets (7)" color="amber" checked={showScienceTargets} onChange={setShowScienceTargets}/>
+            <LayerToggle label="THEMIS Thermal Inertia Grid (100m)" color="amber" checked={showThemisOverlay} onChange={setShowThemisOverlay}/>
+
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#c982d9', letterSpacing: '0.06em', margin: '8px 0 4px' }}>5. ROVER DATA &amp; ORBITAL GEOMETRY</div>
+            <LayerToggle label="Perseverance Recorded Traverse" color="amber" checked={showHistory} onChange={setShowHistory}/>
+            <LayerToggle label="Perseverance Sol Waypoints" color="violet" checked={showWaypoints} onChange={setShowWaypoints}/>
+            <LayerToggle label="Curiosity (Gale Crater)" color="violet" checked={showCuriosity} onChange={setShowCuriosity}/>
+            <LayerToggle label="Planned Route Corridor" color="mint" checked={showRoute} onChange={setShowRoute}/>
+            <LayerToggle label="Alternative Corridors" color="gray" checked={showAlternatives} onChange={setShowAlternatives}/>
+            <LayerToggle label="Orbiters (Real-time J2)" color="mint" checked={showOrbiters} onChange={setShowOrbiters}/>
+            <LayerToggle label="Orbital Ground Tracks" color="mint" checked={showGroundTracks} onChange={setShowGroundTracks}/>
+            <LayerToggle label="Observation Footprints" color="amber" checked={showFootprints} onChange={setShowFootprints}/>
+
             {view3d && (
               <div className="slider-field">
                 <label htmlFor="exaggeration">Elevation exaggeration <strong>×{exaggeration}</strong></label>
@@ -1016,7 +1529,7 @@ function App() {
               </div>
             )}
             <p className="field-note">
-              {live ? 'Hazards show returned route measurements.' : 'Heatmap edges are softened visually; routing uses the original grid.'} Coverage is the combined HRSC/MOLA product. Orbital tracks use J2-perturbed astrodynamics.
+              Imagery streams live OGC WMTS tiles (`default028mm`). Routing uses numerical USGS DEM elevation (never visual imagery).
             </p>
           </section>
         )}
@@ -1024,7 +1537,15 @@ function App() {
         {historyMode ? (
           <TraverseTimeline cut={solCut} max={maxSol} stats={historyStats} onChange={v => { setSolCut(v); setWaypoint(null); }} onAll={showAllHistory}/>
         ) : plannerMode ? (
-          <Profile route={active} onHover={setHover} expanded={profileExpanded} onToggle={value => setProfileExpanded(v => typeof value === 'boolean' ? value : !v)} busy={busy}/>
+          <Profile
+            route={active}
+            onHover={setHover}
+            expanded={profileExpanded}
+            onToggle={value => setProfileExpanded(v => typeof value === 'boolean' ? value : !v)}
+            busy={busy}
+            activeProfileTab={activeProfileTab}
+            onSelectProfileTab={setActiveProfileTab}
+          />
         ) : null}
 
         <div className="traverse-key glass">

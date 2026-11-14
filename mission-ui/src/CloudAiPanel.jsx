@@ -167,7 +167,16 @@ export default function CloudAiPanel({ activeRoute, currentCoords }) {
 
     try {
       const routeId = activeRoute?.route_id || 'primary';
-      const resp = await explainRoute(routeId, 'Why was this corridor chosen over alternate paths and what risk trade-offs were made?', selectedProvider);
+      const routeMetrics = activeRoute ? {
+        total_distance_km: (activeRoute.summary?.total_distance_meters || 3280) / 1000.0,
+        total_cost: activeRoute.total_cost || 4073.2,
+        max_slope_deg: activeRoute.summary?.max_slope_degrees || 11.4,
+        mean_slope_deg: activeRoute.summary?.mean_slope_degrees || 4.8,
+        elevation_gain_m: activeRoute.summary?.elevation_gain_meters || 45.0,
+        elevation_loss_m: activeRoute.summary?.elevation_loss_meters || 12.0,
+        risk_category: (activeRoute.summary?.max_slope_degrees || 11.4) <= 12 ? 'LOW_RISK' : 'MODERATE_RISK',
+      } : null;
+      const resp = await explainRoute(routeId, 'Why was this corridor chosen over alternate paths and what risk trade-offs were made?', selectedProvider, routeMetrics);
       const assistantMsg = {
         id: `asst_route_${Date.now()}`,
         role: 'assistant',
