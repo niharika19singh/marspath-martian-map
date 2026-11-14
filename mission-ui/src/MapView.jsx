@@ -392,6 +392,7 @@ export default function MapView(props) {
       }),
       controls: [new ScaleLine({ units: 'metric' })],
     });
+    if (typeof window !== 'undefined') window.__ol_map = map;
 
     // Multi-resolution planetary GIS edge feathering: softly feather rectangular boundaries of high-res insets into basemap
     const applyEdgeFeathering = (layer, extent, featherPx = 54) => {
