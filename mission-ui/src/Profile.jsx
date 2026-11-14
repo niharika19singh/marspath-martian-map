@@ -74,7 +74,7 @@ export default function Profile({route,onHover,expanded,onToggle,busy,activeProf
         <span className="profile-title">
           <span className="drawer-grip"/>
           Terrain &amp; Mission Analytics
-          <small>{busy?'Computing…':route?'6-tab engineering & science workbench':'Generate a route to begin'}</small>
+          <small>{busy?'Computing…':route?'5-tab engineering & science workbench':'Generate a route to begin'}</small>
         </span>
         <svg className="sparkline" viewBox="0 0 180 32" aria-hidden="true">
           <polyline points={spark} fill="none" stroke="#d8b27e" strokeWidth="1.5"/>
@@ -163,6 +163,23 @@ export default function Profile({route,onHover,expanded,onToggle,busy,activeProf
                   {[0,.25,.5,.75,1].map(n=>(
                     <text key={n} x={64+n*900} y="183" textAnchor="middle">{(n*total/1000).toFixed(2)} km</text>
                   ))}
+                  {route?.turnaround && Number.isFinite(route.turnaround.turnaround_distance_m) && (
+                    <g>
+                      {(() => {
+                        const tx = 64 + (Math.min(total, Math.max(0, route.turnaround.turnaround_distance_m)) / total) * 900;
+                        const fill = route.turnaround.feasible_before_sunset ? '#ffb867' : '#ff6b6b';
+                        return (
+                          <>
+                            <line x1={tx} x2={tx} y1="14" y2="158" stroke={fill} strokeWidth="2" strokeDasharray="4 3" />
+                            <circle cx={tx} cy="16" r="4.5" fill={fill} stroke="#11161a" strokeWidth="1.5" />
+                            <text x={Math.min(890, Math.max(85, tx))} y="12" fill={fill} fontSize="10" fontWeight="600" textAnchor="middle">
+                              Turnaround {route.turnaround.turnaround_ltst_hms || ''}
+                            </text>
+                          </>
+                        );
+                      })()}
+                    </g>
+                  )}
                   {hover&&hover.z!==null&&(
                     <g>
                       <line x1={x(hover)} x2={x(hover)} y1="16" y2="157" stroke="#e1d4bb88" strokeDasharray="3 4"/>
@@ -182,7 +199,7 @@ export default function Profile({route,onHover,expanded,onToggle,busy,activeProf
               </div>
             </>
           ):(
-            <div className={'empty-profile '+(busy?'shimmer':'')}>{busy?'Analyzing terrain…':'Elevation observations appear after route generation.'}</div>
+            <div className={'empty-profile '+(busy?'shimmer':'')}>{busy?'Analyzing terrain…':route?'Elevation profile unavailable — 2D planar route.':'Elevation observations appear after route generation.'}</div>
           )
         )}
 

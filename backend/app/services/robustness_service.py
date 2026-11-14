@@ -43,7 +43,7 @@ from backend.app.geospatial.terrain_metrics import (
     compute_slope_degrees,
 )
 from backend.app.routing.astar import astar_search
-from backend.app.routing.cost_model import MODE_WEIGHTS, calculate_edge_cost
+from backend.app.routing.cost_model import MODE_WEIGHTS
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode, RouteConstraints
 from backend.app.schemas.routes import (
@@ -347,11 +347,6 @@ def evaluate_path_on_scenario_graph(
                     f"Diagonal step ({r1}, {c1}) -> ({r2}, {c2}) at step {step_idx + 1} blocked by "
                     "diagonal corner-cutting constraint (orthogonal neighbor untraversable).",
                 )
-            d2d = scenario_graph.dist_diag
-        elif dr != 0:
-            d2d = scenario_graph.dist_orth_y
-        else:
-            d2d = scenario_graph.dist_orth_x
 
         z1 = float(scenario_graph.elevation[r1, c1])
         z2 = float(scenario_graph.elevation[r2, c2])
@@ -366,17 +361,7 @@ def evaluate_path_on_scenario_graph(
                 f"Step ({r1}, {c1}) -> ({r2}, {c2}) encountered NaN terrain metric in scenario.",
             )
 
-        delta_z = z2 - z1
-        dist_3d = math.sqrt(d2d**2 + delta_z**2)
-        step_cost, _ = calculate_edge_cost(
-            distance_3d=dist_3d,
-            slope_deg=slope,
-            roughness=rough,
-            delta_z=delta_z,
-            mode=scenario_graph.mode,
-            is_nodata=False,
-            extra_penalty=0.0,
-        )
+        step_cost, dist_3d, _, _, delta_z, _ = scenario_graph.edge_cost(r1, c1, r2, c2)
         total_cost += step_cost
         total_length_3d += dist_3d
 

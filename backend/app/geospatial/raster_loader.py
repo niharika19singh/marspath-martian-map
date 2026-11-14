@@ -835,20 +835,27 @@ def get_file_identity(file_path: str) -> tuple[str, int, int, int, int, int] | N
         return None
 
 
+def _float32_close_mask(arr: np.ndarray, target: float) -> np.ndarray:
+    """Memory-lean float32 element-wise tolerance comparison avoiding float64 promotion."""
+    t32 = np.float32(target)
+    tol = np.float32(1e-3 + 1e-6 * abs(float(t32)))
+    diff = arr - t32
+    np.abs(diff, out=diff)
+    return diff <= tol
+
+
 class RasterData:
     def __init__(self, data: np.ndarray, metadata: RasterMetadata):
-        self.data = data.astype(np.float32)
+        self.data = data if data.dtype == np.float32 else data.astype(np.float32)
         self.metadata = metadata
         self._init_nodata_mask()
 
     def _init_nodata_mask(self):
-        mask = np.isnan(self.data) | ~np.isfinite(self.data)
+        mask = ~np.isfinite(self.data)
         if self.metadata.nodata_value is not None:
-            mask = mask | (
-                np.isclose(self.data, self.metadata.nodata_value, rtol=1e-6, atol=1e-3)
-            )
+            mask |= _float32_close_mask(self.data, self.metadata.nodata_value)
         # Standard Mars PDS nodata sentinels (including 16#FF7FFFFB# ~ -3.4028227e+38)
-        mask = mask | (self.data < -9000.0) | (self.data > 1e30)
+        mask |= (self.data < np.float32(-9000.0)) | (self.data > np.float32(1e30))
         self.nodata_mask = mask
 
     @property
@@ -1162,22 +1169,19 @@ def load_raster_file(file_path: str) -> RasterData:
                     elif pds_missing_const is not None:
                         nodata_val = pds_missing_const
 
-                data_f32 = data.astype(np.float32).copy()
+                data_f32 = data if data.dtype == np.float32 else data.astype(np.float32)
+                del data
 
                 # Step 1: Construct raw NoData mask strictly using explicit source NoData,
                 # PDS3 CORE_NULL, PDS3 MISSING_CONSTANT, NaN, non-finite values, and extreme sentinels (> 1e30).
                 # Do NOT apply physical elevation thresholds (< -9000m) to unscaled storage values!
-                raw_nd = (
-                    np.isnan(data_f32)
-                    | ~np.isfinite(data_f32)
-                    | (np.abs(data_f32) > 1e30)
-                )
+                raw_nd = (~np.isfinite(data_f32)) | (np.abs(data_f32) > np.float32(1e30))
                 if nodata_val is not None:
-                    raw_nd = raw_nd | np.isclose(data_f32, nodata_val, rtol=1e-6, atol=1e-3)
+                    raw_nd |= _float32_close_mask(data_f32, nodata_val)
                 if pds_core_null is not None:
-                    raw_nd = raw_nd | np.isclose(data_f32, pds_core_null, rtol=1e-6, atol=1e-3)
+                    raw_nd |= _float32_close_mask(data_f32, pds_core_null)
                 if pds_missing_const is not None:
-                    raw_nd = raw_nd | np.isclose(data_f32, pds_missing_const, rtol=1e-6, atol=1e-3)
+                    raw_nd |= _float32_close_mask(data_f32, pds_missing_const)
 
                 pds_scale = float(pds3_res.scaling_factor) if (pds3_res and pds3_res.is_valid_dtm) else 1.0
                 pds_offset = float(pds3_res.offset) if (pds3_res and pds3_res.is_valid_dtm) else 0.0

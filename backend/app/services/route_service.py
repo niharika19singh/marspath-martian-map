@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import time
 import uuid
@@ -38,6 +39,10 @@ from backend.app.routing.alternatives import (
 from backend.app.routing.astar import astar_search
 from backend.app.routing.dijkstra import dijkstra_search
 from backend.app.routing.graph_builder import TerrainGridGraph
+from backend.app.routing.return_constraint import (
+    compute_backward_time_grid,
+    serialize_time_grid_overlay,
+)
 from backend.app.schemas.mission import OptimizationMode, RoutingAlgorithm
 from backend.app.schemas.routes import (
     AlgorithmComparisonReport,
@@ -144,6 +149,8 @@ class RouteService:
         validate_coordinates_in_bounds(request.destination, regional_master_meta, "Destination point")
         for idx, wp in enumerate(request.science_waypoints or []):
             validate_coordinates_in_bounds(wp, regional_master_meta, f"Science Waypoint #{idx + 1}")
+        if getattr(request, "habitat", None) is not None:
+            validate_coordinates_in_bounds(request.habitat, regional_master_meta, "Habitat base")
 
         # Enforce MAX_SEARCH_RADIUS_METERS before terrain selection, corridor preparation, or grid construction
         max_search_radius = self.settings.MAX_SEARCH_RADIUS_METERS
@@ -166,10 +173,13 @@ class RouteService:
                     )
 
         # 4. Deterministic Multi-Resolution Terrain Source Selection & Corridor Preparation
+        corridor_waypoints = list(request.science_waypoints or [])
+        if getattr(request, "habitat", None) is not None:
+            corridor_waypoints.append(request.habitat)
         selection_outcome = TerrainSourceSelector.select_and_prepare_corridor(
             start=request.start,
             destination=request.destination,
-            waypoints=request.science_waypoints,
+            waypoints=corridor_waypoints or None,
             regional_provider=active_regional_provider,
             hirise_provider=active_hirise_provider,
             max_cells=self.max_cells if self.max_cells is not None else self.settings.MAX_GRID_CELLS,
@@ -212,6 +222,98 @@ class RouteService:
             d_col, d_row, traversable_mask, request.destination, "Destination location"
         )
 
+        # Resolve habitat base cell (defaults to start)
+        if getattr(request, "habitat", None) is not None:
+            hab_col, hab_row = geo_to_pixel(
+                request.habitat.lon,
+                request.habitat.lat,
+                cropped_meta.min_lon,
+                cropped_meta.max_lat,
+                cropped_meta.deg_per_px_lon,
+                cropped_meta.deg_per_px_lat,
+                pixel_center=True,
+            )
+            hab_col = max(0, min(hab_col, cropped_meta.width - 1))
+            hab_row = max(0, min(hab_row, cropped_meta.height - 1))
+            check_cell_traversability(
+                hab_col, hab_row, traversable_mask, request.habitat, "Habitat base"
+            )
+        else:
+            hab_row, hab_col = s_row, s_col
+
+        # Stage 1 parameters
+        cost_mode = str(getattr(request, "cost_mode", "directional") or "directional").lower()
+        effort_model = str(getattr(request, "effort_model", "slope_penalty") or "slope_penalty").lower()
+        cross_slope_weight = float(
+            getattr(request, "cross_slope_weight", 0.35)
+            if getattr(request, "cross_slope_weight", None) is not None
+            else 0.35
+        )
+        suit_load_factor = float(getattr(request, "suit_load_factor", 1.0) or 1.0)
+        return_mode = str(getattr(request, "return_constraint_mode", "flag") or "flag").lower()
+        dep_utc = getattr(request, "departure_utc", None) or "2026-06-15T08:00:00Z"
+        walk_speed = getattr(request, "walking_speed_m_s", None) or 1.1111
+        max_eva_h = float(getattr(request, "max_eva_hours", 8.0) or 8.0)
+        daylight_buf_min = float(getattr(request, "daylight_buffer_minutes", 0.0) or 0.0)
+        rescue_enabled = bool(getattr(request, "rescue_enabled", True))
+        rescue_speed_m_s = float(getattr(request, "rescue_speed_m_s", 2.7778) or 2.7778)
+        rescue_max_slope_deg = float(getattr(request, "rescue_max_slope_deg", 12.0) or 12.0)
+        rescue_threshold_min = float(getattr(request, "rescue_threshold_minutes", 30.0) or 30.0)
+
+        # 8b. Backward-Dijkstra Habitat Return-Time Solver
+        return_grid_res = None
+        return_blocked_mask = None
+        if return_mode != "off":
+            return_grid_res = compute_backward_time_grid(
+                elevation=cropped_elev,
+                slope_deg=slope_deg,
+                traversable_mask=traversable_mask,
+                dx_meters=dx_meters,
+                dy_meters=dy_meters,
+                habitat_node=(hab_row, hab_col),
+                base_speed_m_s=walk_speed,
+                budget_seconds=max_eva_h * 3600.0,
+            )
+            if return_mode == "block":
+                return_blocked_mask = return_grid_res.reachable_mask
+                if not bool(return_blocked_mask[d_row, d_col]):
+                    ret_s = float(return_grid_res.time_seconds_grid[d_row, d_col])
+                    ret_desc = f"{ret_s / 60.0:.1f} min" if math.isfinite(ret_s) else "unreachable"
+                    raise UnreachableDestinationError(
+                        reason=(
+                            f"Destination exceeds EVA return-time budget ({ret_desc} > {max_eva_h * 60.0:.1f} min) "
+                            "to habitat under return_constraint_mode='block'."
+                        ),
+                        start=(hab_row, hab_col),
+                        dest=(d_row, d_col),
+                    )
+                if not bool(return_blocked_mask[s_row, s_col]):
+                    ret_s = float(return_grid_res.time_seconds_grid[s_row, s_col])
+                    ret_desc = f"{ret_s / 60.0:.1f} min" if math.isfinite(ret_s) else "unreachable"
+                    raise UnreachableDestinationError(
+                        reason=(
+                            f"Start coordinate exceeds EVA return-time budget ({ret_desc} > {max_eva_h * 60.0:.1f} min) "
+                            "to habitat under return_constraint_mode='block'."
+                        ),
+                        start=(hab_row, hab_col),
+                        dest=(s_row, s_col),
+                    )
+
+        # 8c. Backward-Dijkstra Rescue-Time Solver (reuses same solver with rescue vehicle profile)
+        rescue_grid_res = None
+        if rescue_enabled:
+            rescue_grid_res = compute_backward_time_grid(
+                elevation=cropped_elev,
+                slope_deg=slope_deg,
+                traversable_mask=traversable_mask,
+                dx_meters=dx_meters,
+                dy_meters=dy_meters,
+                habitat_node=(hab_row, hab_col),
+                base_speed_m_s=rescue_speed_m_s,
+                budget_seconds=rescue_threshold_min * 60.0,
+                max_drivable_slope_deg=rescue_max_slope_deg,
+            )
+
         # 9. Build terrain grid graph
         graph = TerrainGridGraph(
             elevation=cropped_elev,
@@ -221,6 +323,11 @@ class RouteService:
             dx_meters=dx_meters,
             dy_meters=dy_meters,
             mode=request.mode,
+            cost_mode=cost_mode,
+            effort_model=effort_model,
+            cross_slope_weight=cross_slope_weight,
+            suit_load_factor=suit_load_factor,
+            return_blocked_mask=return_blocked_mask,
         )
 
         science_pois = self.provider.get_science_targets()
@@ -733,34 +840,107 @@ class RouteService:
             cell_size_meters=round((dx_meters + dy_meters) / 2.0, 2),
         )
 
-        # 12. Phase 2-4 Mission Intelligence Enrichment (Uncertainty, Science/EVA, Mars24 Clock, Pareto, Recon, Stress)
-        dep_utc = getattr(request, "departure_utc", None) or "2026-06-15T08:00:00Z"
-        walk_speed = getattr(request, "walking_speed_m_s", None) or 1.1111
+        # 12. Phase 2-4 + Stage 1 Mission Intelligence Enrichment
         inc_return = bool(getattr(request, "include_return_leg", True))
-        max_eva_h = float(getattr(request, "max_eva_hours", 8.0) or 8.0)
         eff_res_m = float(selection_report.effective_resolution_meters or round((dx_meters + dy_meters) / 2.0, 2))
+        dem_src_name = str(provenance.get("dataset_name") or selection_report.selected_source_id)
+        dem_res_label = f"{dem_src_name} ({round(eff_res_m, 1)} m/px)"
         wp_tuples = [(wp.lon, wp.lat) for wp in (request.science_waypoints or [])]
         wp_dicts = [{"lon": wp.lon, "lat": wp.lat, "stop_minutes": 20.0} for wp in (request.science_waypoints or [])]
 
         pareto_inputs: list[dict] = []
         for r_alt in routes:
             coords = r_alt.geometry.coordinates if r_alt.geometry else []
+            path_nodes = baseline_route_nodes.get(r_alt.route_id, [])
+
+            # Stage 1: Attach return-time and rescue-time metrics per segment & summary
+            ret_vals_min: list[float] = []
+            res_vals_min: list[float] = []
+            exceeds_ret = False
+            rescue_flagged_dist = 0.0
+            has_unreach_ret = False
+            has_unreach_res = False
+
             segs_raw = []
             if r_alt.evidence_passport and r_alt.evidence_passport.segments:
-                for s in r_alt.evidence_passport.segments:
+                for seg in r_alt.evidence_passport.segments:
+                    node_idx = min(seg.segment_index + 1, len(path_nodes) - 1) if path_nodes else -1
+                    if node_idx >= 0:
+                        nr, nc = path_nodes[node_idx]
+                        if return_grid_res is not None:
+                            rt_s = float(return_grid_res.time_seconds_grid[nr, nc])
+                            if math.isfinite(rt_s):
+                                rt_m = round(rt_s / 60.0, 1)
+                                seg.return_time_minutes = rt_m
+                                ret_vals_min.append(rt_m)
+                                if rt_m > max_eva_h * 60.0:
+                                    exceeds_ret = True
+                                    if "exceeds_eva_return_budget" not in seg.quality_flags:
+                                        seg.quality_flags.append("exceeds_eva_return_budget")
+                            else:
+                                seg.return_time_minutes = None
+                                has_unreach_ret = True
+                                exceeds_ret = True
+                                if "exceeds_eva_return_budget" not in seg.quality_flags:
+                                    seg.quality_flags.append("exceeds_eva_return_budget")
+                        if rescue_grid_res is not None:
+                            rs_s = float(rescue_grid_res.time_seconds_grid[nr, nc])
+                            if math.isfinite(rs_s):
+                                rs_m = round(rs_s / 60.0, 1)
+                                seg.rescue_time_minutes = rs_m
+                                res_vals_min.append(rs_m)
+                                if rs_m > rescue_threshold_min:
+                                    rescue_flagged_dist += float(seg.step_distance_meters)
+                                    if "exceeds_rescue_time_threshold" not in seg.quality_flags:
+                                        seg.quality_flags.append("exceeds_rescue_time_threshold")
+                            else:
+                                seg.rescue_time_minutes = None
+                                has_unreach_res = True
+                                rescue_flagged_dist += float(seg.step_distance_meters)
+                                if "exceeds_rescue_time_threshold" not in seg.quality_flags:
+                                    seg.quality_flags.append("exceeds_rescue_time_threshold")
+
                     segs_raw.append(
                         {
-                            "start_lon": s.from_coord.lon,
-                            "start_lat": s.from_coord.lat,
-                            "end_lon": s.to_coord.lon,
-                            "end_lat": s.to_coord.lat,
-                            "length_meters": s.step_distance_meters,
-                            "is_valid_data": s.is_valid_data,
-                            "slope_deg": s.slope_deg,
-                            "roughness": s.roughness,
-                            "quality_flags": s.quality_flags,
+                            "start_lon": seg.from_coord.lon,
+                            "start_lat": seg.from_coord.lat,
+                            "end_lon": seg.to_coord.lon,
+                            "end_lat": seg.to_coord.lat,
+                            "length_meters": seg.step_distance_meters,
+                            "is_valid_data": seg.is_valid_data,
+                            "slope_deg": seg.slope_deg,
+                            "roughness": seg.roughness,
+                            "quality_flags": seg.quality_flags,
                         }
                     )
+
+            r_alt.summary.max_return_time_minutes = (
+                round(max(ret_vals_min), 1)
+                if (ret_vals_min and not has_unreach_ret)
+                else None
+            )
+            r_alt.summary.exceeds_return_budget = bool(exceeds_ret)
+            r_alt.summary.max_rescue_time_minutes = (
+                round(max(res_vals_min), 1)
+                if (res_vals_min and not has_unreach_res)
+                else None
+            )
+            r_alt.summary.rescue_flagged_distance_meters = round(rescue_flagged_dist, 1)
+            r_alt.summary.provenance = {
+                "kind": "computed",
+                "source": dem_src_name,
+                "resolution": f"{round(eff_res_m, 2)} m/px",
+                "as_of": dep_utc,
+            }
+            if exceeds_ret:
+                r_alt.warnings.append(
+                    f"Habitat return-time constraint flagged: route reaches cells exceeding {max_eva_h:.1f}h EVA budget."
+                )
+            if rescue_flagged_dist > 0.0:
+                r_alt.warnings.append(
+                    f"Rescue response time exceeds {rescue_threshold_min:.0f} min threshold across {round(rescue_flagged_dist, 1)} m."
+                )
+
             unc = classify_route_uncertainty(
                 segments=segs_raw,
                 coordinates=coords,
@@ -785,13 +965,21 @@ class RouteService:
                 waypoint_coords=wp_tuples,
                 include_return_leg=inc_return,
                 max_eva_duration_hours=max_eva_h,
+                daylight_buffer_minutes=daylight_buf_min,
+                dem_resolution_label=dem_res_label,
             )
             r_alt.uncertainty_summary = unc
             r_alt.science_eva_plan = sci_plan
             r_alt.mission_clock = m_clock
+            r_alt.turnaround = m_clock.get("turnaround")
 
             cb = r_alt.cost_breakdown or {}
-            hazard_idx = float(cb.get("slope_penalty", 0.0)) + float(cb.get("roughness_penalty", 0.0)) + float(cb.get("hazard_penalty", 0.0))
+            hazard_idx = (
+                float(cb.get("slope_penalty", 0.0))
+                + float(cb.get("cross_slope_penalty", 0.0))
+                + float(cb.get("roughness_penalty", 0.0))
+                + float(cb.get("hazard_penalty", 0.0))
+            )
             pareto_inputs.append(
                 {
                     "route_id": r_alt.route_id,
@@ -846,6 +1034,34 @@ class RouteService:
             stress_suite = None
             brief_md = None
 
+        return_zone_payload = None
+        if return_grid_res is not None:
+            return_zone_payload = serialize_time_grid_overlay(
+                return_grid_res.time_seconds_grid,
+                cropped_meta,
+                budget_minutes=max_eva_h * 60.0,
+                as_of=dep_utc,
+                source_name=f"{dem_src_name} (Backward Dijkstra Return)",
+                resolution_m=eff_res_m,
+            )
+            return_zone_payload["mode"] = return_mode
+            return_zone_payload["reachable_fraction"] = return_grid_res.reachable_fraction
+
+        rescue_zone_payload = None
+        if rescue_grid_res is not None:
+            rescue_zone_payload = serialize_time_grid_overlay(
+                rescue_grid_res.time_seconds_grid,
+                cropped_meta,
+                budget_minutes=rescue_threshold_min,
+                as_of=dep_utc,
+                source_name=f"{dem_src_name} (Rescue Profile <= {rescue_max_slope_deg:.0f} deg)",
+                resolution_m=eff_res_m,
+            )
+            rescue_zone_payload["reachable_fraction"] = rescue_grid_res.reachable_fraction
+            rescue_zone_payload["speed_m_s"] = round(rescue_speed_m_s, 3)
+            rescue_zone_payload["max_slope_deg"] = round(rescue_max_slope_deg, 1)
+            rescue_zone_payload["threshold_minutes"] = round(rescue_threshold_min, 1)
+
         return RoutePlanResponse(
             mission_id=mission_id,
             status="success",
@@ -863,4 +1079,6 @@ class RouteService:
             reconnaissance_plan=recon_plan,
             operational_stress_suite=stress_suite,
             mission_brief_markdown=brief_md,
+            return_zone=return_zone_payload,
+            rescue_zone=rescue_zone_payload,
         )

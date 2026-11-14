@@ -11,17 +11,14 @@ Covers:
 """
 
 import pytest
-from fastapi.testclient import TestClient
-
-from app.main import app
 from app.data.manifest import (
     DATA_CATALOG_MANIFEST,
-    USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256,
 )
 from app.data.providers.hirise import HiRISERasterProvider
-from app.schemas.routes import RoutePlanRequest, MarsCoordinate, RouteConstraints
+from app.main import app
+from app.schemas.routes import MarsCoordinate, RouteConstraints, RoutePlanRequest
 from app.services.route_service import RouteService
-
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 

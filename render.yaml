@@ -32,4 +32,9 @@ services:
       # synthetic fallback terrain in production.
       - key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK
         value: "false"
+      # Render Free tier has 512 MB RAM; HiRISE 1m A*+robustness peaks at ~1.2 GB RSS.
+      # Keep MARSPATH_USE_HIRISE_DEM=false on Free plan (200m MOLA-HRSC runs in ~105 MB);
+      # set both MARSPATH_PROVISION_HIRISE=true and MARSPATH_USE_HIRISE_DEM=true on >=2 GB plans.
+      - key: MARSPATH_USE_HIRISE_DEM
+        value: "false"
     healthCheckPath: /health

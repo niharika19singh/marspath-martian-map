@@ -1,5 +1,6 @@
 import WMTS from 'ol/source/WMTS.js';
 import WMTSTileGrid from 'ol/tilegrid/WMTS.js';
+import { getAssetUrl } from './integration.js';
 
 export const AUTHORITATIVE_MARS_IMAGERY_CATALOG = {
   viking_global_232m: {
@@ -388,7 +389,8 @@ export function createOpenLayersWMTSSource(parsedCaps, onTileLoad, onTileError) 
  * and falling back to the upstream NASA Mars Trek capabilities URL.
  */
 export async function fetchAndParseWMTSCapabilities(entry) {
-  const urlsToTry = [entry.localCapabilitiesUrl, entry.capabilitiesUrl].filter(Boolean);
+  const localUrl = entry.localCapabilitiesUrl ? getAssetUrl(entry.localCapabilitiesUrl) : null;
+  const urlsToTry = [localUrl, entry.capabilitiesUrl].filter(Boolean);
   for (const url of urlsToTry) {
     try {
       const resp = await fetch(url);
@@ -515,4 +517,3 @@ export function verifyCoordinateDatasetCoverage(arg1, arg2, hiriseTerrain = unde
     },
   };
 }
-

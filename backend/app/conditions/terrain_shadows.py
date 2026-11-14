@@ -178,11 +178,12 @@ class DemShadowAnalyzer:
     ) -> TerrainShadowResult:
         """Ray-march from (latitude_deg, longitude_east_deg) toward solar_azimuth_deg."""
         if not self._ensure_loaded() or self._elevation is None or self._nodata_mask is None:
+            is_below = solar_elevation_deg <= 0.0
             return TerrainShadowResult(
-                shadow_state="INSUFFICIENT_DEM_COVERAGE",
+                shadow_state="BELOW_HORIZON" if is_below else "INSUFFICIENT_DEM_COVERAGE",
                 is_illuminated=False,
                 is_terrain_shadowed=False,
-                is_below_horizon=solar_elevation_deg <= 0.0,
+                is_below_horizon=is_below,
                 has_dem_coverage=False,
                 solar_elevation_deg=round(solar_elevation_deg, 4),
                 solar_azimuth_deg=round(solar_azimuth_deg, 4),

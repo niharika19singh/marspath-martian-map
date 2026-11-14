@@ -14,6 +14,7 @@ from typing import Any
 
 from backend.app.conditions.mars24 import MARS_SOL_RATIO, compute_mars24, parse_utc_datetime
 from backend.app.conditions.terrain_shadows import get_dem_shadow_analyzer
+from backend.app.routing.graph_builder import directional_walk_speed_m_s
 
 
 @dataclass(frozen=True)
@@ -43,8 +44,23 @@ class SegmentClockEntry:
     is_terrain_shadowed: bool
 
 
-def _tobler_mars_speed_m_s(base_speed_m_s: float, slope_deg: float) -> float:
-    """Slope-adjusted walking/traverse speed preserving positive physical bounds."""
+def _hours_to_hms(hours: float) -> str:
+    h_mod = hours % 24.0
+    total_sec = int(round(h_mod * 3600.0)) % 86400
+    hh = total_sec // 3600
+    mm = (total_sec % 3600) // 60
+    ss = total_sec % 60
+    return f"{hh:02d}:{mm:02d}:{ss:02d}"
+
+
+def _tobler_mars_speed_m_s(
+    base_speed_m_s: float,
+    slope_deg: float,
+    signed_grade: float | None = None,
+) -> float:
+    """Directional slope-adjusted walking/traverse speed preserving positive physical bounds."""
+    if signed_grade is not None:
+        return directional_walk_speed_m_s(base_speed_m_s, signed_grade)
     grade = math.tan(math.radians(min(45.0, abs(slope_deg))))
     factor = math.exp(-2.2 * abs(grade + 0.02))
     return max(0.08 * base_speed_m_s, min(1.15 * base_speed_m_s, base_speed_m_s * factor))
@@ -60,6 +76,8 @@ def evaluate_route_mission_clock(
     include_return_leg: bool = True,
     return_time_multiplier: float = 1.0,
     max_eva_duration_hours: float = 8.0,
+    daylight_buffer_minutes: float = 0.0,
+    dem_resolution_label: str = "USGS HiRISE / MOLA-HRSC",
 ) -> dict[str, Any]:
     """Compute a complete mission clock timeline for a route geometry."""
     if not coordinates or len(coordinates) < 2:
@@ -74,16 +92,35 @@ def evaluate_route_mission_clock(
     shadow_analyzer = get_dem_shadow_analyzer()
 
     # Calculate remaining daylight hours at departure if currently in daylight
+    sunset_seconds_from_dep: float | None = None
+    sunset_utc_str: str | None = None
+    sunset_ltst_hms: str | None = None
+    in_daylight_at_departure = False
+
     if m24_start.polar_day_state == "POLAR_CONTINUOUS_DAY":
         avail_daylight_earth_h = 24.0 * MARS_SOL_RATIO
+        in_daylight_at_departure = True
     elif m24_start.polar_day_state == "POLAR_CONTINUOUS_NIGHT":
         avail_daylight_earth_h = 0.0
     elif m24_start.sunset_ltst_hours is not None and m24_start.sunrise_ltst_hours is not None:
-        if m24_start.sunrise_ltst_hours <= m24_start.ltst_hours <= m24_start.sunset_ltst_hours:
+        sunset_ltst_hms = _hours_to_hms(m24_start.sunset_ltst_hours)
+        if m24_start.sunrise_ltst_hours <= m24_start.ltst_hours < m24_start.sunset_ltst_hours:
             avail_mars_h = m24_start.sunset_ltst_hours - m24_start.ltst_hours
             avail_daylight_earth_h = max(0.0, avail_mars_h * MARS_SOL_RATIO)
+            sunset_seconds_from_dep = avail_daylight_earth_h * 3600.0
+            sunset_utc_str = (dt_start + timedelta(seconds=sunset_seconds_from_dep)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            in_daylight_at_departure = True
         else:
             avail_daylight_earth_h = 0.0
+            if m24_start.ltst_hours < m24_start.sunrise_ltst_hours:
+                next_sunset_mars_h = m24_start.sunset_ltst_hours - m24_start.ltst_hours
+            else:
+                next_sunset_mars_h = (24.0 - m24_start.ltst_hours) + m24_start.sunset_ltst_hours
+            sunset_utc_str = (
+                dt_start + timedelta(seconds=next_sunset_mars_h * MARS_SOL_RATIO * 3600.0)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
     else:
         avail_daylight_earth_h = 0.0
 
@@ -125,6 +162,11 @@ def evaluate_route_mission_clock(
     stride = max(1, len(coordinates) // 60)
     last_shadow_state = "ILLUMINATED"
 
+    # Per-vertex cumulative distance, outbound arrival seconds, and return walking seconds to start
+    vertex_cum_dist_m: list[float] = [0.0]
+    vertex_out_s: list[float] = [0.0]
+    vertex_ret_s: list[float] = [0.0]
+
     for idx in range(len(coordinates) - 1):
         p0 = coordinates[idx]
         p1 = coordinates[idx + 1]
@@ -138,17 +180,26 @@ def evaluate_route_mission_clock(
         seg_dist_m = mars_r * math.hypot(dlat, dlon)
         if z0 is not None and z1 is not None and seg_dist_m > 0.1:
             slope_deg = math.degrees(math.atan2(abs(z1 - z0), seg_dist_m))
+            out_grade: float | None = (z1 - z0) / seg_dist_m
+            ret_grade: float | None = (z0 - z1) / seg_dist_m
         else:
             slope_deg = 2.5
+            out_grade = None
+            ret_grade = None
 
-        eff_speed = _tobler_mars_speed_m_s(base_speed, slope_deg)
+        eff_speed = _tobler_mars_speed_m_s(base_speed, slope_deg, signed_grade=out_grade)
         walk_s = seg_dist_m / max(0.05, eff_speed)
+        ret_speed_edge = _tobler_mars_speed_m_s(base_speed, slope_deg, signed_grade=ret_grade) / return_mult
+        ret_walk_edge_s = seg_dist_m / max(0.05, ret_speed_edge)
         stop_s = wp_stops_s.get(idx + 1, 0.0)
 
         cum_dist_m += seg_dist_m
         outbound_walk_s += walk_s
         outbound_stop_s += stop_s
         cum_dur_s += walk_s + stop_s
+        vertex_cum_dist_m.append(cum_dist_m)
+        vertex_out_s.append(cum_dur_s)
+        vertex_ret_s.append(vertex_ret_s[-1] + ret_walk_edge_s)
 
         arr_dt = dt_start + timedelta(seconds=cum_dur_s)
         m24_seg = compute_mars24(lat1, lon1, arr_dt)
@@ -221,10 +272,12 @@ def evaluate_route_mission_clock(
             seg_dist_m = mars_r * math.hypot(dlat, dlon)
             if z0 is not None and z1 is not None and seg_dist_m > 0.1:
                 slope_deg = math.degrees(math.atan2(abs(z1 - z0), seg_dist_m))
+                signed_ret_grade: float | None = (z1 - z0) / seg_dist_m
             else:
                 slope_deg = 2.5
+                signed_ret_grade = None
 
-            eff_speed = _tobler_mars_speed_m_s(base_speed, slope_deg) / return_mult
+            eff_speed = _tobler_mars_speed_m_s(base_speed, slope_deg, signed_grade=signed_ret_grade) / return_mult
             walk_s = seg_dist_m / max(0.05, eff_speed)
             cum_dist_m += seg_dist_m
             return_walk_s += walk_s
@@ -289,6 +342,98 @@ def evaluate_route_mission_clock(
     total_earth_hours = cum_dur_s / 3600.0
     rem_daylight_h = max(0.0, avail_daylight_earth_h - total_earth_hours)
 
+    # Hard Turnaround Time: latest turnaround instant before min(EVA budget, sunset - buffer)
+    eva_deadline_s = max(0.0, float(max_eva_duration_hours) * 3600.0)
+    eva_deadline_dt = dt_start + timedelta(seconds=eva_deadline_s)
+    buf_s = max(0.0, float(daylight_buffer_minutes) * 60.0)
+    if m24_start.polar_day_state == "POLAR_CONTINUOUS_DAY":
+        effective_sunset_s = float("inf")
+    elif in_daylight_at_departure and sunset_seconds_from_dep is not None:
+        effective_sunset_s = max(0.0, sunset_seconds_from_dep - buf_s)
+    else:
+        effective_sunset_s = 0.0
+
+    hard_deadline_s = min(eva_deadline_s, effective_sunset_s)
+    feasible_before_sunset = bool(
+        (m24_start.polar_day_state == "POLAR_CONTINUOUS_DAY")
+        or (in_daylight_at_departure and effective_sunset_s > 0.0)
+    )
+    if not in_daylight_at_departure:
+        if m24_start.polar_day_state == "POLAR_CONTINUOUS_NIGHT":
+            limiting_constraint = "polar_night"
+        elif m24_start.sunset_ltst_hours is not None and m24_start.ltst_hours >= m24_start.sunset_ltst_hours:
+            limiting_constraint = "after_sunset"
+        else:
+            limiting_constraint = "pre_dawn_darkness"
+    elif effective_sunset_s <= 0.0:
+        limiting_constraint = "sunset_buffer"
+    elif effective_sunset_s < eva_deadline_s:
+        limiting_constraint = "sunset_buffer" if buf_s > 0.0 else "sunset"
+    else:
+        limiting_constraint = "eva_budget"
+
+    roundtrip_totals = [vertex_out_s[i] + vertex_ret_s[i] for i in range(len(coordinates))]
+    if hard_deadline_s <= 0.0 or not feasible_before_sunset:
+        turn_coord = [round(start_lon, 6), round(start_lat, 6)]
+        turn_dist_m = 0.0
+        turn_frac = 0.0
+        turn_s = 0.0
+        route_exceeds_deadline = True
+    elif roundtrip_totals[-1] <= hard_deadline_s:
+        turn_coord = [round(end_lon, 6), round(end_lat, 6)]
+        turn_dist_m = round(outbound_dist_m, 1)
+        turn_frac = 1.0
+        turn_s = max(vertex_out_s[-1], hard_deadline_s - vertex_ret_s[-1])
+        route_exceeds_deadline = False
+    else:
+        k_idx = 0
+        for i in range(len(roundtrip_totals) - 1):
+            if roundtrip_totals[i] <= hard_deadline_s:
+                k_idx = i
+            else:
+                break
+        span = max(1e-6, roundtrip_totals[k_idx + 1] - roundtrip_totals[k_idx])
+        alpha = max(0.0, min(1.0, (hard_deadline_s - roundtrip_totals[k_idx]) / span))
+        lon_t = float(coordinates[k_idx][0]) + alpha * (
+            float(coordinates[k_idx + 1][0]) - float(coordinates[k_idx][0])
+        )
+        lat_t = float(coordinates[k_idx][1]) + alpha * (
+            float(coordinates[k_idx + 1][1]) - float(coordinates[k_idx][1])
+        )
+        turn_coord = [round(lon_t, 6), round(lat_t, 6)]
+        turn_dist_m = round(
+            vertex_cum_dist_m[k_idx] + alpha * (vertex_cum_dist_m[k_idx + 1] - vertex_cum_dist_m[k_idx]),
+            1,
+        )
+        turn_frac = round(turn_dist_m / max(1e-6, outbound_dist_m), 4)
+        turn_s = vertex_out_s[k_idx] + alpha * (vertex_out_s[k_idx + 1] - vertex_out_s[k_idx])
+        route_exceeds_deadline = True
+
+    turn_dt = dt_start + timedelta(seconds=turn_s)
+    m24_turn = compute_mars24(turn_coord[1], turn_coord[0], turn_dt)
+    turnaround_summary = {
+        "turnaround_utc": turn_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "turnaround_ltst_hms": m24_turn.ltst_hms,
+        "turnaround_elapsed_hours": round(turn_s / 3600.0, 3),
+        "turnaround_coord": turn_coord,
+        "turnaround_distance_m": turn_dist_m,
+        "turnaround_fraction": turn_frac,
+        "sunset_utc": sunset_utc_str,
+        "sunset_ltst_hms": sunset_ltst_hms,
+        "eva_deadline_utc": eva_deadline_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "daylight_buffer_minutes": round(float(daylight_buffer_minutes), 1),
+        "limiting_constraint": limiting_constraint,
+        "feasible_before_sunset": feasible_before_sunset,
+        "within_eva_budget": bool(total_earth_hours <= max_eva_duration_hours),
+        "route_exceeds_hard_deadline": route_exceeds_deadline,
+        "provenance": {
+            "kind": "derived",
+            "source": f"NASA GISS Mars24 + {dem_resolution_label}",
+            "resolution": dem_resolution_label,
+            "as_of": dt_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    }
+
     # Subsample returned segment entries if very long so JSON stays compact while preserving key milestones
     if len(entries) > 80:
         step = max(1, len(entries) // 60)
@@ -350,5 +495,6 @@ def evaluate_route_mission_clock(
         "terrain_shadowed_distance_m": round(total_shadow_m, 1),
         "terrain_shadowed_fraction": round(total_shadow_m / total_dist_m, 4),
         "cost_function_modified": False,
+        "turnaround": turnaround_summary,
         "segments": sampled_entries,
     }

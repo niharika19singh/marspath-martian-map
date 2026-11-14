@@ -107,23 +107,44 @@ class Mars24Result:
 
 
 def parse_utc_datetime(utc_input: str | datetime | None) -> datetime:
-    """Parse an ISO-8601 UTC string or datetime into a timezone-aware UTC datetime."""
+    """Parse an ISO-8601 UTC string or datetime into a timezone-aware UTC datetime.
+
+    Rejects timezone-naive strings or datetimes with a ValueError.
+    """
     if utc_input is None:
         return datetime.now(UTC)
     if isinstance(utc_input, datetime):
         if utc_input.tzinfo is None:
-            return utc_input.replace(tzinfo=UTC)
+            raise ValueError(
+                "Timezone-naive datetime is not permitted. Supply a timezone-aware ISO 8601 timestamp (e.g. ending in 'Z' or '+00:00')."
+            )
         return utc_input.astimezone(UTC)
 
     raw = str(utc_input).strip()
-    if raw.endswith("Z"):
+    # Check for timezone indicator
+    has_z = raw.endswith("Z") or raw.endswith("z")
+    has_offset = False
+    if len(raw) >= 6 and (raw[-6] in ("+", "-") or raw[-5] in ("+", "-")):
+        has_offset = True
+
+    if not (has_z or has_offset):
+        raise ValueError(
+            f"Timezone-naive ISO 8601 timestamp '{raw}' rejected: timestamp must explicitly specify a timezone (e.g. 'Z' or '+00:00')."
+        )
+
+    if has_z:
         raw = raw[:-1] + "+00:00"
-    dt = datetime.fromisoformat(raw)
+
+    try:
+        dt = datetime.fromisoformat(raw)
+    except Exception as exc:
+        raise ValueError(f"Malformed ISO 8601 timestamp '{utc_input}': {exc}") from exc
+
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    else:
-        dt = dt.astimezone(UTC)
-    return dt
+        raise ValueError(
+            f"Timezone-naive ISO 8601 timestamp '{utc_input}' rejected: timestamp must explicitly specify a timezone."
+        )
+    return dt.astimezone(UTC)
 
 
 def utc_to_tt_offset_seconds(dt_utc: datetime) -> float:
@@ -180,10 +201,15 @@ def compute_mars24(
     utc_time:
         UTC timestamp (ISO-8601 string or datetime). Defaults to current UTC.
     """
+    if not math.isfinite(latitude_deg) or not math.isfinite(longitude_east_deg):
+        raise ValueError("Latitude and longitude must be finite numerical values.")
     if not (-90.0 <= latitude_deg <= 90.0):
         raise ValueError(f"Latitude must be within [-90, 90], got {latitude_deg}")
-    if not (-180.0 <= longitude_east_deg <= 360.0):
-        raise ValueError(f"Longitude must be within [-180, 360], got {longitude_east_deg}")
+
+    # Normalize longitude into [0, 360)
+    longitude_east_deg = longitude_east_deg % 360.0
+    if longitude_east_deg < 0.0:
+        longitude_east_deg += 360.0
 
     dt_utc = parse_utc_datetime(utc_time)
     epoch_ms = dt_utc.timestamp() * 1000.0

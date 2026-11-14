@@ -1,6 +1,7 @@
+import threading
 from collections import OrderedDict
 from pathlib import Path
-import threading
+
 import httpx
 from fastapi import APIRouter, HTTPException, Response
 

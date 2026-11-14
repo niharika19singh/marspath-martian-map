@@ -64,5 +64,14 @@ echo "[MARSPath Build Provisioning] Verifying build artifact integrity and readi
 "${PYTHON_BIN}" -m backend.app.data.ingestion --verify-runtime --output "${MARSPATH_DEM_PATH}"
 echo "[MARSPath Build Provisioning] ALL BUILD-TIME DEM ARTIFACT INTEGRITY CHECKS PASSED."
 
+# Step 3: Optional HiRISE 1 m/px DTM corridor provisioning (enabled when MARSPATH_USE_HIRISE_DEM=true or MARSPATH_PROVISION_HIRISE=true)
+if [ "${MARSPATH_PROVISION_HIRISE:-false}" = "true" ] || [ "${MARSPATH_USE_HIRISE_DEM:-false}" = "true" ]; then
+    HIRISE_TARGET="${MARSPATH_HIRISE_DEM_PATH:-backend/app/data/rasters/hirise_jezero_delta_dtm.tif}"
+    echo "[MARSPath Build Provisioning] Provisioning HiRISE 1m DTM corridor to ${HIRISE_TARGET}..."
+    "${PYTHON_BIN}" -m backend.app.data.ingestion --provision-hirise --output "${HIRISE_TARGET}"
+    "${PYTHON_BIN}" -m backend.app.data.ingestion --verify-hirise --output "${HIRISE_TARGET}"
+    echo "[MARSPath Build Provisioning] HiRISE 1m DTM artifact verified at ${HIRISE_TARGET}."
+fi
+
 echo "[MARSPath Build Provisioning] Build-time DEM artifact successfully provisioned and verified at ${MARSPATH_DEM_PATH}."
 exit 0

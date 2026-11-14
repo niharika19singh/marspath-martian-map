@@ -49,6 +49,12 @@ echo "[MARSPath Startup] MARSPATH_ALLOW_SYNTHETIC_FALLBACK=${MARSPATH_ALLOW_SYNT
 echo "[MARSPath Startup] Running strict runtime DEM verification..."
 "${PYTHON_BIN}" -m backend.app.data.ingestion --verify-runtime --output "${MARSPATH_DEM_PATH}"
 
+if [ "${MARSPATH_USE_HIRISE_DEM:-false}" = "true" ]; then
+    HIRISE_TARGET="${MARSPATH_HIRISE_DEM_PATH:-backend/app/data/rasters/hirise_jezero_delta_dtm.tif}"
+    echo "[MARSPath Startup] Verifying pre-built HiRISE 1m DTM corridor at ${HIRISE_TARGET}..."
+    "${PYTHON_BIN}" -m backend.app.data.ingestion --verify-hirise --output "${HIRISE_TARGET}"
+fi
+
 if [ "${MARSPATH_SKIP_UVICORN:-false}" = "true" ]; then
     echo "[MARSPath Startup] MARSPATH_SKIP_UVICORN=true; pre-launch verification finished."
     exit 0

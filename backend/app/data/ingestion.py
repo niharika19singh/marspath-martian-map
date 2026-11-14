@@ -61,6 +61,30 @@ OFFICIAL_USGS_ENDPOINTS = {
     USGS_MOLA_HRSC_BACKUP_URL,
 }
 
+# Authoritative upstream catalog metadata (Mars 2020 TRN HiRISE DTM Mosaic 1m)
+USGS_HIRISE_TRN_PRODUCT_ID = (
+    "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40"
+)
+USGS_HIRISE_TRN_PRODUCT_NAME = "Mars 2020 Terrain Relative Navigation HiRISE DTM Mosaic"
+USGS_HIRISE_TRN_DOI = "10.5066/P9REJ9JN"
+USGS_HIRISE_TRN_LANDING_PAGE = (
+    "https://astrogeology.usgs.gov/search/map/mars_2020_terrain_relative_navigation_hirise_dtm_mosaic"
+)
+USGS_HIRISE_TRN_GLOBAL_URL = (
+    "https://planetarymaps.usgs.gov/mosaic/mars2020_trn/HiRISE/"
+    "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40.tif"
+)
+USGS_HIRISE_TRN_S3_URL = (
+    "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/HiRISE/"
+    "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40.tif"
+)
+OFFICIAL_HIRISE_ENDPOINTS = {
+    USGS_HIRISE_TRN_GLOBAL_URL,
+    USGS_HIRISE_TRN_S3_URL,
+}
+DEFAULT_HIRISE_PIXEL_WINDOW = (9428, 13592, 4506, 4032)  # col_off, row_off, width, height
+DEFAULT_HIRISE_FILENAME = "hirise_jezero_delta_dtm.tif"
+
 # Default Jezero Crater analysis envelope
 DEFAULT_JEZERO_BOUNDS = (77.15, 18.10, 78.00, 18.70)  # min_lon, min_lat, max_lon, max_lat
 DEFAULT_OUTPUT_FILENAME = "jezero_mola_hrsc_blended.tif"
@@ -742,6 +766,217 @@ def verify_runtime_dem(
         ) from exc
 
 
+def ingest_jezero_hirise_dtm(
+    output_path: str | Path | None = None,
+    source_url_or_path: str | None = None,
+    pixel_window: tuple[int, int, int, int] = DEFAULT_HIRISE_PIXEL_WINDOW,
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    Extracts the Mars 2020 TRN HiRISE 1 m/px Jezero delta corridor DTM via HTTP Range
+    (/vsicurl/) from official USGS / AWS S3 PDS endpoints (or local path), writes a
+    tiled DEFLATE float32 GeoTIFF with explicit meter units, and generates its sidecar.
+    """
+    import rasterio
+    from rasterio.windows import Window
+
+    from backend.app.data.manifest import USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256
+
+    if output_path is None:
+        base_dir = Path(__file__).resolve().parent / "rasters"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        out_file = base_dir / DEFAULT_HIRISE_FILENAME
+    else:
+        out_file = Path(output_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    sidecar_file = get_provenance_sidecar_path(out_file)
+    if not force and out_file.exists() and sidecar_file.exists():
+        integrity_ok, _, sidecar = verify_local_integrity(out_file)
+        if integrity_ok and sidecar is not None:
+            return sidecar
+
+    candidate_sources = (
+        [source_url_or_path]
+        if source_url_or_path
+        else [USGS_HIRISE_TRN_S3_URL, USGS_HIRISE_TRN_GLOBAL_URL]
+    )
+    col_off, row_off, width, height = pixel_window
+    window = Window(col_off=col_off, row_off=row_off, width=width, height=height)
+
+    data = None
+    last_err: Exception | None = None
+    used_source = candidate_sources[0]
+    for cand in candidate_sources:
+        vsi = (
+            f"/vsicurl/{cand}"
+            if (cand.startswith("http://") or cand.startswith("https://"))
+            else cand
+        )
+        try:
+            with rasterio.open(vsi) as src:
+                data = src.read(1, window=window).astype(np.float32)
+                win_transform = rasterio.windows.transform(window, src.transform)
+                win_bounds = rasterio.windows.bounds(window, src.transform)
+                src_crs = src.crs
+                nodata_val = float(src.nodata) if src.nodata is not None else -3.4028226550889045e38
+            used_source = cand
+            break
+        except Exception as exc:
+            last_err = exc
+            logger.warning("HiRISE window read failed for %s: %s", cand, exc)
+
+    if data is None:
+        assert last_err is not None
+        raise last_err
+
+    arr_sha256 = compute_array_sha256(data)
+    is_official_remote = used_source in OFFICIAL_HIRISE_ENDPOINTS
+    array_matches_pinned = (
+        pixel_window == DEFAULT_HIRISE_PIXEL_WINDOW
+        and arr_sha256 == USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256
+    )
+    validation_status = (
+        "official_endpoint_retrieved_checksum_unverified"
+        if is_official_remote
+        else "valid_numeric_raster_unverified_source"
+    )
+    ingestion_method = (
+        "official_endpoint_vsicurl_range_extract"
+        if is_official_remote
+        else "unverified_local_or_remote_range_extract"
+    )
+
+    with rasterio.open(
+        out_file,
+        "w",
+        driver="GTiff",
+        height=int(data.shape[0]),
+        width=int(data.shape[1]),
+        count=1,
+        dtype="float32",
+        crs=src_crs or "+proj=longlat +a=3396190 +b=3396190 +no_defs",
+        transform=win_transform,
+        nodata=nodata_val,
+        compress="deflate",
+        tiled=True,
+        blockxsize=256,
+        blockysize=256,
+    ) as dst:
+        dst.units = ("meters",)
+        dst.update_tags(
+            DATASET_NAME=USGS_HIRISE_TRN_PRODUCT_NAME,
+            LANDING_PAGE=USGS_HIRISE_TRN_LANDING_PAGE,
+            OFFICIAL_PRODUCT_ID=USGS_HIRISE_TRN_PRODUCT_ID,
+            PDS_DOI=USGS_HIRISE_TRN_DOI,
+            PRODUCT_ID=USGS_HIRISE_TRN_PRODUCT_ID,
+            SOURCE_URL=USGS_HIRISE_TRN_GLOBAL_URL,
+            VERTICAL_DATUM="Mars 2000 MOLA Geoid (DeltaGeoid blend40)",
+            VERTICAL_UNIT="meters",
+        )
+        dst.update_tags(1, UNITS="meters", VERTICAL_UNIT="meters")
+        dst.write(data, 1)
+
+    del data
+    file_sha256 = compute_file_sha256(out_file)
+    record: dict[str, Any] = {
+        "product_id": USGS_HIRISE_TRN_PRODUCT_ID,
+        "dataset_name": USGS_HIRISE_TRN_PRODUCT_NAME,
+        "pds_doi": USGS_HIRISE_TRN_DOI,
+        "source_url": USGS_HIRISE_TRN_GLOBAL_URL,
+        "s3_mirror_url": USGS_HIRISE_TRN_S3_URL,
+        "landing_page": USGS_HIRISE_TRN_LANDING_PAGE,
+        "ingestion_method": ingestion_method,
+        "local_file_sha256": file_sha256,
+        "extracted_array_sha256": arr_sha256,
+        "pinned_window_array_sha256_match": array_matches_pinned,
+        "source_checksum_verified": False,
+        "validation_status": validation_status,
+        "window_bounds": {
+            "min_lon": round(float(win_bounds[0]), 7),
+            "min_lat": round(float(win_bounds[1]), 7),
+            "max_lon": round(float(win_bounds[2]), 7),
+            "max_lat": round(float(win_bounds[3]), 7),
+        },
+        "source_pixel_window": {
+            "col_off": col_off,
+            "row_off": row_off,
+            "width": width,
+            "height": height,
+        },
+        "native_resolution_meters": 1.0,
+        "crs": "IAU2000:49900",
+        "vertical_units": "meters",
+        "vertical_datum": "Mars 2000 MOLA Geoid (DeltaGeoid blend40)",
+        "nodata_value": nodata_val,
+    }
+    with open(sidecar_file, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2)
+    return record
+
+
+def provision_runtime_hirise(
+    dem_path: str | Path | None = None,
+    source_url_or_path: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Idempotent build-time provisioning and validation for the HiRISE 1 m DTM corridor."""
+    from backend.app.core.config import get_settings
+
+    settings = get_settings()
+    target_path = Path(dem_path or settings.HIRISE_DEM_PATH)
+    sidecar_path = get_provenance_sidecar_path(target_path)
+    if not force and target_path.is_file() and sidecar_path.is_file():
+        ok, reason, sidecar = verify_local_integrity(target_path)
+        if ok and sidecar is not None:
+            return {
+                "status": "already_provisioned_valid",
+                "hirise_provisioned": True,
+                "dem_path": str(target_path),
+                "local_file_sha256": sidecar.get("local_file_sha256"),
+                "validation_status": sidecar.get("validation_status"),
+            }
+        logger.warning("Existing HiRISE DTM failed check (%s); re-ingesting.", reason)
+
+    record = ingest_jezero_hirise_dtm(
+        output_path=target_path,
+        source_url_or_path=source_url_or_path,
+        force=True,
+    )
+    ok, reason, _ = verify_local_integrity(target_path)
+    if not ok:
+        raise RuntimeError(f"Post-ingestion HiRISE integrity check failed: {reason}")
+    return {
+        "status": "provisioned_from_source",
+        "hirise_provisioned": True,
+        "dem_path": str(target_path),
+        "local_file_sha256": record.get("local_file_sha256"),
+        "validation_status": record.get("validation_status"),
+    }
+
+
+def verify_runtime_hirise(dem_path: str | Path | None = None) -> dict[str, Any]:
+    """Strict read-only verification of pre-built HiRISE 1 m DTM + provenance sidecar."""
+    from backend.app.core.config import get_settings
+    from backend.app.data.providers.hirise import HiRISERasterProvider
+
+    settings = get_settings()
+    target_path = Path(dem_path or settings.HIRISE_DEM_PATH)
+    ok, reason, sidecar = verify_local_integrity(target_path)
+    if not ok or sidecar is None:
+        raise RuntimeError(f"HiRISE local SHA-256 verification failed for '{target_path}': {reason}")
+    provider = HiRISERasterProvider(dem_path=str(target_path), enabled=True)
+    res = provider.validate_hirise_raster()
+    if not res.is_valid:
+        raise RuntimeError(f"HiRISE raster validation failed ({res.status_code}): {res.reason}")
+    return {
+        "status": "verified_valid",
+        "dem_path": str(target_path),
+        "local_file_sha256": sidecar.get("local_file_sha256"),
+        "validation_status": sidecar.get("validation_status"),
+    }
+
+
 if __name__ == "__main__":
     import sys
 
@@ -762,7 +997,41 @@ if __name__ == "__main__":
         action="store_true",
         help="Run strict read-only runtime DEM verification (never downloads, extracts, or deletes)",
     )
+    parser.add_argument(
+        "--provision-hirise",
+        action="store_true",
+        help="Run idempotent HiRISE 1m DTM corridor provisioning from USGS PDS /vsicurl/",
+    )
+    parser.add_argument(
+        "--verify-hirise",
+        action="store_true",
+        help="Run strict read-only HiRISE 1m DTM verification",
+    )
     args = parser.parse_args()
+
+    if args.verify_hirise:
+        try:
+            res = verify_runtime_hirise(dem_path=args.output)
+            print(f"HiRISE verification status: {res['status']}")
+            print(f"HiRISE SHA-256: {res['local_file_sha256']}")
+            sys.exit(0)
+        except Exception as err:
+            print(f"HiRISE verification failed: {err}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.provision_hirise:
+        try:
+            res = provision_runtime_hirise(
+                dem_path=args.output,
+                source_url_or_path=args.source,
+                force=args.force,
+            )
+            print(f"HiRISE provisioning status: {res['status']}")
+            print(f"HiRISE SHA-256: {res.get('local_file_sha256')}")
+            sys.exit(0)
+        except Exception as err:
+            print(f"HiRISE provisioning failed: {err}", file=sys.stderr)
+            sys.exit(1)
 
     if args.verify_runtime:
         try:

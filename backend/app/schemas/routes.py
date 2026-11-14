@@ -370,6 +370,68 @@ class RoutePlanRequest(BaseModel):
             "regional 200 m MOLA-HRSC DEM (10.5066/P907276M) is selected."
         ),
     )
+    cost_mode: str = Field(
+        default="directional",
+        description=(
+            "Slope cost mode: 'directional' (signed uphill/downhill + perpendicular cross-slope) "
+            "or 'legacy_magnitude' (isotropic gradient magnitude comparison mode)."
+        ),
+    )
+    effort_model: str = Field(
+        default="slope_penalty",
+        description=(
+            "Effort costing model: 'slope_penalty' (standard asymmetric slope cost) or "
+            "'minetti_effort' (Minetti 2002 polynomial gradient cost scaled for Mars gravity g_mars/g_earth)."
+        ),
+    )
+    cross_slope_weight: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=2.0,
+        description="Weight applied to perpendicular cross-slope gradient penalty in directional mode",
+    )
+    suit_load_factor: float = Field(
+        default=1.0,
+        ge=0.5,
+        le=2.5,
+        description="Dimensionless suit/payload multiplier applied to estimated relative effort",
+    )
+    habitat: MarsCoordinate | None = Field(
+        default=None,
+        description="Optional habitat/base coordinate for backward-Dijkstra return-time and rescue-time solvers (defaults to start)",
+    )
+    return_constraint_mode: str = Field(
+        default="flag",
+        description="Habitat return-time constraint behavior: 'block' (prunes cells exceeding EVA budget), 'flag' (permits but flags), or 'off'",
+    )
+    daylight_buffer_minutes: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=120.0,
+        description="Safety buffer in Earth minutes before local sunset used to constrain hard turnaround time",
+    )
+    rescue_enabled: bool = Field(
+        default=True,
+        description="Whether to compute backward-Dijkstra rescue-vehicle response time grid from habitat",
+    )
+    rescue_speed_m_s: float = Field(
+        default=2.7778,
+        gt=0.1,
+        le=20.0,
+        description="Assumed nominal rescue vehicle speed in m/s (default ~10 km/h) over drivable slopes",
+    )
+    rescue_max_slope_deg: float = Field(
+        default=12.0,
+        ge=2.0,
+        le=35.0,
+        description="Maximum terrain slope (degrees) traversable by the rescue vehicle profile",
+    )
+    rescue_threshold_minutes: float = Field(
+        default=30.0,
+        gt=1.0,
+        le=480.0,
+        description="Rescue response time threshold in Earth minutes above which segments are flagged",
+    )
 
 
 class RouteSegment(BaseModel):
@@ -397,9 +459,29 @@ class RouteSegment(BaseModel):
         default=None,
         description="Target cell physical slope in degrees, or None if invalid/nodata",
     )
+    along_slope_deg: float | None = Field(
+        default=None,
+        description="Signed terrain slope along direction of travel in degrees (+ uphill, - downhill), or None if invalid/nodata",
+    )
+    cross_slope_deg: float | None = Field(
+        default=None,
+        description="Unsigned perpendicular cross-slope (roll tilt) in degrees computed from local DEM gradient, or None if invalid/nodata",
+    )
     roughness: float | None = Field(
         default=None,
         description="Target cell normalized TRI roughness [0.0 - 1.0], or None if invalid/nodata",
+    )
+    estimated_relative_effort: float | None = Field(
+        default=None,
+        description="Unitless estimated relative effort for this step (planning indicator; never physiological calories), or None if invalid/nodata",
+    )
+    return_time_minutes: float | None = Field(
+        default=None,
+        description="Minimum modeled walking return time from segment end to habitat in Earth minutes, or None if unreachable/nodata",
+    )
+    rescue_time_minutes: float | None = Field(
+        default=None,
+        description="Minimum modeled rescue-vehicle transit time from habitat to segment end in Earth minutes, or None if unreachable/nodata",
     )
     is_valid_data: bool = Field(
         ...,
@@ -575,6 +657,46 @@ class RouteSummary(BaseModel):
         default="complete_observed",
         description="'complete_observed', 'incomplete_partial_observations', or 'unverified_no_valid_observations'",
     )
+    cost_mode: str = Field(
+        default="directional",
+        description="Active slope cost mode used to plan and summarize this route",
+    )
+    effort_model: str = Field(
+        default="slope_penalty",
+        description="Active effort costing model used for this route",
+    )
+    estimated_relative_effort: float | None = Field(
+        default=None,
+        description="Unitless estimated relative effort total across complete observed route steps, or None when observations are incomplete",
+    )
+    average_cross_slope_deg: float | None = Field(
+        default=None,
+        description="Mean perpendicular cross-slope along observed route steps in degrees, or None if unavailable",
+    )
+    max_cross_slope_deg: float | None = Field(
+        default=None,
+        description="Maximum perpendicular cross-slope along observed route steps in degrees, or None if unavailable",
+    )
+    max_return_time_minutes: float | None = Field(
+        default=None,
+        description="Worst-case minimum return time to habitat along the route in Earth minutes, or None if unavailable/unreachable",
+    )
+    exceeds_return_budget: bool = Field(
+        default=False,
+        description="True if any cell along the route has modeled return time exceeding the EVA budget (or is unreachable from habitat)",
+    )
+    max_rescue_time_minutes: float | None = Field(
+        default=None,
+        description="Worst-case rescue-vehicle response time along the route in Earth minutes, or None if unavailable/unreachable",
+    )
+    rescue_flagged_distance_meters: float = Field(
+        default=0.0,
+        description="Distance in meters where rescue-vehicle response time exceeds rescue_threshold_minutes or is unreachable",
+    )
+    provenance: dict[str, Any] | None = Field(
+        default=None,
+        description="Summary provenance object carrying kind, source, resolution, and as_of",
+    )
 
 
 class GeoJSONGeometry(BaseModel):
@@ -630,6 +752,10 @@ class RouteAlternative(BaseModel):
     mission_clock: dict[str, Any] | None = Field(
         default=None,
         description="Mars24 Route Mission Clock with segment arrival UTC, LTST, solar elevation, DEM shadows, and return leg",
+    )
+    turnaround: dict[str, Any] | None = Field(
+        default=None,
+        description="Hard turnaround checkpoint computed from departure UTC, EVA budget, and Mars24 sunset",
     )
     is_pareto_optimal: bool = Field(
         default=True,
@@ -1189,6 +1315,14 @@ class RoutePlanResponse(BaseModel):
     mission_brief_markdown: str | None = Field(
         default=None,
         description="Structured printable Markdown operational Mission Brief",
+    )
+    return_zone: dict[str, Any] | None = Field(
+        default=None,
+        description="Serialized backward-Dijkstra reachable return-time grid from habitat with explicit provenance",
+    )
+    rescue_zone: dict[str, Any] | None = Field(
+        default=None,
+        description="Serialized backward-Dijkstra rescue-vehicle response-time grid from habitat with explicit provenance",
     )
 
 

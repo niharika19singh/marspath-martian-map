@@ -18,6 +18,42 @@ def compute_physical_pixel_sizes(
     return max(dx_meters, 0.1), max(dy_meters, 0.1)
 
 
+def compute_directional_gradients(
+    elevation_grid: np.ndarray,
+    dx_meters: float,
+    dy_meters: float,
+    nodata_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Computes physical East (dz/dx) and North (dz/dy_north) elevation gradients in m/m.
+    Note: Raster rows increase southward, so positive North gradient is -(d_elev / dy).
+    Nodata cells and their immediate 3x3 neighbors are masked with NaN so placeholder values
+    cannot contaminate lateral/cross-slope calculations.
+    """
+    elev_clean = elevation_grid.astype(np.float64).copy()
+    if nodata_mask is not None:
+        elev_clean[nodata_mask] = np.nan
+
+    # np.gradient axis 0 is southward row increase (+dy south -> negate for +North), axis 1 is eastward (+dx east)
+    if elev_clean.shape[0] > 1:
+        dz_dsouth = np.gradient(elev_clean, dy_meters, axis=0)
+        dz_dnorth = -dz_dsouth
+    else:
+        dz_dnorth = np.full_like(elev_clean, np.nan)
+
+    if elev_clean.shape[1] > 1:
+        dz_deast = np.gradient(elev_clean, dx_meters, axis=1)
+    else:
+        dz_deast = np.full_like(elev_clean, np.nan)
+
+    if nodata_mask is not None:
+        dilated_mask = ndimage.binary_dilation(nodata_mask, structure=np.ones((3, 3)))
+        dz_deast[dilated_mask] = np.nan
+        dz_dnorth[dilated_mask] = np.nan
+
+    return dz_deast.astype(np.float32), dz_dnorth.astype(np.float32)
+
+
 def compute_slope_degrees(
     elevation_grid: np.ndarray,
     dx_meters: float,

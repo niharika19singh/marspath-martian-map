@@ -16,7 +16,11 @@ from backend.app.geospatial.crs import (
 )
 from backend.app.geospatial.raster_loader import RasterMetadata
 from backend.app.routing.astar import astar_search
-from backend.app.routing.cost_model import MODE_WEIGHTS, calculate_edge_cost
+from backend.app.routing.cost_model import (
+    MODE_WEIGHTS,
+    calculate_edge_cost,
+    calculate_step_relative_effort,
+)
 from backend.app.routing.dijkstra import dijkstra_search
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.mission import OptimizationMode, ScienceTarget
@@ -54,6 +58,7 @@ def reconstruct_route_summary(
     elev_gain = 0.0
     elev_loss = 0.0
     slopes: list[float] = []
+    cross_slopes: list[float] = []
     roughnesses: list[float] = []
     elevations: list[float] = []
     geojson_coords: list[list[float]] = []
@@ -63,6 +68,7 @@ def reconstruct_route_summary(
     cost_rough = 0.0
     cost_hazard = 0.0
     cost_extra = 0.0
+    total_relative_effort = 0.0
 
     observed_duration_seconds = 0.0
     observed_duration_step_count = 0
@@ -116,23 +122,39 @@ def reconstruct_route_summary(
         dr = curr_r - prev_r
         dc = curr_c - prev_c
 
-        d2d = (
-            graph.dist_diag
-            if (dr != 0 and dc != 0)
-            else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
-        )
-        dz = (z_curr - z_prev) if (prev_valid and curr_valid) else 0.0
-        d3d = math.sqrt(d2d**2 + dz**2)
-        total_dist_2d += d2d
-        total_dist_3d += d3d
-
         if prev_valid and curr_valid:
+            d2d, dz, d3d, along_slope_deg, cross_slope_deg = graph.compute_edge_geometry(
+                prev_r, prev_c, curr_r, curr_c
+            )
             valid_elev_transition_count += 1
             observed_3d_dist += d3d
             if dz > 0:
                 elev_gain += dz
             else:
                 elev_loss += abs(dz)
+            cross_slopes.append(cross_slope_deg)
+            along_grade = dz / max(d2d, 1e-6)
+            cross_grade = math.tan(math.radians(min(89.0, cross_slope_deg)))
+            total_relative_effort += calculate_step_relative_effort(
+                distance_3d=d3d,
+                along_grade=along_grade,
+                cross_grade=cross_grade,
+                gravity_ratio=graph.gravity_ratio,
+                suit_load_factor=graph.suit_load_factor,
+            )
+        else:
+            d2d = (
+                graph.dist_diag
+                if (dr != 0 and dc != 0)
+                else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
+            )
+            dz = 0.0
+            d3d = d2d
+            along_slope_deg = 0.0
+            cross_slope_deg = 0.0
+
+        total_dist_2d += d2d
+        total_dist_3d += d3d
 
         slope_raw = float(graph.slope_deg[curr_r, curr_c])
         rough_raw = float(graph.roughness[curr_r, curr_c])
@@ -158,7 +180,7 @@ def reconstruct_route_summary(
         if penalized_edges and ((prev_r, prev_c), (curr_r, curr_c)) in penalized_edges:
             extra_pen = penalized_edges[((prev_r, prev_c), (curr_r, curr_c))]
 
-        # Reconcile exact edge cost using active cost model (unchanged)
+        # Reconcile exact edge cost using active directional/effort cost model
         _, step_breakdown = calculate_edge_cost(
             distance_3d=d3d,
             slope_deg=slope_for_calc,
@@ -167,6 +189,14 @@ def reconstruct_route_summary(
             mode=mode,
             is_nodata=step_is_nodata,
             extra_penalty=extra_pen,
+            along_slope_deg=along_slope_deg,
+            cross_slope_deg=cross_slope_deg,
+            d2d=d2d,
+            cost_mode=graph.cost_mode,
+            effort_model=graph.effort_model,
+            cross_slope_weight=graph.cross_slope_weight,
+            gravity_ratio=graph.gravity_ratio,
+            suit_load_factor=graph.suit_load_factor,
         )
 
         cost_base += step_breakdown["base_distance_cost"]
@@ -202,6 +232,8 @@ def reconstruct_route_summary(
 
     avg_slope: float | None = round(float(np.mean(slopes)), 2) if slopes else None
     max_slope: float | None = round(float(np.max(slopes)), 2) if slopes else None
+    avg_cross_slope: float | None = round(float(np.mean(cross_slopes)), 2) if cross_slopes else None
+    max_cross_slope: float | None = round(float(np.max(cross_slopes)), 2) if cross_slopes else None
     avg_rough: float | None = round(float(np.mean(roughnesses)), 3) if roughnesses else None
 
     num_steps = max(len(path_nodes) - 1, 0)
@@ -330,6 +362,13 @@ def reconstruct_route_summary(
         unobserved_step_distance_meters=unobserved_dist_val,
         risk_category=risk_category,
         risk_assessment_status=risk_assessment_status,
+        cost_mode=graph.cost_mode,
+        effort_model=graph.effort_model,
+        estimated_relative_effort=(
+            round(total_relative_effort, 1) if all_elev_transitions_valid else None
+        ),
+        average_cross_slope_deg=avg_cross_slope,
+        max_cross_slope_deg=max_cross_slope,
     )
 
     geometry = GeoJSONGeometry(type="LineString", coordinates=geojson_coords)
@@ -518,6 +557,14 @@ def generate_route_alternatives(
                 dx_meters=graph.dx,
                 dy_meters=graph.dy,
                 mode=alt_mode,
+                dz_deast=graph.dz_deast,
+                dz_dnorth=graph.dz_dnorth,
+                cost_mode=graph.cost_mode,
+                effort_model=graph.effort_model,
+                cross_slope_weight=graph.cross_slope_weight,
+                gravity_ratio=graph.gravity_ratio,
+                suit_load_factor=graph.suit_load_factor,
+                return_blocked_mask=graph.return_blocked_mask,
             )
             try:
                 safety_nodes, safety_cost, nodes_3, _ = search_fn(

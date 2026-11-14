@@ -31,7 +31,10 @@ from backend.app.geospatial.crs import (
     pixel_to_geo,
 )
 from backend.app.geospatial.raster_loader import RasterMetadata
-from backend.app.routing.cost_model import calculate_edge_cost
+from backend.app.routing.cost_model import (
+    calculate_edge_cost,
+    calculate_step_relative_effort,
+)
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.schemas.coordinates import BoundingBox, MarsCoordinate
 from backend.app.schemas.mission import OptimizationMode
@@ -534,13 +537,34 @@ class EvidenceService:
             elev_start_m = round(z_u_raw, 2) if u_valid_elev else None
             elev_end_m = round(z_v_raw, 2) if v_valid_elev else None
             if u_valid_elev and v_valid_elev:
-                dz_raw = z_v_raw - z_u_raw
+                d2d_edge, dz_raw, d3d, along_deg, cross_deg = graph.compute_edge_geometry(
+                    r_u, c_u, r_v, c_v
+                )
                 delta_elev_m: float | None = round(dz_raw, 2)
-                d3d = math.sqrt(d2d**2 + dz_raw**2)
+                along_slope_val: float | None = round(along_deg, 2)
+                cross_slope_val: float | None = round(cross_deg, 2)
+                along_grade = dz_raw / max(d2d_edge, 1e-6)
+                cross_grade = math.tan(math.radians(min(89.0, cross_deg)))
+                rel_effort_val: float | None = round(
+                    calculate_step_relative_effort(
+                        distance_3d=d3d,
+                        along_grade=along_grade,
+                        cross_grade=cross_grade,
+                        gravity_ratio=graph.gravity_ratio,
+                        suit_load_factor=graph.suit_load_factor,
+                    ),
+                    2,
+                )
             else:
+                d2d_edge = d2d
                 dz_raw = 0.0
                 delta_elev_m = None
                 d3d = d2d
+                along_deg = 0.0
+                cross_deg = 0.0
+                along_slope_val = None
+                cross_slope_val = None
+                rel_effort_val = None
 
             slope_val: float | None = round(slope_v_raw, 2) if slope_valid else None
             rough_val: float | None = round(rough_v_raw, 3) if rough_valid else None
@@ -557,6 +581,14 @@ class EvidenceService:
                 mode=mode,
                 is_nodata=not seg_is_valid,
                 extra_penalty=extra_pen,
+                along_slope_deg=along_deg,
+                cross_slope_deg=cross_deg,
+                d2d=d2d_edge,
+                cost_mode=graph.cost_mode,
+                effort_model=graph.effort_model,
+                cross_slope_weight=graph.cross_slope_weight,
+                gravity_ratio=graph.gravity_ratio,
+                suit_load_factor=graph.suit_load_factor,
             )
 
             seg_flags = list(base_segment_flags)
@@ -583,7 +615,10 @@ class EvidenceService:
                     elevation_end_m=elev_end_m,
                     delta_elevation_m=delta_elev_m,
                     slope_deg=slope_val,
+                    along_slope_deg=along_slope_val,
+                    cross_slope_deg=cross_slope_val,
                     roughness=rough_val,
+                    estimated_relative_effort=rel_effort_val,
                     is_valid_data=seg_is_valid,
                     segment_cost=round(step_cost, 2) if not math.isinf(step_cost) else 1e9,
                     quality_flags=seg_flags,
