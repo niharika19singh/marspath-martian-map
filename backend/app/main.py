@@ -11,6 +11,8 @@ from backend.app.core.config import Settings, get_settings, validate_cors_origin
 from backend.app.core.exceptions import MarsPathError
 from backend.app.core.logging import setup_logging
 from backend.app.data_sources.routers.data_sources import router as data_sources_router
+from backend.app.integrations.routers.ai_router import router as ai_router
+from backend.app.integrations.routers.cloud_router import router as cloud_router
 
 
 def configure_cors(target_app: FastAPI, app_settings: Settings | None = None) -> list[str]:
@@ -66,6 +68,8 @@ app.include_router(data_status_router)
 app.include_router(routes_router)
 app.include_router(intelligence_router)
 app.include_router(data_sources_router, prefix="/api/v1")
+app.include_router(cloud_router, prefix="/api/v1")
+app.include_router(ai_router, prefix="/api/v1")
 
 
 @app.get("/", summary="Root landing index")
@@ -89,4 +93,12 @@ def root_index():
         "api_v1_data_catalogue_search": "/api/v1/data-catalogue/search",
         "api_v1_data_releases": "/api/v1/data-releases",
         "api_v1_data_synchronization_status": "/api/v1/data-synchronization/status",
+        "api_v1_cloud_status": "/api/v1/cloud/status",
+        "api_v1_cloud_storage_status": "/api/v1/cloud/storage/status",
+        "api_v1_cloud_jobs_status": "/api/v1/cloud/jobs/status",
+        "api_v1_ai_providers": "/api/v1/ai/providers",
+        "api_v1_ai_status": "/api/v1/ai/status",
+        "api_v1_ai_chat": "/api/v1/ai/mars-science/chat",
+        "api_v1_ai_route_explain": "/api/v1/ai/route/explain",
+        "api_v1_ai_models_compare": "/api/v1/ai/models/compare",
     }

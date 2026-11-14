@@ -1,0 +1,48 @@
+# MARSPath Cloud Scheduler Ingestion Workflows
+# Deploy using:
+# gcloud scheduler jobs create http marspath-pds-release-monitor \
+#   --schedule="0 2 1 * *" \
+#   --uri="https://${BACKEND_URL}/api/v1/cloud/jobs/run/nasa_catalog_sync" \
+#   --http-method=POST \
+#   --oidc-service-account-email="marspath-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
+
+schedules:
+  - name: marspath-pds-release-monitor
+    schedule: "0 2 1 * *"
+    time_zone: "Etc/UTC"
+    description: "Quarterly and monthly NASA PDS flight mission release monitor"
+    http_target:
+      http_method: POST
+      relative_uri: "/api/v1/cloud/jobs/run/nasa_catalog_sync"
+      oidc_token:
+        service_account_email: "marspath-scheduler@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com"
+      retry_config:
+        retry_count: 3
+        max_retry_duration: 3600s
+        min_backoff_duration: 60s
+        max_backoff_duration: 600s
+
+  - name: marspath-daily-catalog-sync
+    schedule: "0 4 * * *"
+    time_zone: "Etc/UTC"
+    description: "Daily synchronization of planetary catalog with NASA ODE and Trek services"
+    http_target:
+      http_method: POST
+      relative_uri: "/api/v1/cloud/jobs/run/nasa_catalog_sync"
+      oidc_token:
+        service_account_email: "marspath-scheduler@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com"
+      retry_config:
+        retry_count: 2
+        max_retry_duration: 1800s
+
+  - name: marspath-provenance-audit-weekly
+    schedule: "0 3 * * 0"
+    time_zone: "Etc/UTC"
+    description: "Weekly cryptographic checksum and DOI provenance validation"
+    http_target:
+      http_method: POST
+      relative_uri: "/api/v1/cloud/jobs/run/provenance_validator"
+      oidc_token:
+        service_account_email: "marspath-scheduler@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com"
+      retry_config:
+        retry_count: 2

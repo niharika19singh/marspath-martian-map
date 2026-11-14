@@ -192,6 +192,66 @@ if HAS_SETTINGS:
         DEFAULT_MAX_SLOPE_DEG: float = 20.0
         STRICT_MAX_SLOPE_DEG: float = 14.0
 
+        # Google Cloud & Storage Configuration
+        GOOGLE_CLOUD_PROJECT: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("GOOGLE_CLOUD_PROJECT", "MARSPATH_GOOGLE_CLOUD_PROJECT"),
+        )
+        GOOGLE_CLOUD_LOCATION: str = Field(
+            default="us-central1",
+            validation_alias=AliasChoices("GOOGLE_CLOUD_LOCATION", "MARSPATH_GOOGLE_CLOUD_LOCATION"),
+        )
+        GCS_BUCKET: str = Field(
+            default="marspath-data",
+            validation_alias=AliasChoices("GCS_BUCKET", "MARSPATH_GCS_BUCKET"),
+        )
+        GOOGLE_APPLICATION_CREDENTIALS: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS", "MARSPATH_GOOGLE_APPLICATION_CREDENTIALS"),
+        )
+        GCS_LOCAL_STORAGE_ROOT: str = Field(
+            default="backend/app/data/storage",
+            validation_alias=AliasChoices("GCS_LOCAL_STORAGE_ROOT", "MARSPATH_GCS_LOCAL_STORAGE_ROOT"),
+        )
+        GCS_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_GCS_ENABLED", "GCS_ENABLED"),
+        )
+        CLOUD_JOBS_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_CLOUD_JOBS_ENABLED", "CLOUD_JOBS_ENABLED"),
+        )
+
+        # AI Providers Configuration
+        GEMINI_API_KEY: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("GEMINI_API_KEY", "MARSPATH_GEMINI_API_KEY"),
+        )
+        GEMINI_MODEL: str = Field(
+            default="gemini-2.5-flash",
+            validation_alias=AliasChoices("GEMINI_MODEL", "MARSPATH_GEMINI_MODEL"),
+        )
+        GEMINI_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_GEMINI_ENABLED", "GEMINI_ENABLED"),
+        )
+        AZURE_AI_FOUNDRY_ENDPOINT: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("AZURE_AI_FOUNDRY_ENDPOINT", "MARSPATH_AZURE_AI_FOUNDRY_ENDPOINT"),
+        )
+        AZURE_AI_FOUNDRY_API_KEY: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("AZURE_AI_FOUNDRY_API_KEY", "MARSPATH_AZURE_AI_FOUNDRY_API_KEY"),
+        )
+        AZURE_AI_FOUNDRY_MODEL: str = Field(
+            default="gpt-4o",
+            validation_alias=AliasChoices("AZURE_AI_FOUNDRY_MODEL", "MARSPATH_AZURE_AI_FOUNDRY_MODEL"),
+        )
+        AZURE_AI_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_AZURE_AI_ENABLED", "AZURE_AI_ENABLED"),
+        )
+
         @property
         def cors_origin_list(self) -> list[str]:
             return validate_cors_origins(self.CORS_ORIGINS)
@@ -285,6 +345,66 @@ else:
         )
         DEFAULT_MAX_SLOPE_DEG: float = 20.0
         STRICT_MAX_SLOPE_DEG: float = 14.0
+
+        # Google Cloud & Storage Configuration
+        GOOGLE_CLOUD_PROJECT: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("GOOGLE_CLOUD_PROJECT", "MARSPATH_GOOGLE_CLOUD_PROJECT"),
+        )
+        GOOGLE_CLOUD_LOCATION: str = Field(
+            default="us-central1",
+            validation_alias=AliasChoices("GOOGLE_CLOUD_LOCATION", "MARSPATH_GOOGLE_CLOUD_LOCATION"),
+        )
+        GCS_BUCKET: str = Field(
+            default="marspath-data",
+            validation_alias=AliasChoices("GCS_BUCKET", "MARSPATH_GCS_BUCKET"),
+        )
+        GOOGLE_APPLICATION_CREDENTIALS: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS", "MARSPATH_GOOGLE_APPLICATION_CREDENTIALS"),
+        )
+        GCS_LOCAL_STORAGE_ROOT: str = Field(
+            default="backend/app/data/storage",
+            validation_alias=AliasChoices("GCS_LOCAL_STORAGE_ROOT", "MARSPATH_GCS_LOCAL_STORAGE_ROOT"),
+        )
+        GCS_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_GCS_ENABLED", "GCS_ENABLED"),
+        )
+        CLOUD_JOBS_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_CLOUD_JOBS_ENABLED", "CLOUD_JOBS_ENABLED"),
+        )
+
+        # AI Providers Configuration
+        GEMINI_API_KEY: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("GEMINI_API_KEY", "MARSPATH_GEMINI_API_KEY"),
+        )
+        GEMINI_MODEL: str = Field(
+            default="gemini-2.5-flash",
+            validation_alias=AliasChoices("GEMINI_MODEL", "MARSPATH_GEMINI_MODEL"),
+        )
+        GEMINI_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_GEMINI_ENABLED", "GEMINI_ENABLED"),
+        )
+        AZURE_AI_FOUNDRY_ENDPOINT: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("AZURE_AI_FOUNDRY_ENDPOINT", "MARSPATH_AZURE_AI_FOUNDRY_ENDPOINT"),
+        )
+        AZURE_AI_FOUNDRY_API_KEY: str | None = Field(
+            default=None,
+            validation_alias=AliasChoices("AZURE_AI_FOUNDRY_API_KEY", "MARSPATH_AZURE_AI_FOUNDRY_API_KEY"),
+        )
+        AZURE_AI_FOUNDRY_MODEL: str = Field(
+            default="gpt-4o",
+            validation_alias=AliasChoices("AZURE_AI_FOUNDRY_MODEL", "MARSPATH_AZURE_AI_FOUNDRY_MODEL"),
+        )
+        AZURE_AI_ENABLED: bool = Field(
+            default=False,
+            validation_alias=AliasChoices("MARSPATH_AZURE_AI_ENABLED", "AZURE_AI_ENABLED"),
+        )
 
         @property
         def cors_origin_list(self) -> list[str]:

@@ -12,6 +12,7 @@ import Icon from './Icons.jsx';
 import { resolveInitialApiUrl, resolveTerrainProvenance, resolveAlternativeShortfall, canSubmitRoute, validateRouteExecutionPreconditions } from './integration.js';
 import IntelligencePanel from './IntelligencePanel.jsx';
 import NasaDataPanel from './NasaDataPanel.jsx';
+import CloudAiPanel from './CloudAiPanel.jsx';
 import {
   fetchSpacecraftList,
   fetchGroundTrack,
@@ -42,7 +43,7 @@ function Dialog({ onClose, children, label = 'Close dialog' }) {
 function App() {
   const [missionView, setMissionView] = useState(() => {
     const v = new URLSearchParams(location.search).get('view');
-    return v === 'planner' ? 'planner' : v === 'intelligence' ? 'intelligence' : v === 'nasa-data' ? 'nasa-data' : 'history';
+    return v === 'planner' ? 'planner' : v === 'intelligence' ? 'intelligence' : v === 'nasa-data' ? 'nasa-data' : v === 'cloud-ai' ? 'cloud-ai' : 'history';
   });
 
   const [traverse, setTraverse] = useState(null);
@@ -58,6 +59,7 @@ function App() {
   const historyMode = missionView === 'history';
   const intelligenceMode = missionView === 'intelligence';
   const nasaDataMode = missionView === 'nasa-data';
+  const cloudAiMode = missionView === 'cloud-ai';
   const plannerMode = missionView === 'planner';
 
   const drives = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
@@ -130,6 +132,7 @@ function App() {
     if (mode === 'planner') url.searchParams.set('view', 'planner');
     else if (mode === 'intelligence') url.searchParams.set('view', 'intelligence');
     else if (mode === 'nasa-data') url.searchParams.set('view', 'nasa-data');
+    else if (mode === 'cloud-ai') url.searchParams.set('view', 'cloud-ai');
     else url.searchParams.delete('view');
     window.history.replaceState({}, '', url);
 
@@ -724,9 +727,17 @@ function App() {
             <button className={nasaDataMode ? 'active' : ''} aria-pressed={nasaDataMode} onClick={() => switchMission('nasa-data')}>
               NASA Data &amp; Intelligence
             </button>
+            <button className={cloudAiMode ? 'active' : ''} aria-pressed={cloudAiMode} onClick={() => switchMission('cloud-ai')}>
+              Cloud &amp; AI Center
+            </button>
           </div>
 
-          {nasaDataMode ? (
+          {cloudAiMode ? (
+            <CloudAiPanel
+              activeRoute={result}
+              currentCoords={INITIAL.start}
+            />
+          ) : nasaDataMode ? (
             <NasaDataPanel
               apiUrl={api?.url || ''}
               onFocusProduct={prod => {

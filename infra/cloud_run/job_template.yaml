@@ -1,0 +1,33 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: marspath-batch-job
+  labels:
+    app: marspath
+    component: planetary-processing
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      taskCount: 1
+      parallelism: 1
+      template:
+        spec:
+          containers:
+            - image: gcr.io/${GOOGLE_CLOUD_PROJECT}/marspath-jobs:latest
+              resources:
+                limits:
+                  cpu: "2000m"
+                  memory: "4Gi"
+              env:
+                - name: MARSPATH_GCS_ENABLED
+                  value: "true"
+                - name: GCS_BUCKET
+                  value: "${GCS_BUCKET}"
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: "${GOOGLE_CLOUD_PROJECT}"
+          maxRetries: 2
+          timeoutSeconds: 900
+          serviceAccountName: marspath-runner@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com
