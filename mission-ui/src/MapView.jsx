@@ -26,6 +26,13 @@ import {
 } from './wmts_capabilities.js';
 import Icon from './Icons.jsx';
 import Terrain3D from './Terrain3D.jsx';
+import {
+  computeTimeOverlayPixels,
+  buildTimeOverlayCanvas,
+  calculateEdgeFeatherGradients,
+} from './map_rendering.js';
+
+export { computeTimeOverlayPixels, buildTimeOverlayCanvas, calculateEdgeFeatherGradients };
 
 export const GLOBAL_MARS_BOUNDS = [-180, -85, 180, 85];
 export const JEZERO_VALIDATED_DEM_BOUNDS = [77.2008333, 18.1491667, 77.9491667, 18.6508333];
@@ -68,56 +75,6 @@ function buildThemisThermalCanvas(terrain) {
     img.data.set([red, green, blue, 108], j);
   }
   cx.putImageData(img, 0, 0);
-  return canvas.toDataURL('image/png');
-}
-
-function buildTimeOverlayCanvas(zone, kind = 'return') {
-  const rows = zone?.rows || 0;
-  const cols = zone?.cols || 0;
-  const grid = zone?.minutes_grid;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, cols);
-  canvas.height = Math.max(1, rows);
-  if (!rows || !cols || !Array.isArray(grid)) return canvas.toDataURL('image/png');
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(cols, rows);
-  const budget = Number(zone.threshold_minutes ?? zone.budget_minutes ?? 60);
-
-  for (let r = 0; r < rows; r++) {
-    const rowArr = grid[r] || [];
-    for (let c = 0; c < cols; c++) {
-      const val = rowArr[c];
-      const idx = (r * cols + c) * 4;
-      let rgb = [105, 118, 128];
-      let a = 70; // NoData / unreachable never shown as safe
-      if (val !== null && Number.isFinite(val)) {
-        if (kind === 'rescue') {
-          const ratio = val / Math.max(1, budget);
-          if (ratio <= 0.5) {
-            rgb = [92, 225, 158];
-            a = 88;
-          } else if (ratio <= 1.0) {
-            rgb = [235, 184, 92];
-            a = 104;
-          } else {
-            rgb = [228, 102, 86];
-            a = 132;
-          }
-        } else {
-          if (val <= budget) {
-            const frac = Math.min(1, val / Math.max(1, budget));
-            rgb = [72, Math.round(235 - frac * 50), 178];
-            a = Math.round(48 + frac * 34);
-          } else {
-            rgb = [226, 112, 92];
-            a = 112;
-          }
-        }
-      }
-      img.data.set([...rgb, a], idx);
-    }
-  }
-  ctx.putImageData(img, 0, 0);
   return canvas.toDataURL('image/png');
 }
 
@@ -287,9 +244,10 @@ export default function MapView(props) {
 
     // 2. Regional Jezero Basemap: USGS Mars 2020 TRN CTX Orthomosaic (6 m/px, DOI: 10.5066/P9GV1ND3)
     const wmtsCtxRegional = new TileLayer({
+      className: 'ol-layer-ctx',
       source: createOpenLayersWMTSSource(ctxCap, recordTileOk('ctx'), recordTileErr('ctx')),
       extent: ctxExtent,
-      maxResolution: 1800 / M_PER_DEG,
+      maxResolution: 800 / M_PER_DEG,
       zIndex: 2,
       opacity: 1.0,
       preload: 2,
@@ -297,9 +255,10 @@ export default function MapView(props) {
 
     // 3. High-Resolution Jezero Basemap: USGS Mars 2020 TRN HiRISE Orthomosaic (0.25 m/px, DOI: 10.5066/P9QJDP48)
     const wmtsHiriseLocal = new TileLayer({
+      className: 'ol-layer-hirise',
       source: createOpenLayersWMTSSource(hiriseCap, recordTileOk('hirise'), recordTileErr('hirise')),
       extent: hiriseOrthoExtent,
-      maxResolution: 35 / M_PER_DEG,
+      maxResolution: 25 / M_PER_DEG,
       zIndex: 3,
       opacity: 1.0,
       preload: 1,
@@ -365,7 +324,7 @@ export default function MapView(props) {
     const spacecraftLayer = new VectorLayer({ source: new VectorSource(), zIndex: 26 });
     const playbackLayer = new VectorLayer({ source: new VectorSource(), zIndex: 27 });
 
-    // Populate DEM & Imagery Coverage Boundaries
+    // Populate DEM & Imagery Coverage Boundaries (visible strictly when coverage toggle is active)
     const demPoly = new Feature(new Polygon([[
       [jezeroExtent[0], jezeroExtent[1]],
       [jezeroExtent[2], jezeroExtent[1]],
@@ -374,8 +333,8 @@ export default function MapView(props) {
       [jezeroExtent[0], jezeroExtent[1]],
     ]]));
     demPoly.setStyle((feature, resolution) => {
+      if (!callbacks.current.props.coverage) return null;
       const resM = resolution * M_PER_DEG;
-      if (resM < 90 && !callbacks.current.props.coverage) return null;
       return new Style({
         stroke: new Stroke({ color: '#5cffb088', width: 1.6, lineDash: [8, 6] }),
         fill: new Fill({ color: resM > 200 ? 'rgba(92,255,176,0.04)' : 'rgba(0,0,0,0)' }),
@@ -433,6 +392,55 @@ export default function MapView(props) {
       }),
       controls: [new ScaleLine({ units: 'metric' })],
     });
+
+    // Multi-resolution planetary GIS edge feathering: softly feather rectangular boundaries of high-res insets into basemap
+    const applyEdgeFeathering = (layer, extent, featherPx = 54) => {
+      layer.on('postrender', evt => {
+        const ctx = evt.context;
+        if (!ctx) return;
+        const [minLon, minLat, maxLon, maxLat] = extent;
+        const tl = map.getPixelFromCoordinate([minLon, maxLat]);
+        const br = map.getPixelFromCoordinate([maxLon, minLat]);
+        const grads = calculateEdgeFeatherGradients({ tl, br }, featherPx);
+        if (!grads) return;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+
+        // Top feather
+        const gradT = ctx.createLinearGradient(grads.top.x0, grads.top.y0, grads.top.x1, grads.top.y1);
+        gradT.addColorStop(0, 'rgba(0,0,0,1)');
+        gradT.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradT;
+        ctx.fillRect(...grads.top.fillRect);
+
+        // Bottom feather
+        const gradB = ctx.createLinearGradient(grads.bottom.x0, grads.bottom.y0, grads.bottom.x1, grads.bottom.y1);
+        gradB.addColorStop(0, 'rgba(0,0,0,1)');
+        gradB.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradB;
+        ctx.fillRect(...grads.bottom.fillRect);
+
+        // Left feather
+        const gradL = ctx.createLinearGradient(grads.left.x0, grads.left.y0, grads.left.x1, grads.left.y1);
+        gradL.addColorStop(0, 'rgba(0,0,0,1)');
+        gradL.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradL;
+        ctx.fillRect(...grads.left.fillRect);
+
+        // Right feather
+        const gradR = ctx.createLinearGradient(grads.right.x0, grads.right.y0, grads.right.x1, grads.right.y1);
+        gradR.addColorStop(0, 'rgba(0,0,0,1)');
+        gradR.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradR;
+        ctx.fillRect(...grads.right.fillRect);
+
+        ctx.restore();
+      });
+    };
+
+    applyEdgeFeathering(wmtsCtxRegional, ctxExtent, 64);
+    applyEdgeFeathering(wmtsHiriseLocal, hiriseOrthoExtent, 48);
 
     const element = document.createElement('div');
     element.className = 'route-midpoint glass';
@@ -639,13 +647,13 @@ export default function MapView(props) {
     // 2. Regional CTX (6 m/px)
     const ctxVisible = Boolean(showCtx && (isAuto || isCtx || isHirise || !isViking));
     l.wmtsCtxRegional?.setVisible(ctxVisible && !isViking);
-    l.wmtsCtxRegional?.setMaxResolution((isCtx ? 8000 : 1800) / M_PER_DEG);
+    l.wmtsCtxRegional?.setMaxResolution((isCtx ? 8000 : 800) / M_PER_DEG);
     l.wmtsCtxRegional?.setOpacity(effCtxOpacity);
 
     // 3. Local HiRISE (0.25 m/px)
     const hiriseVisible = Boolean(showHirise && (isAuto || isHirise));
     l.wmtsHiriseLocal?.setVisible(hiriseVisible && !isViking && !isCtx);
-    l.wmtsHiriseLocal?.setMaxResolution((isHirise ? 2500 : 35) / M_PER_DEG);
+    l.wmtsHiriseLocal?.setMaxResolution((isHirise ? 2500 : 25) / M_PER_DEG);
     l.wmtsHiriseLocal?.setOpacity(effHiriseOpacity);
 
     if (!effectiveTerrain) return;

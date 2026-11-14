@@ -40,3 +40,17 @@ This document records the scope boundaries, model assumptions, and data constrai
 - **Graph Coverage Completeness:** The Mission Knowledge Graph links explicit known datasets, hazards, segments, and operational constraints. Regions outside the active spatial-temporal index or devoid of high-resolution orbital coverage are flagged as coverage gaps rather than assumed safe.
 - **What-If Scenario Fidelity:** Scenario modifiers ($\tau$ dust increase, power budget reductions, wheel degradation multipliers) perturb operational thresholds parametrically to demonstrate sensitivity; they do not simulate dynamic atmospheric fluid dynamics or vehicle physics.
 
+---
+
+## 7. Multi-Resolution Imagery Hierarchy & Boundary Feathering
+- **Resolution Tiers:** MARSPath implements a 3-tier planetary GIS visual hierarchy: Global Mars Viking MDIM 2.1 (232 m/px), Regional CTX Orthomosaic (6 m/px), and Local HiRISE Orthomosaic (0.25 m/px).
+- **Edge Feathering vs. Raw Footprints:** High-resolution insets are bounded to their verified coverage footprints (`JEZERO_CTX_ORTHO_BOUNDS` and `JEZERO_HIRISE_ORTHO_BOUNDS`) with a dynamic 48–64 pixel linear alpha feather on all borders. This prevents hard rectangular seams against the global color mosaic while avoiding invented pixel data outside authentic bounds.
+- **Color Temperature & Grayscale Insets:** CTX and HiRISE products are panchromatic (grayscale) visible mosaics, whereas Viking MDIM 2.1 is a global color mosaic. Subtle tone harmonization is applied in the GIS viewport to preserve high-contrast morphological features without producing an artificial stark grey rectangular contrast against surrounding terrain.
+
+---
+
+## 8. Route Robustness & Monte Carlo Scenario Limits
+- **Scenario Execution Ceiling:** The Monte Carlo route robustness engine (`/api/v1/routes/plan` and `backend/app/services/robustness_service.py`) caps perturbation evaluations at 20 scenarios (`scenario_count: int = Field(default=5, ge=1, le=20)`). This is an intentional performance design to guarantee responsive execution (<2.5 seconds) within production container resource budgets.
+- **Deterministic Evaluation:** All noise fields are generated with a deterministic pseudo-random seed (`seed: int = 42` by default) so identical route coordinates yield reproducible robustness scores across runs.
+
+

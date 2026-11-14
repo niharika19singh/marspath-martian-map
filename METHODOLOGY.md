@@ -145,3 +145,19 @@ Enables operators to evaluate hypothetical or deteriorating operational conditio
 - **Modifiers:** Atmospheric dust storm opacity ($\tau$), power budget factor ($0.0 - 1.0$), slope ceiling threshold (degrees), wheel degradation multiplier, and communication blackout windows.
 - **Side-by-Side Comparison:** Compares modified scenarios against primary baseline traverses, reporting deltas in traversability, effort index, hazard exposure, and identifying compromised segments.
 
+---
+
+## 9. Multi-Resolution Planetary GIS Display & Seamless Inset Model
+
+### 9.1 Multi-Tier Resolution Switching
+MARSPath structures imagery streaming into three deterministic resolution domains:
+1. **Global Scale ($> 800\text{ m/px}$):** The continuous NASA Mars Trek Viking MDIM 2.1 Color Mosaic ($232\text{ m/px}$) renders across the global planetocentric frame ($180^\circ\text{W} - 180^\circ\text{E}$, $90^\circ\text{S} - 90^\circ\text{N}$), ensuring no region of Mars appears unrendered.
+2. **Regional Context ($25\text{ m/px} - 800\text{ m/px}$):** The USGS Mars 2020 Context Camera (CTX) Orthomosaic ($6\text{ m/px}$) activates across the Jezero Crater basin (`JEZERO_CTX_ORTHO_BOUNDS`), providing intermediate regional surface structure.
+3. **Local Rover Exploration ($< 25\text{ m/px}$):** The USGS Mars 2020 HiRISE Orthomosaic ($0.25\text{ m/px}$) activates over the Jezero Western Delta / Perseverance landing site (`JEZERO_HIRISE_ORTHO_BOUNDS`), revealing sub-meter ripple, boulder, and outcrop structures. Outside the HiRISE footprint, CTX provides regional context; outside CTX, Viking provides global context.
+
+### 9.2 Edge Feathering & Tone Harmonization
+- **Edge Feathering:** In OpenLayers, bounded insets rendered with hard bounding box clipping produce artificial rectangular seams against lower-resolution base imagery. MARSPath attaches an edge feathering post-render shader to insets, applying a dynamic $48 - 64\text{ pixel}$ linear alpha gradient (`destination-out`) along the four perimeter boundaries. The high-resolution imagery dissolves smoothly into the underlying mosaic without fabricating pixels.
+- **Tone Harmonization:** Panchromatic (grayscale) CTX and HiRISE imagery are subtly harmonized with the surrounding Mars albedo color space using a lightweight CSS filter pipeline (`contrast(1.05) brightness(0.97) sepia(0.12) hue-rotate(-12deg)`), eliminating jarring grey-rectangle visual artifacts while preserving 100% of the authentic scientific image contrast.
+- **NoData Transparency:** All analytical DEM overlays (reachability zones, rescue-time contours, slope overlays, hillshades) strictly mask non-traversable, unreachable, and NoData cells with zero alpha (`a = 0`), preventing raw DEM rectangles from obscuring the visual basemap.
+
+
