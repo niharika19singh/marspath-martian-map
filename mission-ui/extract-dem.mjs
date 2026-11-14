@@ -1,0 +1,14 @@
+import {fromUrl} from 'geotiff';
+import {writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+const url='https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif';
+const tiff=await fromUrl(url,{allowFullFile:false,blockSize:65536,cacheSize:100});
+const image=await tiff.getImage();const origin=image.getOrigin(),resolution=image.getResolution();
+console.log(JSON.stringify({width:image.getWidth(),height:image.getHeight(),origin,resolution,bounds:image.getBoundingBox()}));
+const minLon=77.15,maxLon=78,minLat=18.1,maxLat=18.7;
+const left=Math.floor((minLon-origin[0])/resolution[0]),right=Math.ceil((maxLon-origin[0])/resolution[0]);
+const top=Math.floor((maxLat-origin[1])/resolution[1]),bottom=Math.ceil((minLat-origin[1])/resolution[1]);
+const rasters=await image.readRasters({window:[left,top,right,bottom],samples:[0]});const vals=rasters[0];
+const bounds=[origin[0]+left*resolution[0],origin[1]+bottom*resolution[1],origin[0]+right*resolution[0],origin[1]+top*resolution[1]];
+const json={width:right-left,height:bottom-top,bounds,elevation:Array.from(vals,v=>Number.isFinite(v)&&v>-9000?Math.round(v*100)/100:null),data_mode:'real_official_endpoint_unverified_checksum',source_name:'USGS MOLA–HRSC blended DEM global 200m v2',source_url:url,source_page:'https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m',product_id:'Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2',source_checksum_verified:false,local_array_sha256:createHash('sha256').update(Buffer.from(vals.buffer)).digest('hex'),nominal_resolution_meters:200,crs_identifier:'IAU2000:49900',vertical_datum:'Mars areoid · MOLA reference',is_synthetic:false,retrieved:'2026-11-06'};
+await writeFile('../dist/mission-data/jezero-dem.json',JSON.stringify(json));console.log(JSON.stringify({samples:vals.length,bounds,min:Math.min(...vals),max:Math.max(...vals)}));

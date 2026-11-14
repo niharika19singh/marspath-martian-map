@@ -1,0 +1,208 @@
+{
+  "mission_id": "mission_jezero_pilot_sample_001",
+  "status": "success",
+  "crs": {
+    "identifier": "IAU2000:49900",
+    "name": "Mars 2000 Sphere (IAU/IAG Working Group)",
+    "ellipsoid_radius_meters": 3396190.0,
+    "latitude_type": "planetocentric",
+    "longitude_direction": "positive_east",
+    "projection": "Geographic (Planetocentric Degrees)"
+  },
+  "pilot_region": "Jezero Crater, Mars",
+  "data_mode": "real_official_endpoint_unverified_checksum",
+  "provenance": {
+    "dataset_name": "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2",
+    "official_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+    "official_source_url": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
+    "pds_doi": "https://doi.org/10.5066/P9P7W018",
+    "data_publisher": "USGS Astrogeology Science Center",
+    "file_path": "backend/app/data/rasters/jezero_mola_hrsc_blended.tif",
+    "file_format": "GeoTIFF",
+    "file_sha256": "03845eeebd5965a288d8835c414632773d18ee3b392b38cf40d0467154c0f029",
+    "local_integrity_verified": true,
+    "source_checksum_verified": false,
+    "real_dem_requested": true,
+    "real_dem_loaded": true,
+    "data_mode": "real_official_endpoint_unverified_checksum",
+    "real_data_validation_status": "official_endpoint_retrieved_checksum_unverified",
+    "provenance_verification_method": "official_endpoint_retrieved_checksum_unverified",
+    "is_synthetic": false,
+    "horizontal_crs": "ESRI:104971",
+    "coordinate_type": "geographic",
+    "projection_units": "degrees",
+    "pixel_resolution_meters": {
+      "x": 189.77,
+      "y": 200.0
+    },
+    "spatial_coverage": {
+      "min_lon": 77.1485,
+      "max_lon": 77.9988,
+      "min_lat": 18.1009,
+      "max_lat": 18.7015
+    },
+    "vertical_datum": "Mars Areoid (MOLA 0m reference datum)"
+  },
+  "routes": [
+    {
+      "route_id": "route_primary_opt",
+      "name": "Primary Route (Balanced)",
+      "mode": "balanced",
+      "score_rank": 1,
+      "total_cost": 4352.4,
+      "cost_breakdown": {
+        "base_distance_cost": 3820.5,
+        "slope_penalty": 345.1,
+        "roughness_penalty": 186.8,
+        "hazard_penalty": 0.0,
+        "extra_penalty": 0.0
+      },
+      "summary": {
+        "total_distance_meters": 3820.5,
+        "elevation_gain_meters": 34.2,
+        "elevation_loss_meters": 12.1,
+        "min_elevation_meters": -2560.5,
+        "max_elevation_meters": -2526.3,
+        "max_slope_deg": 8.42,
+        "average_slope_deg": 3.15,
+        "average_roughness": 0.124,
+        "data_coverage_fraction": 1.0,
+        "estimated_duration_hours": 7.07,
+        "motion_profile": "rover_slope_derated_0.15mps",
+        "energy_index": 4.5,
+        "science_score": 30.0,
+        "hazard_exposure_meters": 0.0,
+        "risk_category": "nominal"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [77.4000, 18.3900, -2558.2],
+          [77.4160, 18.4010, -2545.4],
+          [77.4400, 18.4200, -2526.3]
+        ]
+      },
+      "waypoints_visited": [],
+      "science_targets_visited": ["poi_delta_front"],
+      "science_targets_nearby": ["poi_kodiak_butte"],
+      "warnings": [],
+      "evidence_passport": {
+        "schema_version": "1.0.0",
+        "assessment_scope": "regional_terrain_evidence_assessment_not_mission_survival_probability",
+        "scientific_disclaimer": "Terrain evidence quality measures the provenance, spatial resolution, and observation completeness of the underlying elevation data. It is NOT a probability of rover survival, probability of mission success, or calibrated probability of mechanical failure.",
+        "quality_tier": "moderate",
+        "tier_explanation": "Assigned 'moderate' tier for official dataset 'Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2' (Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2) with 100% valid route observation coverage and verified local file integrity because the Jezero Crater sub-window was extracted from the official USGS HTTPS endpoint with verified local SHA-256 integrity, but the full 11.38 GB upstream archive MD5 checksum remains unverified over all source bytes.",
+        "quality_flags": [
+          "source_checksum_unverified",
+          "coarse_resolution_for_obstacle_detection"
+        ],
+        "source": {
+          "dataset_name": "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2",
+          "product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+          "publisher": "USGS Astrogeology Science Center",
+          "official_source_url": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
+          "data_mode": "real_official_endpoint_unverified_checksum",
+          "validation_status": "official_endpoint_retrieved_checksum_unverified",
+          "verification_method": "official_endpoint_retrieved_checksum_unverified",
+          "is_synthetic": false,
+          "local_integrity_verified": true,
+          "source_checksum_verified": false,
+          "file_sha256": "03845eeebd5965a288d8835c414632773d18ee3b392b38cf40d0467154c0f029",
+          "pixel_resolution_x_meters": 189.79,
+          "pixel_resolution_y_meters": 200.0,
+          "nominal_resolution_meters": 200.0,
+          "raster_width": 252,
+          "raster_height": 178,
+          "crs_identifier": "ESRI:104971",
+          "vertical_datum": "Mars Areoid (MOLA 0m reference datum)",
+          "spatial_coverage": {
+            "min_lon": 77.148497,
+            "min_lat": 18.100859,
+            "max_lon": 77.998775,
+            "max_lat": 18.701453
+          },
+          "source_limitations": [
+            "Retrieved from official USGS/PDS HTTPS endpoint via GDAL /vsicurl/ HTTP Range extraction; local GeoTIFF SHA-256 integrity is verified.",
+            "Full 11.38 GB upstream file MD5 checksum (e98092a06bea74d5ec9a704dcd1fe318) was NOT independently verified over all source bytes because only the Jezero Crater sub-window was streamed."
+          ]
+        },
+        "coverage": {
+          "route_sample_count": 3,
+          "valid_route_sample_count": 3,
+          "invalid_route_sample_count": 0,
+          "route_data_coverage_fraction": 1.0,
+          "corridor_total_cells": 2255,
+          "corridor_valid_cells": 2255,
+          "corridor_invalid_cells": 0,
+          "corridor_data_coverage_fraction": 1.0,
+          "near_nodata_segment_count": 0
+        },
+        "resolution_assessment": {
+          "actual_x_meters_per_pixel": 189.79,
+          "actual_y_meters_per_pixel": 200.0,
+          "effective_resolution_meters": 200.0,
+          "nominal_dataset_resolution_meters": 200.0,
+          "suitability_classification": "regional_corridor_assessment_only",
+          "obstacle_detection_capable": false,
+          "limitation_statement": "Actual metric cell resolution at corridor latitude is 189.79 m (X) × 200.0 m (Y) per pixel (effective 200.0 m/px) (nominal equatorial resolution 200.0 m/px; zonal width compressed by cos(lat) at Jezero Crater). Supports regional corridor topographic screening only; does NOT resolve metre-scale boulders, local scarps, sand ripples, or flight-grade rover obstacles."
+        },
+        "known_limitations": [
+          "Actual metric cell resolution at corridor latitude is 189.79 m (X) × 200.0 m (Y) per pixel (effective 200.0 m/px) (nominal equatorial resolution 200.0 m/px; zonal width compressed by cos(lat) at Jezero Crater). Supports regional corridor topographic screening only; does NOT resolve metre-scale boulders, local scarps, sand ripples, or flight-grade rover obstacles.",
+          "Route cost weights, hazard penalties, and categorical risk levels are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of rover failure or mission survival.",
+          "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200 m/px nominal) was originally constructed for global thermal-modelling (THEMIS thermal inertia) rather than precision local surface navigation.",
+          "Retrieved via HTTP range extraction from the official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but the full 11.38 GB upstream file MD5 checksum was not computed over all upstream source bytes."
+        ],
+        "segments": [
+          {
+            "segment_index": 0,
+            "from_coord": {"lon": 77.4, "lat": 18.39},
+            "to_coord": {"lon": 77.416, "lat": 18.401},
+            "step_distance_meters": 1810.2,
+            "elevation_start_m": -2558.2,
+            "elevation_end_m": -2545.4,
+            "delta_elevation_m": 12.8,
+            "slope_deg": 2.95,
+            "roughness": 0.112,
+            "is_valid_data": true,
+            "segment_cost": 2048.1,
+            "quality_flags": [
+              "source_checksum_unverified",
+              "coarse_resolution_for_obstacle_detection"
+            ]
+          },
+          {
+            "segment_index": 1,
+            "from_coord": {"lon": 77.416, "lat": 18.401},
+            "to_coord": {"lon": 77.44, "lat": 18.42},
+            "step_distance_meters": 2010.3,
+            "elevation_start_m": -2545.4,
+            "elevation_end_m": -2526.3,
+            "delta_elevation_m": 19.1,
+            "slope_deg": 3.35,
+            "roughness": 0.136,
+            "is_valid_data": true,
+            "segment_cost": 2304.3,
+            "quality_flags": [
+              "source_checksum_unverified",
+              "coarse_resolution_for_obstacle_detection"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "stats": {
+    "algorithm_used": "A* (with admissible Euclidean heuristic)",
+    "search_duration_seconds": 0.042,
+    "nodes_expanded": 348,
+    "grid_rows": 41,
+    "grid_cols": 55,
+    "cell_size_meters": 194.9
+  },
+  "limitations": [
+    "Elevation resolution (200.0m/px) supports regional corridor terrain assessment, not metre-scale obstacle detection or flight-grade rover navigation.",
+    "Route cost weights, hazard penalties, and categorical risk levels are deterministic multi-criteria decision heuristics, not empirically calibrated probabilities of failure.",
+    "USGS warns of HRSC/MOLA blending seam inconsistencies and notes the global blended DEM (200m/px nominal) was originally generated for thermal-modelling (THEMIS thermal inertia) rather than precision local navigation.",
+    "Retrieved via HTTP range extraction from official USGS endpoint; local GeoTIFF SHA-256 integrity is verified, but full 11.38 GB upstream file checksum was not computed over all upstream source bytes."
+  ]
+}

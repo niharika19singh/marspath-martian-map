@@ -1,0 +1,425 @@
+{
+  "mission_id": "jezero-mission-20261113-test",
+  "status": "success",
+  "crs": {
+    "identifier": "IAU2000:49900",
+    "name": "Mars 2000 Sphere",
+    "semi_major_axis_meters": 3396190.0,
+    "semi_minor_axis_meters": 3396190.0,
+    "inverse_flattening": 0.0,
+    "longitude_direction": "East",
+    "latitude_type": "Planetocentric"
+  },
+  "pilot_region": "Jezero Crater Delta Region",
+  "data_mode": "real",
+  "provenance": {
+    "dataset_name": "USGS/DLR MOLA-HRSC Blended Global DEM 200m v2",
+    "official_product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+    "publisher": "USGS Astrogeology / DLR",
+    "official_source_url": "https://astrogeology.usgs.gov/search/map/Mars/Topography/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+    "local_integrity_verified": true,
+    "source_checksum_verified": true,
+    "file_sha256": "d41d8cd98f00b204e9800998ecf8427e",
+    "is_synthetic": false,
+    "validation_status": "verified_source"
+  },
+  "source_selection": {
+    "selected_source_id": "dem_mola_hrsc_jezero_200m",
+    "selected_source_tier": "regional_blended_dem",
+    "selected_dataset_name": "USGS HRSC/MOLA Jezero Extract 200m",
+    "selection_reason": "Corridor extends beyond local HiRISE DTM boundary; regional MOLA-HRSC DEM selected to preserve single-source invariant without mosaic seams",
+    "single_source_invariant_enforced": true,
+    "hirise_evaluated": true,
+    "hirise_enabled": true,
+    "hirise_selected": false,
+    "hirise_status": "partial_coverage",
+    "hirise_rejection_reason": "Mission corridor bounds [77.38, 18.38, 77.46, 18.43] exceed HiRISE DTM coverage [77.41, 18.41, 77.45, 18.44]",
+    "native_resolution_meters": 200.0,
+    "effective_resolution_meters": 200.0,
+    "aggregation_applied": false,
+    "aggregation_factor": 1,
+    "aggregation_method": "none",
+    "corridor_native_grid_shape": [50, 50],
+    "corridor_analysis_grid_shape": [50, 50]
+  },
+  "routes": [
+    {
+      "route_id": "route_balanced_0",
+      "name": "Optimal Balanced Route",
+      "mode": "balanced",
+      "score_rank": 1,
+      "total_cost": 4073.24,
+      "cost_breakdown": {
+        "base_distance_cost": 3280.09,
+        "slope_penalty": 412.35,
+        "roughness_penalty": 245.8,
+        "hazard_penalty": 135.0,
+        "extra_penalty": 0.0
+      },
+      "summary": {
+        "total_distance_meters": 3280.09,
+        "horizontal_distance_meters": 3278.4,
+        "surface_3d_distance_meters": 3280.09,
+        "distance_measurement_basis": "complete_surface_3d",
+        "elevation_gain_meters": 48.0,
+        "elevation_loss_meters": 12.0,
+        "min_elevation_meters": -2580.0,
+        "max_elevation_meters": -2532.0,
+        "max_slope_deg": 13.8,
+        "average_slope_deg": 6.2,
+        "average_roughness": 0.28,
+        "data_coverage_fraction": 1.0,
+        "elevation_sample_coverage_fraction": 1.0,
+        "is_complete_measurement": true,
+        "estimated_duration_hours": 6.8,
+        "motion_profile": "rover_slope_derated_0.15mps",
+        "energy_index": 3840.0,
+        "science_score": 88.5,
+        "hazard_exposure_meters": 0.0,
+        "unobserved_step_distance_meters": 0.0,
+        "risk_category": "nominal",
+        "risk_assessment_status": "complete_observed"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [77.40, 18.39, -2580.0],
+          [77.405, 18.394, -2576.0],
+          [77.41, 18.398, -2572.0],
+          [77.415, 18.401, -2568.0],
+          [77.42, 18.405, -2560.0],
+          [77.425, 18.408, -2554.0],
+          [77.43, 18.412, -2548.0],
+          [77.435, 18.416, -2540.0],
+          [77.44, 18.42, -2532.0]
+        ]
+      },
+      "waypoints_visited": [
+        { "lon": 77.42, "lat": 18.405 }
+      ],
+      "science_targets_visited": ["poi_delta_front"],
+      "science_targets_nearby": ["poi_kodiak_butte"],
+      "warnings": [
+        "Optimal balance between transit distance and delta scarp slope gradient"
+      ],
+      "evidence_passport": {
+        "schema_version": "1.0.0",
+        "assessment_scope": "regional_terrain_evidence_assessment_not_mission_survival_probability",
+        "scientific_disclaimer": "Terrain evidence quality measures the provenance, spatial resolution, and observation completeness of the underlying elevation data. It is NOT a probability of rover survival or mission success.",
+        "quality_tier": "moderate",
+        "tier_explanation": "Regional MOLA-HRSC dataset with 100% path observation coverage and verified local checksum. Suitable for regional corridor assessment, not boulder-scale obstacle avoidance.",
+        "quality_flags": [
+          "regional_resolution_not_subpixel",
+          "single_source_enforced"
+        ],
+        "source": {
+          "dataset_name": "USGS/DLR MOLA-HRSC Blended Global DEM 200m v2",
+          "product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+          "publisher": "USGS Astrogeology / DLR",
+          "official_source_url": "https://astrogeology.usgs.gov/search/map/Mars/Topography/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+          "data_mode": "real",
+          "validation_status": "verified_source",
+          "verification_method": "sha256_verified_immutable_sidecar",
+          "is_synthetic": false,
+          "local_integrity_verified": true,
+          "source_checksum_verified": true,
+          "pixel_resolution_x_meters": 194.5,
+          "pixel_resolution_y_meters": 200.0,
+          "raster_width": 250,
+          "raster_height": 250,
+          "crs_identifier": "IAU2000:49900",
+          "vertical_datum": "Mars Areoid (MOLA)",
+          "spatial_coverage": {
+            "min_lon": 77.0,
+            "min_lat": 18.0,
+            "max_lon": 78.0,
+            "max_lat": 19.0
+          },
+          "source_limitations": [
+            "Regional ~200 m resolution does not detect rover-wheel scale rocks or small scarp drop-offs."
+          ]
+        },
+        "coverage": {
+          "route_sample_count": 9,
+          "valid_sample_count": 9,
+          "nodata_sample_count": 0,
+          "route_data_coverage_fraction": 1.0,
+          "corridor_total_cells": 2500,
+          "corridor_valid_cells": 2480,
+          "corridor_nodata_cells": 20,
+          "corridor_data_coverage_fraction": 0.992,
+          "near_nodata_segment_count": 0
+        },
+        "resolution": {
+          "nominal_resolution_meters": 200.0,
+          "effective_resolution_meters": 194.5,
+          "suitability": "regional_corridor_planning",
+          "obstacle_detection_capability": "none_coarse_grid"
+        },
+        "segments": [
+          {
+            "segment_index": 0,
+            "from_coord": { "lon": 77.40, "lat": 18.39 },
+            "to_coord": { "lon": 77.405, "lat": 18.394 },
+            "is_valid_data": true,
+            "from_elevation_m": -2580.0,
+            "to_elevation_m": -2576.0,
+            "elevation_delta_m": 4.0,
+            "slope_deg": 4.2,
+            "roughness": 0.18,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 1,
+            "from_coord": { "lon": 77.405, "lat": 18.394 },
+            "to_coord": { "lon": 77.41, "lat": 18.398 },
+            "is_valid_data": true,
+            "from_elevation_m": -2576.0,
+            "to_elevation_m": -2572.0,
+            "elevation_delta_m": 4.0,
+            "slope_deg": 5.1,
+            "roughness": 0.22,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 2,
+            "from_coord": { "lon": 77.41, "lat": 18.398 },
+            "to_coord": { "lon": 77.415, "lat": 18.401 },
+            "is_valid_data": true,
+            "from_elevation_m": -2572.0,
+            "to_elevation_m": -2568.0,
+            "elevation_delta_m": 4.0,
+            "slope_deg": 5.8,
+            "roughness": 0.25,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 3,
+            "from_coord": { "lon": 77.415, "lat": 18.401 },
+            "to_coord": { "lon": 77.42, "lat": 18.405 },
+            "is_valid_data": true,
+            "from_elevation_m": -2568.0,
+            "to_elevation_m": -2560.0,
+            "elevation_delta_m": 8.0,
+            "slope_deg": 8.3,
+            "roughness": 0.31,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 4,
+            "from_coord": { "lon": 77.42, "lat": 18.405 },
+            "to_coord": { "lon": 77.425, "lat": 18.408 },
+            "is_valid_data": true,
+            "from_elevation_m": -2560.0,
+            "to_elevation_m": -2554.0,
+            "elevation_delta_m": 6.0,
+            "slope_deg": 7.1,
+            "roughness": 0.29,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 5,
+            "from_coord": { "lon": 77.425, "lat": 18.408 },
+            "to_coord": { "lon": 77.43, "lat": 18.412 },
+            "is_valid_data": true,
+            "from_elevation_m": -2554.0,
+            "to_elevation_m": -2548.0,
+            "elevation_delta_m": 6.0,
+            "slope_deg": 6.9,
+            "roughness": 0.27,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 6,
+            "from_coord": { "lon": 77.43, "lat": 18.412 },
+            "to_coord": { "lon": 77.435, "lat": 18.416 },
+            "is_valid_data": true,
+            "from_elevation_m": -2548.0,
+            "to_elevation_m": -2540.0,
+            "elevation_delta_m": 8.0,
+            "slope_deg": 9.4,
+            "roughness": 0.35,
+            "quality_flags": []
+          },
+          {
+            "segment_index": 7,
+            "from_coord": { "lon": 77.435, "lat": 18.416 },
+            "to_coord": { "lon": 77.44, "lat": 18.42 },
+            "is_valid_data": true,
+            "from_elevation_m": -2540.0,
+            "to_elevation_m": -2532.0,
+            "elevation_delta_m": 8.0,
+            "slope_deg": 8.7,
+            "roughness": 0.32,
+            "quality_flags": []
+          }
+        ],
+        "known_limitations": [
+          "Regional elevation extract; localized sand ripples or meter-scale blocks not modeled."
+        ]
+      }
+    },
+    {
+      "route_id": "route_balanced_1",
+      "name": "Alternative 1: Low-Grade Bypass",
+      "mode": "balanced",
+      "score_rank": 2,
+      "total_cost": 4380.12,
+      "cost_breakdown": {
+        "base_distance_cost": 3650.0,
+        "slope_penalty": 320.12,
+        "roughness_penalty": 260.0,
+        "hazard_penalty": 150.0,
+        "extra_penalty": 0.0
+      },
+      "summary": {
+        "total_distance_meters": 3650.0,
+        "horizontal_distance_meters": 3648.0,
+        "surface_3d_distance_meters": 3650.0,
+        "distance_measurement_basis": "complete_surface_3d",
+        "elevation_gain_meters": 42.0,
+        "elevation_loss_meters": 8.0,
+        "min_elevation_meters": -2580.0,
+        "max_elevation_meters": -2538.0,
+        "max_slope_deg": 9.8,
+        "average_slope_deg": 4.9,
+        "average_roughness": 0.24,
+        "data_coverage_fraction": 1.0,
+        "elevation_sample_coverage_fraction": 1.0,
+        "is_complete_measurement": true,
+        "estimated_duration_hours": 7.4,
+        "motion_profile": "rover_slope_derated_0.15mps",
+        "energy_index": 4120.0,
+        "science_score": 75.0,
+        "hazard_exposure_meters": 0.0,
+        "unobserved_step_distance_meters": 0.0,
+        "risk_category": "nominal",
+        "risk_assessment_status": "complete_observed"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [77.40, 18.39, -2580.0],
+          [77.408, 18.392, -2575.0],
+          [77.418, 18.396, -2568.0],
+          [77.428, 18.404, -2558.0],
+          [77.436, 18.412, -2546.0],
+          [77.44, 18.42, -2538.0]
+        ]
+      },
+      "waypoints_visited": [],
+      "science_targets_visited": [],
+      "science_targets_nearby": ["poi_delta_front"],
+      "warnings": [
+        "Longer perimeter path chosen to minimize maximum slope"
+      ],
+      "evidence_passport": {
+        "schema_version": "1.0.0",
+        "assessment_scope": "regional_terrain_evidence_assessment_not_mission_survival_probability",
+        "scientific_disclaimer": "Terrain evidence quality measures the provenance, spatial resolution, and observation completeness of the underlying elevation data.",
+        "quality_tier": "moderate",
+        "tier_explanation": "Regional MOLA-HRSC dataset with 100% path observation coverage.",
+        "quality_flags": ["regional_resolution_not_subpixel"],
+        "source": {
+          "dataset_name": "USGS/DLR MOLA-HRSC Blended Global DEM 200m v2",
+          "product_id": "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
+          "data_mode": "real",
+          "validation_status": "verified_source",
+          "verification_method": "sha256_verified_immutable_sidecar",
+          "is_synthetic": false,
+          "local_integrity_verified": true,
+          "source_checksum_verified": true,
+          "pixel_resolution_x_meters": 194.5,
+          "pixel_resolution_y_meters": 200.0,
+          "crs_identifier": "IAU2000:49900",
+          "vertical_datum": "Mars Areoid (MOLA)"
+        },
+        "coverage": {
+          "route_sample_count": 6,
+          "valid_sample_count": 6,
+          "nodata_sample_count": 0,
+          "route_data_coverage_fraction": 1.0,
+          "corridor_total_cells": 2500,
+          "corridor_valid_cells": 2480,
+          "corridor_nodata_cells": 20,
+          "corridor_data_coverage_fraction": 0.992,
+          "near_nodata_segment_count": 0
+        },
+        "resolution": {
+          "nominal_resolution_meters": 200.0,
+          "effective_resolution_meters": 194.5,
+          "suitability": "regional_corridor_planning",
+          "obstacle_detection_capability": "none_coarse_grid"
+        },
+        "segments": []
+      }
+    }
+  ],
+  "robustness_assessment": {
+    "enabled": true,
+    "model_name": "spatially_correlated_gaussian_elevation_perturbation",
+    "model_description": "Evaluates candidate routes against 5 spatially correlated Gaussian elevation perturbation scenarios (sigma=1.5m, correlation=400m).",
+    "seed": 42,
+    "requested_scenario_count": 5,
+    "completed_scenario_count": 5,
+    "failed_scenario_count": 0,
+    "uncertainty_assumptions": {
+      "vertical_sigma_m": 1.5,
+      "correlation_length_m": 400.0,
+      "scenario_count": 5,
+      "seed": 42,
+      "cost_regret_threshold_fraction": 0.05
+    },
+    "baseline_data_mode": "real",
+    "baseline_quality_tier": "moderate",
+    "baseline_is_synthetic": false,
+    "baseline_route_assessments": [
+      {
+        "route_id": "route_balanced_0",
+        "route_mode": "balanced",
+        "required_waypoint_count": 1,
+        "evaluated_scenario_count": 5,
+        "failed_scenario_count": 0,
+        "scenario_feasible_count": 5,
+        "scenario_infeasible_count": 0,
+        "baseline_route_feasibility_fraction": 1.0,
+        "mean_route_overlap_fraction": 0.92,
+        "minimum_route_overlap_fraction": 0.85,
+        "mean_cost_regret_fraction": 0.021,
+        "maximum_cost_regret_fraction": 0.038,
+        "within_regret_threshold_count": 5,
+        "baseline_route_retention_fraction": 1.0
+      },
+      {
+        "route_id": "route_balanced_1",
+        "route_mode": "balanced",
+        "required_waypoint_count": 0,
+        "evaluated_scenario_count": 5,
+        "failed_scenario_count": 0,
+        "scenario_feasible_count": 5,
+        "scenario_infeasible_count": 0,
+        "baseline_route_feasibility_fraction": 1.0,
+        "mean_route_overlap_fraction": 0.88,
+        "minimum_route_overlap_fraction": 0.81,
+        "mean_cost_regret_fraction": 0.032,
+        "maximum_cost_regret_fraction": 0.049,
+        "within_regret_threshold_count": 5,
+        "baseline_route_retention_fraction": 1.0
+      }
+    ],
+    "scientific_disclaimer": "Results describe route stability under the specified hypothetical terrain perturbation model. They do not establish the actual probability of rover failure or mission success."
+  },
+  "stats": {
+    "algorithm_used": "A* with admissible distance heuristic",
+    "search_duration_seconds": 0.048,
+    "nodes_expanded": 464,
+    "grid_rows": 50,
+    "grid_cols": 50,
+    "cell_size_meters": 200.0
+  },
+  "limitations": [
+    "Regional 200 m grid spacing does not resolve sub-pixel rover hazards (e.g. meter-scale boulders or sand ripples).",
+    "MOLA-HRSC blended elevation vertical error is uncalibrated at fine scale.",
+    "Robustness retention fraction describes stability under hypothetical Gaussian field perturbations; it is not a mission success probability."
+  ]
+}

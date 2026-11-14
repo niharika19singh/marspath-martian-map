@@ -28,13 +28,60 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pytest ruff
 
-      - name: Run Ruff Lint Checks
+      - name: Shell Script Syntax Validation
+        run: |
+          bash -n backend/scripts/provision_build_dem.sh
+          bash -n backend/scripts/start_render.sh
+
+      - name: Provision Jezero DEM Build Artifact
+        run: |
+          bash backend/scripts/provision_build_dem.sh
+
+      - name: Run Ruff Lint Checks (Blocking)
         run: |
           ruff check backend/
-        continue-on-error: true
 
-      - name: Run Pytest Suite
+      - name: Run Pytest Suite (Full Backend, Provenance, Provisioning, Runtime & API Tests)
         env:
-          PYTHONPATH: backend
+          PYTHONPATH: .
         run: |
           pytest -v backend/tests/
+
+  docker:
+    name: Docker Build & Runtime Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image with Build-Time DEM Provisioning
+        run: |
+          docker build -f backend/Dockerfile -t marspath-backend:ci-test .
+
+      - name: Verify Baked-in DEM Artifacts
+        run: |
+          docker run --rm marspath-backend:ci-test test -s backend/app/data/rasters/jezero_mola_hrsc_blended.tif
+          docker run --rm marspath-backend:ci-test test -s backend/app/data/rasters/jezero_mola_hrsc_blended.tif.provenance.json
+
+      - name: Verify Verification-Only Container Startup and API Readiness
+        run: |
+          docker run -d --name test-container -p 8000:8000 marspath-backend:ci-test
+          sleep 4
+          docker logs test-container
+          curl --fail -s http://localhost:8000/health | grep '"is_synthetic":false'
+          curl --fail -s http://localhost:8000/api/v1/data/status | grep '"valid_cells":44856'
+          docker stop test-container
+
+      - name: Verify Fail-Closed Startup When Artifact Missing or Corrupted
+        run: |
+          echo "Testing missing DEM..."
+          if docker run --rm marspath-backend:ci-test bash -c "rm backend/app/data/rasters/jezero_mola_hrsc_blended.tif && bash backend/scripts/start_render.sh"; then
+            echo "Expected container to fail closed when DEM is missing, but it succeeded!"
+            exit 1
+          fi
+          echo "Testing corrupted DEM..."
+          if docker run --rm marspath-backend:ci-test bash -c "echo 'corrupted' > backend/app/data/rasters/jezero_mola_hrsc_blended.tif && bash backend/scripts/start_render.sh"; then
+            echo "Expected container to fail closed when DEM is corrupted, but it succeeded!"
+            exit 1
+          fi
+          echo "Docker verification and fail-closed tests passed successfully."

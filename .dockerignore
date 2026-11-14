@@ -1,0 +1,48 @@
+# Git and dependencies
+.git/
+.deps/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Test & coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Planetary rasters and caches (keep out of image)
+backend/app/data/rasters/*.tif
+backend/app/data/rasters/*.tiff
+backend/app/data/rasters/*.img
+backend/app/data/rasters/*.lbl
+backend/app/data/rasters/*.cub
+backend/app/data/rasters/*.json
+backend/app/data/downloads/
+backend/app/data/cache/
+*.tif
+*.tiff
+*.dem
+*.img
+*.cub
+*.jp2
+*.lbl
+
+# Environment and secrets
+.env
+.env.*
+*.secret
+*.pem
+*.key
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
