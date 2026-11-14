@@ -13,5 +13,5 @@
   "tile_zoom": 14,
   "retrieved_utc": "2026-11-06T13:48:41Z",
   "missing_tiles": [],
-  "note": "Grayscale HiRISE RGB mosaic derivative, cropped to non-transparent observed delta extent (minx=77.267962). Reference imagery only; does not alter 200 m routing DEM."
+  "note": "Grayscale HiRISE RGB mosaic derivative, cropped to non-transparent observed delta extent (minx=77.267962) with smooth-step edge feathering and regional CTX radiometric harmonization. Reference imagery only; does not alter 200 m routing DEM."
 }

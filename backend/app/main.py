@@ -4,11 +4,13 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.v1.data_status import router as data_status_router
 from backend.app.api.v1.health import router as health_router
+from backend.app.api.v1.intelligence import router as intelligence_router
 from backend.app.api.v1.layers import router as layers_router
 from backend.app.api.v1.routes import router as routes_router
 from backend.app.core.config import Settings, get_settings, validate_cors_origins
 from backend.app.core.exceptions import MarsPathError
 from backend.app.core.logging import setup_logging
+from backend.app.data_sources.routers.data_sources import router as data_sources_router
 
 
 def configure_cors(target_app: FastAPI, app_settings: Settings | None = None) -> list[str]:
@@ -62,6 +64,8 @@ app.include_router(health_router)
 app.include_router(layers_router)
 app.include_router(data_status_router)
 app.include_router(routes_router)
+app.include_router(intelligence_router)
+app.include_router(data_sources_router, prefix="/api/v1")
 
 
 @app.get("/", summary="Root landing index")
@@ -74,4 +78,15 @@ def root_index():
         "api_v1_layers": "/api/v1/layers",
         "api_v1_data_status": "/api/v1/data/status",
         "api_v1_route_plan": "/api/v1/routes/plan",
+        "api_v1_intelligence_status": "/api/v1/intelligence/status",
+        "api_v1_intelligence_spacecraft": "/api/v1/intelligence/spacecraft",
+        "api_v1_intelligence_rovers": "/api/v1/intelligence/rovers",
+        "api_v1_intelligence_observations": "/api/v1/intelligence/observations",
+        "api_v1_intelligence_timeline": "/api/v1/intelligence/timeline",
+        "api_v1_data_sources": "/api/v1/data-sources",
+        "api_v1_data_sources_status": "/api/v1/data-sources/status",
+        "api_v1_data_catalogue": "/api/v1/data-catalogue",
+        "api_v1_data_catalogue_search": "/api/v1/data-catalogue/search",
+        "api_v1_data_releases": "/api/v1/data-releases",
+        "api_v1_data_synchronization_status": "/api/v1/data-synchronization/status",
     }
