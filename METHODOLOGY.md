@@ -106,3 +106,42 @@ To assess unassisted-return contingency coverage, `compute_backward_time_grid` i
 | `MARS_RADIUS_METERS` | `3396190.0` m | `backend/app/core/config.py` | IAU Mars 2000 reference sphere radius |
 | `MARS_SOL_RATIO` | `1.0274912517` | `backend/app/conditions/mars24.py` | Sidereal/synodic Earth-day to Mars-sol conversion ratio |
 | `MARS_SOL_SECONDS` | `88775.244147` s | `backend/app/conditions/mars24.py` | Mean solar day on Mars in SI seconds |
+
+---
+
+## 8. Mission Intelligence & Risk Fusion Subsystem
+
+Inspired by multi-source data fusion architectures (e.g. Aureum AI / Verity), the **MARSPath Mission Intelligence & Risk Fusion Engine** evolves MARSPath from a static terrain routing tool into a provenance-traceable planetary decision-support platform.
+
+### 8.1 Multi-Source Evidence Fusion & Normalization
+All incoming observations from orbital sensors (HiRISE, CTX, THEMIS, MOLA-HRSC), in-situ instruments (Perseverance MEDA, SuperCam, Mastcam-Z), and ancillary models (SPICE ephemerides, MCD climatology) are normalized into canonical evidence structures (`NormalizedObservation`):
+- **Quality Tiers:** `GOLD` (peer-reviewed / calibrated PDS archives with cryptographic integrity), `SILVER` (standard processed mission telemetry), `BRONZE` (preliminary unvalidated products), and `UNVALIDATED` (provisional or experimental inputs).
+- **Provenance Kinds:** `MEASURED` (direct instrument readings), `MODELED` (numerical simulations / climatology), `DERIVED` (computed terrain metrics, slope, TRI), `HISTORICAL` (prior traverse logs), and `INFERRED` (multi-spectral proxies).
+- **Quantified Uncertainty:** Retains $1\sigma$ / $2\sigma$ error bars, resolution thresholds, and missing-value flags (preserving `-9999.0` sentinel representations as strictly unavailable data).
+
+### 8.2 Geospatial & Temporal Indexing
+- **Mars Spherical Distance:** Great-circle geodesy using the IAU 2000 Mars mean radius ($R = 3,396,190\text{ m}$) with positive-East longitude wrapping across the $[0^\circ, 360^\circ)$ and $[-180^\circ, 180^\circ)$ frames.
+- **Cross-Track Distance:** Point-to-segment spherical projection for determining proximity of environmental hazards to traverse corridors.
+- **Coverage Gap Detection:** Automated discovery of bounding regions lacking high-resolution DEM or in-situ atmospheric coverage, flagging fallback dependencies (e.g. falling back to 200 m MOLA-HRSC data).
+
+### 8.3 Geospatial Mission Knowledge Graph
+The mission domain is modeled as a directed property graph ($G = (V, E)$) comprising:
+- **12 Node Types:** `DATASET`, `OBSERVATION`, `HAZARD`, `ROUTE_SEGMENT`, `ROUTE`, `WAYPOINT`, `TERRAIN_REGION`, `OPERATIONAL_CONSTRAINT`, `SCIENCE_TARGET`, `SPACECRAFT`, `COMM_PASS`, `WEATHER_EVENT`.
+- **12 Directed Relation Types:** `DERIVED_FROM`, `OBSERVED_BY`, `AFFECTS`, `CONSTRAINS`, `LOCATED_IN`, `INTERSECTS`, `PRECEDES`, `CONTRIBUTES_TO`, `MONITORS`, `VALIDATES`, `CONFLICTS_WITH`, `SUPPORTS`.
+- **Multi-Hop Traversal Algorithms:**
+  - *Upstream Evidence Tracing:* Traverses backward along `DERIVED_FROM`, `OBSERVED_BY`, `AFFECTS`, and `CONSTRAINS` edges to discover authoritative NASA PDS/USGS root products and DOIs supporting any hazard or route constraint.
+  - *Downstream Impact Tracing:* Traverses forward along `AFFECTS`, `CONSTRAINS`, and `PRECEDES` edges to discover which route segments, rover subsystems, and science targets are jeopardized by an observed anomaly or hazard.
+
+### 8.4 Causal Risk Propagation Engine
+Risk is propagated deterministically through traverse segments:
+1. **Segment Traversability:** Segments are classified into discrete operational states: `PASSABLE`, `MARGINAL` (approaching constraints), or `IMPASSABLE` (violating strict slope ceilings or crossing critical hazards).
+2. **Relative Effort Index:** A continuous planning indicator scaled from baseline terrain impedance, slope gradient, surface roughness, and localized wheel degradation factors.
+3. **Hazard Exposure Score:** Sum of proximal hazard severity weights attenuated by Euclidean/spherical distance.
+4. **Uncertainty Exposure:** Quantifies lack of high-resolution evidence along the corridor (e.g., segments traversing low-resolution MOLA fallback regions or uncharacterized terrain).
+5. **Causal Chain Generation:** Explicit diagnostic narratives linking root evidence (e.g., high-resolution HiRISE slope or THEMIS low-thermal-inertia sand) to specific operational segment constraints.
+
+### 8.5 What-If Contingency Scenarios
+Enables operators to evaluate hypothetical or deteriorating operational conditions:
+- **Modifiers:** Atmospheric dust storm opacity ($\tau$), power budget factor ($0.0 - 1.0$), slope ceiling threshold (degrees), wheel degradation multiplier, and communication blackout windows.
+- **Side-by-Side Comparison:** Compares modified scenarios against primary baseline traverses, reporting deltas in traversability, effort index, hazard exposure, and identifying compromised segments.
+

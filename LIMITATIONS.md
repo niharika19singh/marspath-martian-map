@@ -32,3 +32,11 @@ This document records the scope boundaries, model assumptions, and data constrai
 
 ## 5. Browser Engine vs. Backend Precision
 - For instant offline/interactive preview when the FastAPI backend is absent, `mission-ui/src/engine.js` mirrors Stage 1 directional gradients, Minetti effort, backward-Dijkstra return/rescue grids, and Mars24 turnaround math on the active client terrain buffer. Authoritative multi-mode route reports and provenance metadata come from `POST /api/v1/routes/plan` when connected to the backend.
+
+---
+
+## 6. Mission Intelligence & Risk Fusion Subsystem Scope
+- **Non-Probabilistic Risk Metrics:** All risk scores produced by the causal propagation engine (`relative_effort_index`, `hazard_exposure_score`, `uncertainty_exposure_score`) are relative ordinal planning indicators, not mathematical probabilities of mission failure or vehicle loss.
+- **Graph Coverage Completeness:** The Mission Knowledge Graph links explicit known datasets, hazards, segments, and operational constraints. Regions outside the active spatial-temporal index or devoid of high-resolution orbital coverage are flagged as coverage gaps rather than assumed safe.
+- **What-If Scenario Fidelity:** Scenario modifiers ($\tau$ dust increase, power budget reductions, wheel degradation multipliers) perturb operational thresholds parametrically to demonstrate sensitivity; they do not simulate dynamic atmospheric fluid dynamics or vehicle physics.
+

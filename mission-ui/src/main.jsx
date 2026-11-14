@@ -20,6 +20,7 @@ import {
   getAssetUrl
 } from './integration.js';
 import IntelligencePanel from './IntelligencePanel.jsx';
+import MissionIntelligencePanel from './MissionIntelligencePanel.jsx';
 import NasaDataPanel from './NasaDataPanel.jsx';
 import CloudAiPanel from './CloudAiPanel.jsx';
 import { verifyCoordinateDatasetCoverage } from './wmts_capabilities.js';
@@ -159,6 +160,7 @@ function App() {
 
   const historyMode = missionView === 'history';
   const intelligenceMode = missionView === 'intelligence';
+  const fusionMode = missionView === 'fusion';
   const nasaDataMode = missionView === 'nasa-data';
   const cloudAiMode = missionView === 'cloud-ai';
   const plannerMode = missionView === 'planner';
@@ -213,6 +215,7 @@ function App() {
 
   function switchMission(mode) {
     setMissionView(mode);
+    setLeftOpen(true);
     setShowRoute(mode === 'planner');
     setProfileExpanded(false);
     setLayersOpen(false);
@@ -1057,6 +1060,7 @@ function App() {
           <span>Jezero Crater</span>
           {missionView === 'conditions' && <span> / Mars Now</span>}
           {intelligenceMode && <span> / Live Intelligence</span>}
+          {fusionMode && <span> / Risk Fusion Engine</span>}
           {nasaDataMode && <span> / NASA Data</span>}
           {cloudAiMode && <span> / Cloud & AI</span>}
         </nav>
@@ -1237,6 +1241,8 @@ function App() {
               ? 'Rover traverse'
               : intelligenceMode
               ? 'Live Intel'
+              : fusionMode
+              ? 'Risk Fusion'
               : nasaDataMode
               ? 'NASA Data'
               : cloudAiMode
@@ -1245,7 +1251,7 @@ function App() {
           </button>
         )}
 
-        <aside className={'floating-left glass ' + (leftOpen ? '' : 'collapsed') + (nasaDataMode ? ' nasa-mode' : '')} inert={!leftOpen} aria-label="Mission control panel">
+        <aside className={'floating-left glass ' + (leftOpen ? '' : 'collapsed') + (nasaDataMode || fusionMode ? ' nasa-mode' : '')} inert={!leftOpen} aria-label="Mission control panel">
           <div className="panel-heading">
             <h1>
               {missionView === 'conditions'
@@ -1254,6 +1260,8 @@ function App() {
                 ? 'Rover traverse'
                 : intelligenceMode
                 ? 'Live Mars Intelligence'
+                : fusionMode
+                ? 'Mission Intelligence & Risk Fusion'
                 : nasaDataMode
                 ? 'NASA Data & Intelligence'
                 : cloudAiMode
@@ -1295,6 +1303,13 @@ function App() {
               Live Intel
             </button>
             <button
+              className={fusionMode ? 'active' : ''}
+              aria-pressed={fusionMode}
+              onClick={() => switchMission('fusion')}
+            >
+              Risk Fusion
+            </button>
+            <button
               className={nasaDataMode ? 'active' : ''}
               aria-pressed={nasaDataMode}
               onClick={() => switchMission('nasa-data')}
@@ -1310,11 +1325,21 @@ function App() {
             </button>
           </div>
 
-          {cloudAiMode ? (
+          {fusionMode ? (
+            <MissionIntelligencePanel
+              apiUrl={api?.url || apiUrl || ''}
+              onClose={() => setLeftOpen(false)}
+              activeRoute={active}
+              onFocusCoordinates={coords => {
+                mapActions.current?.focus({ lon: coords[0], lat: coords[1], zoom: 11 });
+              }}
+              onHighlightSegment={idx => {}}
+            />
+          ) : cloudAiMode ? (
             <CloudAiPanel activeRoute={active} currentCoords={start} />
           ) : nasaDataMode ? (
             <NasaDataPanel
-              apiUrl={api?.url || ''}
+              apiUrl={api?.url || apiUrl || ''}
               onFocusProduct={prod => {
                 setFocusedProduct(prod);
                 if (prod.bounds) {
@@ -1359,7 +1384,7 @@ function App() {
                 }
               }}
               timelineEvents={timelineEvents}
-              apiUrl={api?.url || ''}
+              apiUrl={api?.url || apiUrl || ''}
             />
           ) : missionView === 'conditions' ? (
             <ConditionsPanel

@@ -21,6 +21,12 @@ MARSPath is an interplanetary routing intelligence and terrain assessment platfo
   - Optional localized high-resolution **HiRISE Jezero Western Delta DTM** (~1 m/px, `18.35°N–18.46°N, 77.38°E–77.47°E`) via `MARSPATH_USE_HIRISE_DEM=true` and `MARSPATH_HIRISE_DEM_PATH`, with automatic single-source corridor selection, projected-to-geographic Mars CRS alignment, and conservative hazard-preserving block aggregation when a HiRISE corridor exceeds `MAX_GRID_CELLS`.
   - Strict separation between local SHA-256 file integrity (`local_integrity_verified`) and upstream source checksum authenticity (`source_checksum_verified`).
   - Five explicit validation states: `synthetic_test_fixture`, `incomplete_missing_genuine_dem`, `valid_numeric_raster_unverified_source`, `official_endpoint_retrieved_checksum_unverified` (for partial HTTP range extractions where the full 11.38 GB archive MD5 is not computed over all upstream bytes), and `verified_source` (reserved strictly for independently verified full-source checksums).
+- **Mission Intelligence & Risk Fusion Subsystem (Aureum AI / Verity Inspired):**
+  - **Multi-Source Evidence Fusion:** Normalizes orbital imagery (HiRISE, CTX), altimetry (MOLA, HRSC), thermal inertia (THEMIS), in-situ meteorology (MEDA), and orbital geometry (SPICE) with explicit quality tiers (`GOLD`, `SILVER`, `BRONZE`) and provenance kinds (`MEASURED`, `MODELED`, `DERIVED`).
+  - **Geospatial Mission Knowledge Graph:** 12 entity types and 12 relation types supporting multi-hop upstream evidence discovery (back to NASA PDS/USGS DOIs) and downstream impact tracing.
+  - **Causal Risk Propagation:** Evaluates route segments deterministically, computing traversability status (`PASSABLE`, `MARGINAL`, `IMPASSABLE`), relative effort index, hazard exposures, and causal chains.
+  - **What-If Scenario Simulation:** Parametric perturbation engine testing atmospheric dust opacity ($\tau$), power budget reductions, slope ceilings, and wheel degradation with side-by-side baseline comparison reports.
+  - **Operational Data Freshness & Coverage Auditing:** Monitors latency, connectivity, and coverage across 8 NASA data archives, pinpointing low-resolution fallback zones.
 
 ---
 

@@ -61,3 +61,19 @@ All authoritative planetary datasets referenced or ingested by MARSPath are cata
 
 - **CRISM Mineralogy MTR3** (`10.17189/1519498`, `18.0 m/px`, Mars Reconnaissance Orbiter): Hyperspectral summary parameters for biosignature-relevant clay/carbonate POIs.
 - **THEMIS Nighttime IR Thermal Inertia** (`10.17189/1519495`, `100.0 m/px`, 2001 Mars Odyssey): Surface blockiness vs. fine dust thermal proxy.
+
+---
+
+## 5. Mission Intelligence & Multi-Source Fusion Archives
+
+The Mission Intelligence & Risk Fusion Engine audits and fuses evidence across 8 official NASA / planetary data nodes:
+
+1. **NASA Mars Trek WMTS & Metadata Services** (`mars_trek`): Global Viking, CTX, and HiRISE 25 cm tile streaming endpoints.
+2. **NASA PDS Geosciences Node / Orbital Data Explorer (ODE)** (`pds_geosciences`): HiRISE stereo pairs, CTX EDR/RDR, and MOLA PEDR topographic profiles.
+3. **NASA PDS Atmospheres Node & Mars 2020 MEDA** (`pds_atmospheres`): Calibrated in-situ atmospheric pressure, ground/air temperatures, and dust opacity ($\tau$) observations.
+4. **THEMIS Data Viewer & Mars Thermal Inertia Repository** (`themis_viewer`): Planetary thermal inertia grids ($I$ in $\text{J}\cdot\text{m}^{-2}\cdot\text{K}^{-1}\cdot\text{s}^{-1/2}$) used as regolith grain-size and mobility sinkage indicators.
+5. **NASA NAIF / SPICE Ephemeris & Geometry Engine** (`naif_spice`): Planetary orbital states, solar phase angles, and spacecraft ground track footprints (MRO, Odyssey, MAVEN, TGO, MEX).
+6. **Planetary Data System Analyst's Notebook** (`planetary_notebook`): Mars 2020 Perseverance and MSL Curiosity traverse waypoints, drive logs, and instrument deployment targets.
+7. **NASA PDS Data Release Feeds** (`pds_releases`): Certified quarterly data releases and release notes.
+8. **USGS Astrogeology PDS Annex** (`usgs_astrogeology`): Orthorectified and cartographically controlled Jezero crater DTM mosaics and geodetic control networks.
+

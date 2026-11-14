@@ -1,13 +1,18 @@
-import {defineConfig} from 'vite';
-export default defineConfig({
-  base:'/mission-control/',
-  build:{outDir:'../dist/mission-control',emptyOutDir:true},
-  worker:{format:'es'},
-  server:{
-    proxy:{
-      '/api':'http://127.0.0.1:8000',
-      '/health':'http://127.0.0.1:8000',
-      '/openapi.json':'http://127.0.0.1:8000'
+import { defineConfig, loadEnv } from 'vite';
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const target = env.VITE_API_URL || process.env.VITE_API_URL || 'http://127.0.0.1:8005';
+  return {
+    base: '/mission-control/',
+    build: { outDir: '../dist/mission-control', emptyOutDir: true },
+    worker: { format: 'es' },
+    server: {
+      proxy: {
+        '/api': target,
+        '/health': target,
+        '/openapi.json': target
+      }
     }
-  }
+  };
 });
