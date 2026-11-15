@@ -4632,3 +4632,728 @@
   border-radius: 6px;
   padding: 8px 10px;
 }
+
+/* ==========================================================================
+   FEATURE 1 — ASTRONAUT SUIT HUD MODE & AUDIO HAZARD ALERTS
+   ========================================================================== */
+.suit-hud-floating-container {
+  position: absolute;
+  top: 70px;
+  left: 20px;
+  right: 20px;
+  z-index: 45;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.glass-hud {
+  background: rgba(9, 14, 20, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 230, 118, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(0, 230, 118, 0.12);
+  border-radius: 10px;
+  pointer-events: auto;
+}
+
+.suit-hud-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  gap: 14px;
+}
+
+.hud-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: #00e676;
+}
+
+.hud-sub-label {
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  padding-left: 8px;
+}
+
+.hud-alert-ticker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  animation: tickerPulse 2s infinite ease-in-out;
+}
+
+.hud-alert-ticker.critical {
+  background: rgba(239, 68, 68, 0.22);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+}
+
+.hud-alert-ticker.warning {
+  background: rgba(245, 158, 11, 0.22);
+  border: 1px solid #f59e0b;
+  color: #fcd34d;
+}
+
+.hud-alert-ticker.advisory {
+  background: rgba(56, 189, 248, 0.2);
+  border: 1px solid #38bdf8;
+  color: #7dd3fc;
+}
+
+.hud-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-hud-audio {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-hud-audio.audio-active {
+  background: rgba(0, 230, 118, 0.18);
+  border: 1px solid #00e676;
+  color: #00e676;
+}
+
+.btn-hud-audio.audio-muted {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #94a3b8;
+}
+
+.btn-hud-spe {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid #f59e0b66;
+  color: #fbbf24;
+  cursor: pointer;
+}
+
+.btn-hud-spe.is-active {
+  background: rgba(239, 68, 68, 0.28);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  animation: pulseSpe 1.8s infinite;
+}
+
+.btn-hud-dismiss {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.suit-hud-metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.hud-metric-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-metric-card.status-card {
+  grid-column: span 1;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+}
+
+.sim-chip {
+  font-size: 8.5px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  padding: 1px 4px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+}
+
+.metric-body {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.val-large {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #f8fafc;
+}
+
+.sub-val {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.metric-progress-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.metric-progress-bar {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.status-mini-tag {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-align: center;
+  margin-top: 2px;
+}
+
+.status-pill-solid {
+  font-size: 9.5px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid;
+  text-align: center;
+  margin-top: 2px;
+}
+
+/* ==========================================================================
+   FEATURE 2 — MARSWALK SURVIVABILITY SCORE & SOLAR STORM SCENARIO
+   ========================================================================== */
+.survivability-score-card {
+  border: 1px solid rgba(0, 230, 118, 0.25);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(9, 15, 22, 0.85);
+}
+
+.btn-storm-toggle {
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-storm-toggle.storm-off {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+}
+
+.btn-storm-toggle.storm-active {
+  background: rgba(239, 68, 68, 0.24);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
+  animation: pulseSpe 2s infinite ease-in-out;
+}
+
+.storm-scenario-alert-banner {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.storm-alert-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.storm-alert-tag {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: #fca5a5;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.storm-alert-title {
+  font-size: 12px;
+  color: #fecaca;
+  display: block;
+}
+
+.storm-alert-desc {
+  font-size: 11px;
+  color: #f8fafc;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.score-hero-display {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.score-circle-container {
+  flex-shrink: 0;
+}
+
+.score-circle {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 3.5px solid;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.score-number {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.score-total {
+  font-size: 10px;
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.score-summary-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tier-badge-pill {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+
+.score-narrative {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.envelope-tightening-callout {
+  font-size: 10px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid #f59e0b88;
+  color: #fde68a;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+
+.btn-toggle-formula {
+  background: none;
+  border: none;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #38bdf8;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.factors-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.factors-breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+
+.factors-breakdown-table th {
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.factors-breakdown-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.storm-deduction-row td {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.factor-assumption-sub {
+  font-size: 9.5px;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.formula-disclosure-box {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.formula-line {
+  font-size: 10.5px;
+  color: #38bdf8;
+}
+
+/* ==========================================================================
+   FEATURE 3 — PLANETARY PROTECTION MAP LEGEND & WAYPOINT POV POPUP
+   ========================================================================== */
+.planetary-protection-map-legend {
+  position: absolute;
+  bottom: 80px;
+  left: 20px;
+  z-index: 25;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(9, 14, 20, 0.9);
+  max-width: 320px;
+  font-size: 11px;
+}
+
+.legend-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #f8fafc;
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: #cbd5e1;
+}
+
+.legend-color-box {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legend-color-box.red-solid {
+  background: rgba(239, 68, 68, 0.3);
+  border: 1.5px solid #ef4444;
+}
+
+.legend-color-box.amber-solid {
+  background: rgba(245, 158, 11, 0.3);
+  border: 1.5px solid #f59e0b;
+}
+
+.legend-color-box.purple-dashed {
+  background: rgba(168, 85, 247, 0.25);
+  border: 1.5px dashed #a855f7;
+}
+
+.legend-provenance-note {
+  font-size: 9px;
+  color: #64748b;
+  margin-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 4px;
+}
+
+.map-route-breach-banner {
+  position: absolute;
+  top: 130px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  background: rgba(239, 68, 68, 0.92);
+  color: #ffffff;
+  border: 1px solid #fecaca;
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.5);
+  padding: 8px 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 680px;
+  font-size: 11.5px;
+}
+
+.waypoint-pov-popup {
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(9, 14, 20, 0.94);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.popup-top-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.popup-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #38bdf8;
+  margin: 0;
+}
+
+.popup-coords {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.popup-close-btn {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.popup-close-btn:hover {
+  color: #f8fafc;
+}
+
+.popup-telemetry-strip {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.pov-img-container {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pov-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.3s ease;
+}
+
+.pov-thumbnail.is-loading {
+  opacity: 0;
+}
+
+.pov-thumbnail.is-loaded {
+  opacity: 1;
+}
+
+.pov-loading-spinner {
+  font-size: 10.5px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.pov-img-fallback {
+  text-align: center;
+  padding: 16px;
+  color: #94a3b8;
+}
+
+.fallback-icon {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.pov-provenance-tag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  font-size: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.pov-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 10px;
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.meta-row {
+  display: flex;
+  gap: 4px;
+}
+
+.meta-label {
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+}
+
+.meta-val {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.pov-desc-compact {
+  font-size: 10.5px;
+  color: #cbd5e1;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.link-nasa-photojournal {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #38bdf8;
+  text-decoration: underline;
+}
+
+.link-nasa-photojournal:hover {
+  color: #7dd3fc;
+}
+
+.popup-actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-popup-action {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.2s ease;
+}
+
+.btn-popup-action.primary {
+  background: rgba(0, 230, 118, 0.18);
+  border-color: #00e676;
+  color: #00e676;
+}
+
+.btn-popup-action.primary:hover {
+  background: rgba(0, 230, 118, 0.3);
+}
+
+.btn-popup-action.secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+}
+
+.btn-popup-action.pov-btn {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #38bdf8;
+}

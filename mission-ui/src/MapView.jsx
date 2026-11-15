@@ -32,6 +32,7 @@ import {
   calculateEdgeFeatherGradients,
 } from './map_rendering.js';
 import { JEZERO_SPECIAL_REGIONS } from './planetary_protection.js';
+import WaypointPovPopup from './WaypointPovPopup.jsx';
 
 export { computeTimeOverlayPixels, buildTimeOverlayCanvas, calculateEdgeFeatherGradients };
 
@@ -148,6 +149,7 @@ export default function MapView(props) {
   const [playbackProgress, setPlaybackProgress] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(2);
   const [inspectPopup, setInspectPopup] = useState(null);
+  const [activeWaypointPopup, setActiveWaypointPopup] = useState(null);
 
   callbacks.current = { onPin, onSelectRoute, pick, props };
   const interact = () => {
@@ -555,8 +557,11 @@ export default function MapView(props) {
       if (obsId) { callbacks.current.props.onSelectObservation?.(obsId); return; }
       if (scId) { callbacks.current.props.onSelectSpacecraft?.(scId); return; }
       if (recorded && !callbacks.current.pick) {
-        if (recorded.geometry.type === 'Point') callbacks.current.props.onWaypoint?.(recorded);
-        else callbacks.current.props.onWaypoint?.(callbacks.current.props.waypoints.findLast(w => w.properties.sol <= recorded.properties.sol));
+        const wp = recorded.geometry?.type === 'Point'
+          ? recorded
+          : callbacks.current.props.waypoints?.findLast(w => w.properties.sol <= recorded.properties.sol) || recorded;
+        callbacks.current.props.onWaypoint?.(wp);
+        setActiveWaypointPopup(wp);
         return;
       }
       if (routeId && !callbacks.current.pick) { callbacks.current.onSelectRoute(routeId); return; }
@@ -873,6 +878,17 @@ export default function MapView(props) {
         return styles;
       });
       src.addFeature(f);
+
+      // Highlight route breach if route intersects planetary protection geofence buffer
+      const ppAssessment = r.planetary_protection_assessment || (primary ? response?.planetary_protection : null);
+      if (ppAssessment && ppAssessment.intersected_regions && ppAssessment.intersected_regions.length > 0) {
+        const breachLine = new Feature({ geometry: line.clone(), routeId: r.route_id });
+        breachLine.setStyle(new Style({
+          stroke: new Stroke({ color: '#ef4444dd', width: 6, lineDash: [8, 6] }),
+          zIndex: 15,
+        }));
+        src.addFeature(breachLine);
+      }
       if (live && hazards) {
         for (const s of r.evidence_passport?.segments || []) {
           if (s.slope_deg > 12 || s.roughness > 0.5) {
@@ -1688,6 +1704,82 @@ export default function MapView(props) {
             >
               Dismiss
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Authentic NASA Perseverance Waypoint POV Popup */}
+      {activeWaypointPopup && (
+        <div
+          className="waypoint-popup-wrapper"
+          style={{
+            position: 'absolute',
+            zIndex: 35,
+            left: corridorCenterStyle,
+            bottom: inspectBottomOffset || '120px',
+            maxWidth: '520px',
+            width: '92%',
+            transform: 'translateX(-50%)',
+          }}
+        >
+          <WaypointPovPopup
+            waypoint={activeWaypointPopup}
+            onClose={() => setActiveWaypointPopup(null)}
+            onSetDestination={(pt) => {
+              onPin?.(pt);
+              setActiveWaypointPopup(null);
+            }}
+            onSetStart={(pt) => {
+              callbacks.current.props.onSetStart?.(pt);
+              setActiveWaypointPopup(null);
+            }}
+            onOpenFullPov={() => {
+              callbacks.current.props.onOpenSurfacePov?.();
+            }}
+          />
+        </div>
+      )}
+
+      {/* Planetary Protection Robot-Only Buffer Floating Map Legend */}
+      {(showOfficialZones || showCandidateZones || showDemoZones) && (
+        <div className="planetary-protection-map-legend glass">
+          <div className="legend-header">
+            <span className="legend-shield">🛡️</span>
+            <strong>Planetary Protection — Robot-Only Buffer</strong>
+          </div>
+          <div className="legend-items">
+            {showOfficialZones && (
+              <div className="legend-item">
+                <span className="legend-color-box red-solid" />
+                <span>Official Restricted Zone (COSPAR Cat IVc)</span>
+              </div>
+            )}
+            {showCandidateZones && (
+              <div className="legend-item">
+                <span className="legend-color-box amber-solid" />
+                <span>Candidate Sensitive Area (Bio-barrier)</span>
+              </div>
+            )}
+            {showDemoZones && (
+              <div className="legend-item">
+                <span className="legend-color-box purple-dashed" />
+                <span>Demonstration Drill Buffer (Simulated)</span>
+              </div>
+            )}
+          </div>
+          <div className="legend-provenance-note">
+            Authoritative CRISM/HiRISE hydration provenance · NASA NPR 8020.12D
+          </div>
+        </div>
+      )}
+
+      {/* Route Geofence Breach Warning Banner */}
+      {showRoute && activeRoute?.planetary_protection_assessment && !activeRoute.planetary_protection_assessment.human_route_approved && (
+        <div className="map-route-breach-banner glass" role="alert">
+          <span className="breach-icon">🛑</span>
+          <div className="breach-text">
+            <strong>PLANETARY PROTECTION RESTRICTION BREACHED:</strong>
+            <span> Route intersects an official robot-only buffer. Human EVA access is barred. Recommend selecting an alternative route avoiding this buffer.</span>
           </div>
         </div>
       )}

@@ -115,6 +115,29 @@ def test_survivability_shelter_bonus_under_spe():
     assert score_sheltered.recommended_shelter_id == "shelter_western_rim_overhang"
 
 
+def test_survivability_transparent_formula_and_normalization():
+    """Verify that normalized factors are strictly in [0.0, 1.0] and transparent formula is present."""
+    score = compute_marswalk_survivability(
+        distance_km=1.8,
+        max_slope_deg=5.2,
+        average_slope_deg=2.8,
+        roughness_tri=0.22,
+        eva_duration_hours=0.9,
+        turnaround_buffer_min=110.0,
+        is_spe_active=False,
+    )
+
+    assert "Score = 100 ×" in score.formula
+    assert score.weights["slope"] == 0.25
+    assert score.weights["terrain"] == 0.25
+    assert score.weights["time"] == 0.20
+    assert score.weights["return"] == 0.20
+    assert score.weights["distance"] == 0.10
+
+    for factor_key, factor_val in score.normalized_factors.items():
+        assert 0.0 <= factor_val <= 1.0, f"Factor {factor_key} out of [0, 1] range: {factor_val}"
+
+
 def test_surface_imagery_catalogue():
     """Verify authentic NASA surface imagery records and coordinate matching."""
     assert len(NASA_SURFACE_POV_CATALOGUE) >= 5
