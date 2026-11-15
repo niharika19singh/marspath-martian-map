@@ -290,9 +290,7 @@ def test_regression_5_genuinely_verified_upstream_source_recognised_when_bytes_m
         actual_src_md5 = compute_file_md5(source_path)
 
         # Register the source file's actual MD5 in the catalog entry for this test
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID)
         original_md5 = usgs_entry.get("upstream_md5")
         usgs_entry["upstream_md5"] = actual_src_md5
 
@@ -392,14 +390,7 @@ def test_render_startup_reuses_already_provisioned_valid_dem():
 
         # Also verify `backend/scripts/start_render.sh` shell execution with MARSPATH_SKIP_UVICORN=true on genuine DEM
         repo_root = Path(__file__).resolve().parents[3]
-        genuine_dem = (
-            repo_root
-            / "backend"
-            / "app"
-            / "data"
-            / "rasters"
-            / "jezero_mola_hrsc_blended.tif"
-        )
+        genuine_dem = repo_root / "backend" / "app" / "data" / "rasters" / "jezero_mola_hrsc_blended.tif"
         if not genuine_dem.exists() or not Path(f"{genuine_dem}.provenance.json").exists():
             provision_runtime_dem(
                 dem_path=genuine_dem,
@@ -509,12 +500,10 @@ def test_render_startup_provisions_missing_dem():
                 text=True,
                 check=False,
             )
-            assert (
-                proc.returncode != 0
-            ), "start_render.sh must fail closed when runtime DEM artifact is missing"
-            assert not os.path.exists(
-                out_path_2
-            ), "start_render.sh must never download or create missing files at runtime"
+            assert proc.returncode != 0, "start_render.sh must fail closed when runtime DEM artifact is missing"
+            assert not os.path.exists(out_path_2), (
+                "start_render.sh must never download or create missing files at runtime"
+            )
         finally:
             if os.path.exists(source_path):
                 os.remove(source_path)
@@ -622,4 +611,3 @@ def test_render_startup_fallback_and_strict_failure_reflected_in_health_and_data
             assert len(st["blocking_errors"]) >= 1
         finally:
             get_settings.cache_clear()
-

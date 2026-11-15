@@ -554,9 +554,7 @@ def test_15_retention_fraction_computed_from_evaluated_scenarios_when_some_fail(
                 dimensions=(16, 16),
                 max_allowed=10,
             )
-        return real_astar(
-            graph, start, goal, max_expansions=max_expansions, penalized_edges=penalized_edges
-        )
+        return real_astar(graph, start, goal, max_expansions=max_expansions, penalized_edges=penalized_edges)
 
     monkeypatch.setattr("backend.app.services.robustness_service.astar_search", _flaky_astar)
 
@@ -1367,5 +1365,3 @@ def test_high_scenario_count_support_up_to_200():
     b = assessment.baseline_route_assessments[0]
     assert b.reliability_classification in ["HIGH", "MEDIUM", "LOW"]
     assert b.reliability_score is not None
-
-

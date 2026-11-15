@@ -31,20 +31,14 @@ def dijkstra_search(
     """
     start_time = time.perf_counter()
     effective_deadline = (
-        deadline
-        if deadline is not None
-        else (start_time + timeout_seconds if timeout_seconds is not None else None)
+        deadline if deadline is not None else (start_time + timeout_seconds if timeout_seconds is not None else None)
     )
     base_start_time = overall_start_time if overall_start_time is not None else start_time
 
     if effective_deadline is not None and time.perf_counter() > effective_deadline:
         now = time.perf_counter()
         elapsed = now - base_start_time
-        limit_sec = (
-            timeout_seconds
-            if timeout_seconds is not None
-            else (effective_deadline - base_start_time)
-        )
+        limit_sec = timeout_seconds if timeout_seconds is not None else (effective_deadline - base_start_time)
         raise RoutingTimeoutError(
             f"Dijkstra search exceeded routing timeout of {limit_sec:.2f}s (elapsed: {elapsed:.2f}s).",
             timeout_seconds=limit_sec,
@@ -77,17 +71,11 @@ def dijkstra_search(
                 max_allowed=max_expansions,
             )
 
-        if effective_deadline is not None and (
-            nodes_expanded % DIJKSTRA_TIMEOUT_CHECK_INTERVAL_NODES == 0
-        ):
+        if effective_deadline is not None and (nodes_expanded % DIJKSTRA_TIMEOUT_CHECK_INTERVAL_NODES == 0):
             now = time.perf_counter()
             if now > effective_deadline:
                 elapsed = now - base_start_time
-                limit_sec = (
-                    timeout_seconds
-                    if timeout_seconds is not None
-                    else (effective_deadline - base_start_time)
-                )
+                limit_sec = timeout_seconds if timeout_seconds is not None else (effective_deadline - base_start_time)
                 raise RoutingTimeoutError(
                     f"Dijkstra search exceeded routing timeout of {limit_sec:.2f}s (elapsed: {elapsed:.2f}s).",
                     timeout_seconds=limit_sec,
@@ -106,9 +94,7 @@ def dijkstra_search(
 
         curr_r, curr_c = current
 
-        for neighbor, edge_cost, _, _, _, _ in graph.get_valid_neighbors(
-            curr_r, curr_c, penalized_edges
-        ):
+        for neighbor, edge_cost, _, _, _, _ in graph.get_valid_neighbors(curr_r, curr_c, penalized_edges):
             if neighbor in visited:
                 continue
 

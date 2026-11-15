@@ -26,17 +26,31 @@ from backend.app.intelligence.risk_propagation.propagation_engine import (
 
 class ScenarioModifiers(BaseModel):
     """Environmental, rover subsystem, and operational constraint adjustments."""
-    tau_atmospheric_increase: float = Field(0.0, ge=0.0, le=5.0, description="Additional optical depth tau from dust storm")
+
+    tau_atmospheric_increase: float = Field(
+        0.0, ge=0.0, le=5.0, description="Additional optical depth tau from dust storm"
+    )
     power_budget_factor: float = Field(1.0, ge=0.2, le=1.0, description="Solar/RTG available energy fraction")
     max_slope_ceiling_deg: float = Field(14.0, ge=5.0, le=30.0, description="Rover maximum traversing slope limit")
     max_roughness_limit: float = Field(0.85, ge=0.1, le=1.0, description="Rover rock/roughness tolerance")
-    thermal_sinkage_penalty_mult: float = Field(1.0, ge=1.0, le=5.0, description="Weighting penalty for low thermal inertia soft regolith")
-    wheel_degradation_factor: float = Field(1.0, ge=0.3, le=1.0, description="Drive efficiency multiplier (lower = degraded motor/wheel)")
-    comm_window_constrained: bool = Field(False, description="Enforce strict line-of-sight orbiter communication window")
+    thermal_sinkage_penalty_mult: float = Field(
+        1.0, ge=1.0, le=5.0, description="Weighting penalty for low thermal inertia soft regolith"
+    )
+    wheel_degradation_factor: float = Field(
+        1.0, ge=0.3, le=1.0, description="Drive efficiency multiplier (lower = degraded motor/wheel)"
+    )
+    comm_window_constrained: bool = Field(
+        False, description="Enforce strict line-of-sight orbiter communication window"
+    )
+    spe_radiation_active: bool = Field(False, description="Simulate acute Solar Particle Event (SPE) solar proton flux")
+    require_topographic_shelter: bool = Field(
+        False, description="Require corridor within reach of designated topographic shelter"
+    )
 
 
 class MissionScenario(BaseModel):
     """Configuration record for a what-if mission scenario."""
+
     scenario_id: str
     name: str
     description: str
@@ -48,6 +62,7 @@ class MissionScenario(BaseModel):
 
 class ScenarioCreateRequest(BaseModel):
     """Request payload to create a new what-if scenario."""
+
     name: str
     description: str = ""
     baseline_route_id: str = "primary"
@@ -57,6 +72,7 @@ class ScenarioCreateRequest(BaseModel):
 
 class ScenarioAnalysisResult(BaseModel):
     """Outcome of risk propagation under specific scenario conditions."""
+
     scenario_id: str
     scenario_name: str
     evaluated_at_utc: str
@@ -78,6 +94,7 @@ class ScenarioAnalysisResult(BaseModel):
 
 class ScenarioComparisonReport(BaseModel):
     """Side-by-side comparison of a what-if scenario versus nominal baseline."""
+
     scenario_id: str
     scenario_name: str
     baseline_route_id: str
@@ -158,6 +175,20 @@ class ScenarioManager:
                 ),
                 tags=["telecom", "relay", "science_priority"],
             ),
+            MissionScenario(
+                scenario_id="scenario-spe-radiation-storm",
+                name="Solar Particle Event (SPE) Class X2.5 Flare",
+                description="Simulates acute coronal mass ejection (CME) solar proton flux (~48.5 mSv/h) requiring immediate topographic shelter diversion or habitat abort.",
+                created_at_utc=datetime.now(UTC).isoformat(),
+                baseline_route_id="primary",
+                modifiers=ScenarioModifiers(
+                    max_slope_ceiling_deg=11.0,
+                    spe_radiation_active=True,
+                    require_topographic_shelter=True,
+                    power_budget_factor=0.75,
+                ),
+                tags=["radiation", "solar_particle_event", "astronaut_survival", "contingency"],
+            ),
         ]
         for s in defaults:
             self._scenarios[s.scenario_id] = s
@@ -224,11 +255,17 @@ class ScenarioManager:
         # Actionable recommendations
         recs: list[str] = []
         if mods.tau_atmospheric_increase > 1.0:
-            recs.append("Restrict single-sol drive distance to <60 m due to low contrast auto-navigation hazard camera range.")
+            recs.append(
+                "Restrict single-sol drive distance to <60 m due to low contrast auto-navigation hazard camera range."
+            )
         if mods.power_budget_factor < 0.7:
-            recs.append("Park rover in northern slope attitude during overnight sleep to optimize solar array angle at dawn.")
+            recs.append(
+                "Park rover in northern slope attitude during overnight sleep to optimize solar array angle at dawn."
+            )
         if impassable_count > 0:
-            recs.append(f"Route contains {impassable_count} segments exceeding {mods.max_slope_ceiling_deg}° slope ceiling; plan detour via crater delta bench.")
+            recs.append(
+                f"Route contains {impassable_count} segments exceeding {mods.max_slope_ceiling_deg}° slope ceiling; plan detour via crater delta bench."
+            )
         if mods.comm_window_constrained:
             recs.append("Traverse must halt 45 minutes prior to MRO UHF overflight pass for mast pointing calibration.")
         if not recs:
@@ -270,7 +307,9 @@ class ScenarioManager:
             max_roughness_limit=0.85,
         )
         baseline_dist = sum(s.distance_m for s in baseline_risk.segment_evaluations)
-        baseline_constrained = sum(1 for s in baseline_risk.segment_evaluations if s.operational_status == "CONSTRAINED")
+        baseline_constrained = sum(
+            1 for s in baseline_risk.segment_evaluations if s.operational_status == "CONSTRAINED"
+        )
         baseline_impassable = sum(1 for s in baseline_risk.segment_evaluations if s.operational_status == "IMPASSABLE")
 
         # Scenario evaluation

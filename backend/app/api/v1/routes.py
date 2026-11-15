@@ -3,6 +3,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 
 from backend.app.core.exceptions import MarsPathError
+from backend.app.data.surface_imagery import (
+    NASA_SURFACE_POV_CATALOGUE,
+    find_surface_imagery_for_coordinates,
+)
 from backend.app.schemas.routes import RoutePlanRequest, RoutePlanResponse
 from backend.app.services.pdf_export_service import generate_mission_pdf
 from backend.app.services.planning_intelligence import (
@@ -34,9 +38,7 @@ def list_science_targets():
     }
 
 
-@router.post(
-    "/plan", response_model=RoutePlanResponse, summary="Optimize traversable Martian route corridor"
-)
+@router.post("/plan", response_model=RoutePlanResponse, summary="Optimize traversable Martian route corridor")
 def plan_route(request: RoutePlanRequest):
     """
     Computes an optimal, explainable traversable route between start and destination coordinates
@@ -84,3 +86,33 @@ def export_mission_plan_pdf(payload: dict[str, Any]):
             status_code=500,
             detail={"error": f"Failed to generate mission PDF: {str(exc)}"},
         ) from exc
+
+
+@router.get("/surface-imagery", summary="List authentic NASA Perseverance surface POV imagery")
+def list_surface_imagery(lat: float | None = None, lon: float | None = None, max_distance_m: float = 3000.0):
+    """Returns authentic NASA Perseverance Mastcam-Z and Navcam surface imagery across Jezero Crater."""
+    if lat is not None and lon is not None:
+        nearby = find_surface_imagery_for_coordinates(lat=lat, lon=lon, max_distance_m=max_distance_m)
+        return {
+            "status": "ok",
+            "count": len(nearby),
+            "imagery": [img.model_dump() for img in nearby],
+            "query": {"lat": lat, "lon": lon, "max_distance_m": max_distance_m},
+        }
+    return {
+        "status": "ok",
+        "count": len(NASA_SURFACE_POV_CATALOGUE),
+        "imagery": [img.model_dump() for img in NASA_SURFACE_POV_CATALOGUE],
+    }
+
+
+@router.get("/surface-imagery/{landmark_id}", summary="Get authentic NASA surface POV image by landmark ID")
+def get_surface_imagery_by_id(landmark_id: str):
+    """Returns authentic NASA surface imagery for a specific Jezero landmark."""
+    match = next((img for img in NASA_SURFACE_POV_CATALOGUE if img.landmark_id == landmark_id), None)
+    if not match:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No authentic NASA surface imagery found for landmark '{landmark_id}'",
+        )
+    return {"status": "ok", "image": match.model_dump()}

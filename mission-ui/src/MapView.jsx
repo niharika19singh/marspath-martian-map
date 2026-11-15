@@ -95,7 +95,7 @@ export default function MapView(props) {
     onSelectObservation, onSelectSpacecraft, curiosityTraverse = null, curiosityWaypoints = [], focusedProduct = null,
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
-    showReachableZone = true, showRescueMap = false,
+    showReachableZone = true, showRescueMap = false, onOpenSurfacePov,
   } = props;
 
   const effectiveTerrain = activeDemTerrain || terrain;
@@ -1512,6 +1512,27 @@ export default function MapView(props) {
             >
               Set Destination
             </button>
+            {onOpenSurfacePov && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenSurfacePov({ lat: inspectPopup.lat, lon: inspectPopup.lon });
+                  setInspectPopup(null);
+                }}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.18)',
+                  border: '1px solid #38bdf866',
+                  borderRadius: '8px',
+                  padding: '6px 8px',
+                  color: '#38bdf8',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                📷 Surface POV
+              </button>
+            )}
             <button
               onClick={() => setInspectPopup(null)}
               style={{

@@ -39,13 +39,9 @@ from backend.app.data.providers.mola_hrsc import MOLAHRSCRasterProvider
 from backend.app.main import app
 
 
-def _write_sample_geotiff(
-    path: str, height: int = 90, width: int = 120, offset: float = -2565.0
-) -> tuple[str, str]:
+def _write_sample_geotiff(path: str, height: int = 90, width: int = 120, offset: float = -2565.0) -> tuple[str, str]:
     """Writes a valid numerical Mars 2000 GeoTIFF over Jezero Crater and returns (file_sha256, array_sha256)."""
-    y_idx, x_idx = np.meshgrid(
-        np.linspace(0.0, 1.0, height), np.linspace(0.0, 1.0, width), indexing="ij"
-    )
+    y_idx, x_idx = np.meshgrid(np.linspace(0.0, 1.0, height), np.linspace(0.0, 1.0, width), indexing="ij")
     elev = (offset + 35.0 * x_idx + 20.0 * y_idx).astype(np.int16)
     transform = from_origin(77.0, 18.80, 0.01, 0.008)
     crs_str = "+proj=longlat +R=3396190 +no_defs"
@@ -78,9 +74,7 @@ def _create_official_unverified_checksum_dem_fixture(tmp_dir: str, monkeypatch) 
     dem_path = os.path.join(tmp_dir, "jezero_mola_hrsc_blended.tif")
     digest, arr_sha = _write_sample_geotiff(dem_path, height=90, width=120, offset=-2565.0)
 
-    usgs_entry = next(
-        p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-    )
+    usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID)
     monkeypatch.setitem(usgs_entry, "jezero_window_array_sha256", arr_sha)
 
     provenance_record = {
@@ -118,9 +112,7 @@ def _create_verified_source_dem_fixture(tmp_dir: str, monkeypatch) -> str:
     dem_path = os.path.join(tmp_dir, "jezero_verified_source.tif")
     digest, _ = _write_sample_geotiff(dem_path, height=91, width=121, offset=-2560.0)
 
-    usgs_entry = next(
-        p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-    )
+    usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID)
     monkeypatch.setitem(usgs_entry, "sha256", digest)
 
     provenance_record = {
@@ -380,7 +372,9 @@ def test_case_5_non_synthetic_raster_unverified_source_returns_503_degraded(monk
             assert body["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
             assert body["local_integrity_verified"] is True
             assert len(body["blocking_errors"]) >= 1
-            assert any("provenance" in err.lower() or "validation status" in err.lower() for err in body["blocking_errors"])
+            assert any(
+                "provenance" in err.lower() or "validation status" in err.lower() for err in body["blocking_errors"]
+            )
 
             status_resp = client.get("/api/v1/data/status")
             assert status_resp.status_code == 200
@@ -521,9 +515,7 @@ def test_case_8_local_synthetic_development_mode_returns_200_healthy(monkeypatch
 # ==============================================================================
 def test_case_9_data_status_mirrors_readiness_classification_for_all_cases(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == USGS_MOLA_HRSC_PRODUCT_ID)
 
         # State A: Acceptable official extract -> healthy
         dem_a = _create_official_unverified_checksum_dem_fixture(tmp_dir, monkeypatch)
@@ -616,8 +608,8 @@ def test_startup_fail_closed_behavior_both_fallback_values(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     render_yaml_path = repo_root / "render.yaml"
     render_yaml_text = render_yaml_path.read_text(encoding="utf-8")
-    assert "key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: \"false\"" in render_yaml_text
-    assert "key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: \"true\"" not in render_yaml_text
+    assert 'key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: "false"' in render_yaml_text
+    assert 'key: MARSPATH_ALLOW_SYNTHETIC_FALLBACK\n        value: "true"' not in render_yaml_text
 
     script_path = repo_root / "backend" / "scripts" / "start_render.sh"
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -669,7 +661,9 @@ def test_startup_fail_closed_behavior_both_fallback_values(monkeypatch):
                 check=False,
             )
             assert proc.returncode != 0
-            assert not os.path.exists(uvicorn_marker), "Uvicorn must NOT launch when provisioning fails with fallback disabled"
+            assert not os.path.exists(uvicorn_marker), (
+                "Uvicorn must NOT launch when provisioning fails with fallback disabled"
+            )
 
         # 2. Fallback explicitly enabled ("true"): provisioning continues, reaches Uvicorn execution, and /health returns 503/degraded
         env_fallback = base_env.copy()

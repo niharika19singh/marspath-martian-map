@@ -70,31 +70,31 @@ class MedaObservationRecord:
 # Periodic at Ls = 0° == 360° for circular interpolation.
 _SEASONAL_ANCHORS: tuple[tuple[float, float, float, float, float, float], ...] = (
     # Ls,   T_mean_K, T_amp_K, P_ref_Pa, tau_880, wind_mean_ms
-    (0.0,   216.5,    29.0,    768.0,    0.42,    6.2),
-    (45.0,  214.0,    28.0,    742.0,    0.36,    5.8),
-    (90.0,  212.0,    27.5,    695.0,    0.32,    5.4),
-    (135.0, 215.5,    28.5,    652.0,    0.38,    6.0),
-    (180.0, 221.0,    30.5,    698.0,    0.58,    7.4),
-    (225.0, 226.5,    31.5,    775.0,    0.88,    8.9),
-    (270.0, 228.0,    31.0,    818.0,    0.95,    9.2),
-    (315.0, 222.0,    30.0,    796.0,    0.64,    7.5),
-    (360.0, 216.5,    29.0,    768.0,    0.42,    6.2),
+    (0.0, 216.5, 29.0, 768.0, 0.42, 6.2),
+    (45.0, 214.0, 28.0, 742.0, 0.36, 5.8),
+    (90.0, 212.0, 27.5, 695.0, 0.32, 5.4),
+    (135.0, 215.5, 28.5, 652.0, 0.38, 6.0),
+    (180.0, 221.0, 30.5, 698.0, 0.58, 7.4),
+    (225.0, 226.5, 31.5, 775.0, 0.88, 8.9),
+    (270.0, 228.0, 31.0, 818.0, 0.95, 9.2),
+    (315.0, 222.0, 30.0, 796.0, 0.64, 7.5),
+    (360.0, 216.5, 29.0, 768.0, 0.42, 6.2),
 )
 
 # Diurnal shape anchors at LTST hours [0..24] (normalized offset in [-1, +1] for air & ground temp)
 # Periodic at LTST = 0.0 == 24.0 for circular interpolation.
 _DIURNAL_ANCHORS: tuple[tuple[float, float, float, float, float], ...] = (
     # LTST, air_norm, ground_norm, wind_mult, p_tide_pa
-    (0.0,   -0.78,    -0.88,       0.62,      +2.5),
-    (3.0,   -0.92,    -0.96,       0.55,      -1.5),
-    (5.5,   -1.00,    -1.00,       0.52,      -3.0),
-    (8.0,   -0.25,    +0.10,       0.95,      +6.5),
-    (11.0,  +0.68,    +0.92,       1.35,      +9.0),
-    (13.0,  +0.96,    +1.00,       1.48,      +3.0),
-    (14.5,  +1.00,    +0.86,       1.52,      -4.5),
-    (17.0,  +0.48,    +0.18,       1.22,      -9.5),
-    (20.0,  -0.38,    -0.58,       0.78,      -2.0),
-    (24.0,  -0.78,    -0.88,       0.62,      +2.5),
+    (0.0, -0.78, -0.88, 0.62, +2.5),
+    (3.0, -0.92, -0.96, 0.55, -1.5),
+    (5.5, -1.00, -1.00, 0.52, -3.0),
+    (8.0, -0.25, +0.10, 0.95, +6.5),
+    (11.0, +0.68, +0.92, 1.35, +9.0),
+    (13.0, +0.96, +1.00, 1.48, +3.0),
+    (14.5, +1.00, +0.86, 1.52, -4.5),
+    (17.0, +0.48, +0.18, 1.22, -9.5),
+    (20.0, -0.38, -0.58, 0.78, -2.0),
+    (24.0, -0.78, -0.88, 0.62, +2.5),
 )
 
 # Released NASA PDS Atmospheres Mars 2020 MEDA benchmark records in Jezero Crater
@@ -347,12 +347,8 @@ def evaluate_modelled_climatology(
 
     Explicitly marks all outputs with `kind="modelled_climatology"`.
     """
-    t_mean_k, t_amp_k, p_ref_pa, tau_880, wind_mean_ms = _interp_periodic_table(
-        ls_deg, 360.0, _SEASONAL_ANCHORS
-    )
-    air_norm, ground_norm, wind_mult, p_tide_pa = _interp_periodic_table(
-        ltst_hours, 24.0, _DIURNAL_ANCHORS
-    )
+    t_mean_k, t_amp_k, p_ref_pa, tau_880, wind_mean_ms = _interp_periodic_table(ls_deg, 360.0, _SEASONAL_ANCHORS)
+    air_norm, ground_norm, wind_mult, p_tide_pa = _interp_periodic_table(ltst_hours, 24.0, _DIURNAL_ANCHORS)
 
     # Latitudinal adjustment relative to Jezero (18.44°N)
     lat_diff = latitude_deg - 18.4447
@@ -377,8 +373,7 @@ def evaluate_modelled_climatology(
     wind_dir_deg = (205.0 - 85.0 * math.sin(ltst_rad - math.radians(45.0))) % 360.0
 
     source_label = (
-        "Jezero Parametric Seasonal-Diurnal Climatology "
-        "(calibrated to MCD v6.1 & Mars 2020 MEDA Year-1 baseline)"
+        "Jezero Parametric Seasonal-Diurnal Climatology (calibrated to MCD v6.1 & Mars 2020 MEDA Year-1 baseline)"
     )
 
     return {
@@ -406,7 +401,9 @@ def find_comparable_meda_observation(
     requested_sol: int | None = None,
 ) -> dict[str, Any]:
     """Find the closest released MEDA record and evaluate whether a direct comparison is valid."""
-    target_coord = MarsCoordinate(lon=longitude_east_deg % 360.0 if longitude_east_deg < -180 else longitude_east_deg, lat=latitude_deg)
+    target_coord = MarsCoordinate(
+        lon=longitude_east_deg % 360.0 if longitude_east_deg < -180 else longitude_east_deg, lat=latitude_deg
+    )
 
     best_rec: MedaObservationRecord = RELEASED_MEDA_RECORDS[0]
     best_score = float("inf")

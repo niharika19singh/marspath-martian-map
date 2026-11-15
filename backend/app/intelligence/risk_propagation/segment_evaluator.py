@@ -19,9 +19,10 @@ from backend.app.intelligence.fusion.spatial_temporal_index import (
 
 class SegmentRiskEvaluation(BaseModel):
     """Scientific evaluation of hazards, environmental state, and evidence for a route segment."""
+
     segment_index: int
     start_coord: list[float]  # [lon, lat]
-    end_coord: list[float]    # [lon, lat]
+    end_coord: list[float]  # [lon, lat]
     distance_m: float
     elevation_start_m: float | None = None
     elevation_end_m: float | None = None
@@ -37,7 +38,7 @@ class SegmentRiskEvaluation(BaseModel):
     active_hazards: list[dict[str, Any]] = Field(default_factory=list)
     thermal_inertia_tiu: float | None = None
     mobility_risk_category: str = "LOW_RISK"  # LOW_RISK, MEDIUM_RISK, HIGH_RISK, CRITICAL_RISK
-    operational_status: str = "NOMINAL"        # NOMINAL, CONSTRAINED, IMPASSABLE, UNKNOWN
+    operational_status: str = "NOMINAL"  # NOMINAL, CONSTRAINED, IMPASSABLE, UNKNOWN
     impact_narrative: str = ""
 
 
@@ -78,42 +79,59 @@ class SegmentEvaluator:
                 seg_max_lon = max(p1[0], p2[0]) + 0.002
                 seg_min_lat = min(p1[1], p2[1]) - 0.002
                 seg_max_lat = max(p1[1], p2[1]) + 0.002
-                if not (obs.bbox[2] < seg_min_lon or obs.bbox[0] > seg_max_lon or obs.bbox[3] < seg_min_lat or obs.bbox[1] > seg_max_lat):
+                if not (
+                    obs.bbox[2] < seg_min_lon
+                    or obs.bbox[0] > seg_max_lon
+                    or obs.bbox[3] < seg_min_lat
+                    or obs.bbox[1] > seg_max_lat
+                ):
                     intersecting_obs.append(obs)
 
         # Detect high-res HiRISE DTM coverage
         has_hirise = any("hirise" in o.instrument.lower() for o in intersecting_obs)
-        dem_source = "USGS HiRISE 1 m DTM (DOI: 10.5066/P9REJ9JN)" if has_hirise else "USGS MOLA-HRSC 200 m DEM (DOI: 10.5066/P907276M)"
+        dem_source = (
+            "USGS HiRISE 1 m DTM (DOI: 10.5066/P9REJ9JN)"
+            if has_hirise
+            else "USGS MOLA-HRSC 200 m DEM (DOI: 10.5066/P907276M)"
+        )
         dem_res = 1.0 if has_hirise else 200.0
         coverage_tier = "STRONG" if has_hirise else "MODERATE"
 
         # Check for THEMIS thermal inertia measurements
         themis_obs = next((o for o in intersecting_obs if o.measurement_type == "thermal_inertia"), None)
-        ti_val = themis_obs.measurement_value.get("thermal_inertia_tiu") if (themis_obs and isinstance(themis_obs.measurement_value, dict)) else 240.0
+        ti_val = (
+            themis_obs.measurement_value.get("thermal_inertia_tiu")
+            if (themis_obs and isinstance(themis_obs.measurement_value, dict))
+            else 240.0
+        )
 
         # Identify active hazards
         hazards: list[dict[str, Any]] = []
         if slope_deg > max_slope_ceiling_deg:
-            hazards.append({
-                "hazard_id": f"h_slope_seg_{segment_index}",
-                "hazard_type": "STEEP_SLOPE_EXCEEDANCE",
-                "severity": "CRITICAL" if slope_deg > max_slope_ceiling_deg * 1.3 else "HIGH",
-                "measured_value": round(slope_deg, 1),
-                "threshold": max_slope_ceiling_deg,
-                "units": "deg",
-                "evidence_source": dem_source,
-            })
+            hazards.append(
+                {
+                    "hazard_id": f"h_slope_seg_{segment_index}",
+                    "hazard_type": "STEEP_SLOPE_EXCEEDANCE",
+                    "severity": "CRITICAL" if slope_deg > max_slope_ceiling_deg * 1.3 else "HIGH",
+                    "measured_value": round(slope_deg, 1),
+                    "threshold": max_slope_ceiling_deg,
+                    "units": "deg",
+                    "evidence_source": dem_source,
+                }
+            )
 
         if ti_val is not None and ti_val < 150.0:
-            hazards.append({
-                "hazard_id": f"h_thermal_sinkage_seg_{segment_index}",
-                "hazard_type": "UNCONSOLIDATED_REGOLITH_SINKAGE",
-                "severity": "HIGH",
-                "measured_value": ti_val,
-                "threshold": 150.0,
-                "units": "tiu",
-                "evidence_source": "THEMIS Nighttime Infrared",
-            })
+            hazards.append(
+                {
+                    "hazard_id": f"h_thermal_sinkage_seg_{segment_index}",
+                    "hazard_type": "UNCONSOLIDATED_REGOLITH_SINKAGE",
+                    "severity": "HIGH",
+                    "measured_value": ti_val,
+                    "threshold": 150.0,
+                    "units": "tiu",
+                    "evidence_source": "THEMIS Nighttime Infrared",
+                }
+            )
 
         # Operational status and risk classification
         if any(h["severity"] == "CRITICAL" for h in hazards):

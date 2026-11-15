@@ -843,4 +843,3 @@ def test_pdf_mission_dossier_export_endpoint():
     assert pdf_resp.headers["content-type"] == "application/pdf"
     assert pdf_resp.content.startswith(b"%PDF-")
     assert len(pdf_resp.content) > 1000
-

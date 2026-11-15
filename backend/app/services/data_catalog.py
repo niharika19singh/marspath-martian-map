@@ -15,9 +15,7 @@ from backend.app.schemas.coordinates import BoundingBox
 from backend.app.schemas.layers import LayerCategory, LayerInfo, LayerListResponse
 from backend.app.schemas.routes import DataStatusResponse
 
-DEFAULT_USGS_200M_URL = (
-    "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m"
-)
+DEFAULT_USGS_200M_URL = "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m"
 
 ACCEPTABLE_REAL_VALIDATION_STATUSES: frozenset[str] = frozenset(
     {
@@ -59,18 +57,14 @@ def evaluate_terrain_readiness(
     effective_path = str(dem_path or provenance.get("file_path") or "unknown")
     real_dem_requested = bool(provenance.get("real_dem_requested", default_use_real_dem))
     raw_real_dem_loaded = bool(provenance.get("real_dem_loaded", not is_synthetic))
-    raw_data_mode = str(
-        provenance.get("data_mode") or ("synthetic_test_fixture" if is_synthetic else "real")
-    )
+    raw_data_mode = str(provenance.get("data_mode") or ("synthetic_test_fixture" if is_synthetic else "real"))
     raw_val_status = str(
         provenance.get("real_data_validation_status")
         or ("synthetic_test_fixture" if is_synthetic else "valid_numeric_raster_unverified_source")
     )
     local_integrity_verified = provenance.get("local_integrity_verified")
     source_checksum_verified = bool(provenance.get("source_checksum_verified", False))
-    verification_method = str(
-        provenance.get("provenance_verification_method") or "unverified"
-    )
+    verification_method = str(provenance.get("provenance_verification_method") or "unverified")
     raw_fallback_reason = provenance.get("fallback_reason")
 
     # Case 1: Local synthetic development mode (MARSPATH_USE_REAL_DEM=false)
@@ -86,26 +80,17 @@ def evaluate_terrain_readiness(
             "real_data_validation_status": "synthetic_test_fixture",
             "local_integrity_verified": None,
             "source_checksum_verified": False,
-            "provenance_verification_method": provenance.get(
-                "provenance_verification_method", "none_synthetic"
-            ),
+            "provenance_verification_method": provenance.get("provenance_verification_method", "none_synthetic"),
             "fallback_reason": None,
             "blocking_errors": [],
         }
 
     # Case 2: Real DEM requested, but synthetic fallback is active
     if is_synthetic or not raw_real_dem_loaded or raw_data_mode == "synthetic_fallback":
-        val_status = (
-            "incomplete_missing_genuine_dem"
-            if raw_val_status == "synthetic_test_fixture"
-            else raw_val_status
-        )
+        val_status = "incomplete_missing_genuine_dem" if raw_val_status == "synthetic_test_fixture" else raw_val_status
         fallback_reason = str(
             raw_fallback_reason
-            or (
-                f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found "
-                f"or invalid at: {effective_path}"
-            )
+            or (f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found or invalid at: {effective_path}")
         )
         return {
             "status": "degraded",
@@ -236,10 +221,7 @@ class DataCatalogService:
 
         if val_status == "verified_source":
             # Case B: Independently verified full-source checksum
-            dataset_name = str(
-                provenance.get("dataset_name")
-                or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2"
-            )
+            dataset_name = str(provenance.get("dataset_name") or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2")
             source_url = provenance.get("official_source_url") or DEFAULT_USGS_200M_URL
             product_id = provenance.get("official_product_id")
             return {
@@ -256,10 +238,7 @@ class DataCatalogService:
 
         if val_status == "official_endpoint_retrieved_checksum_unverified":
             # Case A: Retrieved from official USGS endpoint via HTTP Range extract
-            dataset_name = str(
-                provenance.get("dataset_name")
-                or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2"
-            )
+            dataset_name = str(provenance.get("dataset_name") or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2")
             source_url = provenance.get("official_source_url") or DEFAULT_USGS_200M_URL
             product_id = provenance.get("official_product_id")
             return {
@@ -418,9 +397,7 @@ class DataCatalogService:
                 description="Regional orthorectified MRO Context Camera (CTX) mosaic covering Jezero Crater at 6.0 m/px (DOI: 10.5066/P9GV1ND3).",
                 units="radiance grayscale + alpha",
                 resolution_meters=6.0,
-                bounds=BoundingBox(
-                    min_lon=77.1604655, min_lat=18.2110274, max_lon=77.6991776, max_lat=18.7211945
-                ),
+                bounds=BoundingBox(min_lon=77.1604655, min_lat=18.2110274, max_lon=77.6991776, max_lat=18.7211945),
                 crs=crs_info,
                 source_name="USGS Astrogeology / NASA Mars Trek (DOI: 10.5066/P9GV1ND3)",
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0",
@@ -442,9 +419,7 @@ class DataCatalogService:
                 description="High-resolution orthorectified MRO HiRISE mosaic covering the Jezero Crater landing ellipse and Western Delta at 0.25 m/px (DOI: 10.5066/P9QJDP48).",
                 units="radiance grayscale + alpha",
                 resolution_meters=0.25,
-                bounds=BoundingBox(
-                    min_lon=77.2229331, min_lat=18.3067994, max_lon=77.583964, max_lat=18.669315
-                ),
+                bounds=BoundingBox(min_lon=77.2229331, min_lat=18.3067994, max_lon=77.583964, max_lat=18.669315),
                 crs=crs_info,
                 source_name="USGS Astrogeology / NASA Mars Trek (DOI: 10.5066/P9QJDP48)",
                 source_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first",
@@ -522,9 +497,7 @@ class DataCatalogService:
         readiness = evaluate_terrain_readiness(
             is_synthetic=is_syn,
             provenance=provenance,
-            default_use_real_dem=bool(
-                getattr(self.provider, "use_real_dem", self.settings.USE_REAL_DEM)
-            ),
+            default_use_real_dem=bool(getattr(self.provider, "use_real_dem", self.settings.USE_REAL_DEM)),
             dem_path=getattr(self.provider, "dem_path", None),
         )
         overall_status = readiness["status"]
@@ -538,11 +511,7 @@ class DataCatalogService:
         blocking_errors: list[str] = list(readiness["blocking_errors"])
 
         hi_val = self.hirise_provider.validate_hirise_raster()
-        hi_prov = (
-            self.hirise_provider.get_provenance()
-            if (self.hirise_provider.enabled or hi_val.is_valid)
-            else None
-        )
+        hi_prov = self.hirise_provider.get_provenance() if (self.hirise_provider.enabled or hi_val.is_valid) else None
 
         limitations: list[str] = [
             f"Active DEM grid resolution ({res_meters} m/px) supports regional corridor terrain assessment rather than metre-scale obstacle detection or flight-grade rover navigation.",
@@ -552,9 +521,7 @@ class DataCatalogService:
 
         if effective_is_syn or (real_dem_requested and not real_dem_loaded):
             if active_mode == "synthetic_fallback" or real_dem_requested:
-                limitations.append(
-                    f"Fallback to Synthetic Jezero Crater Terrain Model occurred: {fallback_reason}."
-                )
+                limitations.append(f"Fallback to Synthetic Jezero Crater Terrain Model occurred: {fallback_reason}.")
             else:
                 limitations.append(
                     "Operating in development mode with Synthetic Jezero Crater Terrain Model. Real NASA/USGS DEM is not loaded."
@@ -598,11 +565,7 @@ class DataCatalogService:
             active_pilot_region="Jezero Crater, Mars",
             pilot_bounds=bounds,
             crs=crs_info,
-            loaded_dem=(
-                self.provider.dem_path
-                if not effective_is_syn
-                else "Synthetic Jezero Crater Terrain Model"
-            ),
+            loaded_dem=(self.provider.dem_path if not effective_is_syn else "Synthetic Jezero Crater Terrain Model"),
             active_dem_dataset_name=provenance.get("dataset_name"),
             active_dem_product_id=provenance.get("official_product_id"),
             active_dem_source_url=provenance.get("official_source_url"),

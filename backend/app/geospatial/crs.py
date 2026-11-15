@@ -70,10 +70,7 @@ def get_mars_metric_analysis_crs_info() -> CRSInfo:
 def validate_crs(crs_identifier: str) -> None:
     """Validates that the requested CRS is a recognized Mars planetary CRS."""
     norm = crs_identifier.strip().upper()
-    if (
-        norm not in SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS
-        and norm not in SUPPORTED_PROJECTED_CRS_IDENTIFIERS
-    ):
+    if norm not in SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS and norm not in SUPPORTED_PROJECTED_CRS_IDENTIFIERS:
         raise UnsupportedCRSError(
             crs_identifier,
             list(SUPPORTED_GEOGRAPHIC_CRS_IDENTIFIERS.union(SUPPORTED_PROJECTED_CRS_IDENTIFIERS)),

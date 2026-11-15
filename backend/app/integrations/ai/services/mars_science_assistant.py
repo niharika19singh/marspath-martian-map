@@ -200,9 +200,7 @@ class MarsScienceAssistantService:
             geological_focus=request.geological_focus,
         )
 
-    async def generate_mission_risk_briefing(
-        self, request: MissionRiskBriefingRequest
-    ) -> MissionRiskBriefingResponse:
+    async def generate_mission_risk_briefing(self, request: MissionRiskBriefingRequest) -> MissionRiskBriefingResponse:
         """Synthesizes risk, stress testing, and return feasibility into an executive risk briefing."""
         provider = self.get_provider(request.provider)
         return await provider.generate_mission_risk_briefing(

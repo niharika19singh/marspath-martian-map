@@ -115,8 +115,18 @@ class PlanetaryNotebookConnector(BaseDataSourceConnector):
             "node": "Planetary Analyst's Notebook",
             "host": "Washington University in St. Louis",
             "supported_missions": [
-                {"mission": "Mars 2020", "rover": "Perseverance", "landing_site": "Jezero Crater", "url": NOTEBOOK_M20_URL},
-                {"mission": "Mars Science Laboratory", "rover": "Curiosity", "landing_site": "Gale Crater", "url": NOTEBOOK_MSL_URL},
+                {
+                    "mission": "Mars 2020",
+                    "rover": "Perseverance",
+                    "landing_site": "Jezero Crater",
+                    "url": NOTEBOOK_M20_URL,
+                },
+                {
+                    "mission": "Mars Science Laboratory",
+                    "rover": "Curiosity",
+                    "landing_site": "Gale Crater",
+                    "url": NOTEBOOK_MSL_URL,
+                },
             ],
             "capabilities": [
                 "Sol-by-sol traverse and engineering drive table parsing",

@@ -226,9 +226,7 @@ class TerrainSourceSelector:
         hirise_evaluated = hirise_provider is not None
         hirise_enabled = bool(hirise_provider.enabled) if hirise_provider is not None else False
         hirise_status = "not_configured"
-        hirise_rejection_reason: str | None = (
-            "No HiRISE provider configured for this route service instance."
-        )
+        hirise_rejection_reason: str | None = "No HiRISE provider configured for this route service instance."
 
         if hirise_provider is not None:
             val_res = hirise_provider.validate_hirise_raster()
@@ -301,9 +299,7 @@ class TerrainSourceSelector:
         )
         selected_tier = "synthetic_simulation" if is_syn else "regional_blended_dem"
         dataset_name = str(prov.get("dataset_name", "MOLA-HRSC Regional DEM"))
-        eff_res_m = round(
-            max(float(cropped_meta.meters_per_px_x), float(cropped_meta.meters_per_px_y)), 3
-        )
+        eff_res_m = round(max(float(cropped_meta.meters_per_px_x), float(cropped_meta.meters_per_px_y)), 3)
 
         selection_reason = (
             f"Selected regional source '{dataset_name}' ({eff_res_m:.1f} m/px) for the entire route corridor. "
@@ -450,12 +446,7 @@ class TerrainSourceSelector:
 
         for lon_c, lat_c in check_coords:
             col_f, row_f = hirise_raster.geo_to_native_pixel_float(lon_c, lat_c)
-            if (
-                col_f < -0.5
-                or col_f > hi_meta.width + 0.5
-                or row_f < -0.5
-                or row_f > hi_meta.height + 0.5
-            ):
+            if col_f < -0.5 or col_f > hi_meta.width + 0.5 or row_f < -0.5 or row_f > hi_meta.height + 0.5:
                 return (
                     None,
                     "partial_or_no_corridor_coverage",
@@ -565,12 +556,10 @@ class TerrainSourceSelector:
                     ),
                 )
 
-            analysis_elev, analysis_meta, subgrid_max_slope, subgrid_max_rough = (
-                aggregate_corridor_hazard_preserving(
-                    native_elev=native_elev,
-                    native_meta=native_corr_meta,
-                    factor=agg_factor,
-                )
+            analysis_elev, analysis_meta, subgrid_max_slope, subgrid_max_rough = aggregate_corridor_hazard_preserving(
+                native_elev=native_elev,
+                native_meta=native_corr_meta,
+                factor=agg_factor,
             )
             agg_applied = True
             agg_method = AGGREGATION_METHOD_NAME
@@ -622,17 +611,11 @@ class TerrainSourceSelector:
         d_col = max(0, min(d_col, analysis_meta.width - 1))
         d_row = max(0, min(d_row, analysis_meta.height - 1))
 
-        eff_res_m = round(
-            max(float(analysis_meta.meters_per_px_x), float(analysis_meta.meters_per_px_y)), 3
-        )
+        eff_res_m = round(max(float(analysis_meta.meters_per_px_x), float(analysis_meta.meters_per_px_y)), 3)
         nat_res_m = round(native_res_m, 3)
 
         prov = dict(hirise_provider.get_provenance())
-        selected_id = (
-            prov.get("official_product_id")
-            or prov.get("declared_product_id")
-            or "dem_hirise_jezero_delta_1m"
-        )
+        selected_id = prov.get("official_product_id") or prov.get("declared_product_id") or "dem_hirise_jezero_delta_1m"
         dataset_name = str(prov.get("dataset_name", "HiRISE Jezero Western Delta DTM"))
 
         if agg_applied:
@@ -737,9 +720,7 @@ class TerrainSourceSelector:
             dst_w = max(4, int(round((corr_max_lon - corr_min_lon) / deg_lon_px)))
             dst_h = max(4, int(round((corr_max_lat - corr_min_lat) / deg_lat_px)))
 
-            dst_transform = from_bounds(
-                corr_min_lon, corr_min_lat, corr_max_lon, corr_max_lat, dst_w, dst_h
-            )
+            dst_transform = from_bounds(corr_min_lon, corr_min_lat, corr_max_lon, corr_max_lat, dst_w, dst_h)
             src_transform = Affine(*hi_meta.affine_transform)
             src_crs = rasterio.crs.CRS.from_user_input(hi_meta.crs_str)
             dst_crs = rasterio.crs.CRS.from_string("+proj=longlat +R=3396190 +no_defs")
@@ -793,12 +774,7 @@ class TerrainSourceSelector:
                 dst_nodata=-1.0,
                 resampling=Resampling.max,
             )
-            invalid_dst = (
-                (dst_bad_bilin < 0.0)
-                | (dst_bad_bilin > 1e-6)
-                | (dst_bad_max < 0.0)
-                | (dst_bad_max > 1e-6)
-            )
+            invalid_dst = (dst_bad_bilin < 0.0) | (dst_bad_bilin > 1e-6) | (dst_bad_max < 0.0) | (dst_bad_max > 1e-6)
             dst_elev[invalid_dst] = np.nan
 
             actual_d_lon = (corr_max_lon - corr_min_lon) / dst_w

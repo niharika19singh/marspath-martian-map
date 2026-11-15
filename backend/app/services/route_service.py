@@ -43,6 +43,7 @@ from backend.app.routing.return_constraint import (
     compute_backward_time_grid,
     serialize_time_grid_overlay,
 )
+from backend.app.routing.survivability import compute_marswalk_survivability
 from backend.app.schemas.mission import OptimizationMode, RoutingAlgorithm
 from backend.app.schemas.routes import (
     AlgorithmComparisonReport,
@@ -109,16 +110,13 @@ class RouteService:
             "jez_hirise_soc_006_dtm_molatopography_deltageoid_1m_eqc_latts0_lon0_blend40",
             "dem_hirise_jezero_delta_1m",
         ):
-            if os.path.exists(self.settings.DEM_PATH) and getattr(
-                active_regional_provider, "is_synthetic", lambda: False
-            )():
-                active_regional_provider = MOLAHRSCRasterProvider(
-                    dem_path=self.settings.DEM_PATH, use_real_dem=True
-                )
+            if (
+                os.path.exists(self.settings.DEM_PATH)
+                and getattr(active_regional_provider, "is_synthetic", lambda: False)()
+            ):
+                active_regional_provider = MOLAHRSCRasterProvider(dem_path=self.settings.DEM_PATH, use_real_dem=True)
             hi_path = (
-                active_hirise_provider.dem_path
-                if active_hirise_provider is not None
-                else self.settings.HIRISE_DEM_PATH
+                active_hirise_provider.dem_path if active_hirise_provider is not None else self.settings.HIRISE_DEM_PATH
             )
             if active_hirise_provider is None or not active_hirise_provider.enabled:
                 active_hirise_provider = HiRISERasterProvider(dem_path=hi_path, enabled=True)
@@ -129,16 +127,13 @@ class RouteService:
             "mars_hrsc_mola_blenddem_global_200mp_v2",
             "dem_mola_hrsc_blended_200m",
         ):
-            if os.path.exists(self.settings.DEM_PATH) and getattr(
-                active_regional_provider, "is_synthetic", lambda: False
-            )():
-                active_regional_provider = MOLAHRSCRasterProvider(
-                    dem_path=self.settings.DEM_PATH, use_real_dem=True
-                )
+            if (
+                os.path.exists(self.settings.DEM_PATH)
+                and getattr(active_regional_provider, "is_synthetic", lambda: False)()
+            ):
+                active_regional_provider = MOLAHRSCRasterProvider(dem_path=self.settings.DEM_PATH, use_real_dem=True)
             hi_path = (
-                active_hirise_provider.dem_path
-                if active_hirise_provider is not None
-                else self.settings.HIRISE_DEM_PATH
+                active_hirise_provider.dem_path if active_hirise_provider is not None else self.settings.HIRISE_DEM_PATH
             )
             active_hirise_provider = HiRISERasterProvider(dem_path=hi_path, enabled=False)
 
@@ -218,9 +213,7 @@ class RouteService:
 
         # 8. Check start and dest cell traversability
         check_cell_traversability(s_col, s_row, traversable_mask, request.start, "Start location")
-        check_cell_traversability(
-            d_col, d_row, traversable_mask, request.destination, "Destination location"
-        )
+        check_cell_traversability(d_col, d_row, traversable_mask, request.destination, "Destination location")
 
         # Resolve habitat base cell (defaults to start)
         if getattr(request, "habitat", None) is not None:
@@ -235,9 +228,7 @@ class RouteService:
             )
             hab_col = max(0, min(hab_col, cropped_meta.width - 1))
             hab_row = max(0, min(hab_row, cropped_meta.height - 1))
-            check_cell_traversability(
-                hab_col, hab_row, traversable_mask, request.habitat, "Habitat base"
-            )
+            check_cell_traversability(hab_col, hab_row, traversable_mask, request.habitat, "Habitat base")
         else:
             hab_row, hab_col = s_row, s_col
 
@@ -342,9 +333,7 @@ class RouteService:
         algorithm_comparison_report: AlgorithmComparisonReport | None = None
 
         req_algo_raw = getattr(request, "algorithm", None) or RoutingAlgorithm.ASTAR
-        req_algo = str(
-            req_algo_raw.value if hasattr(req_algo_raw, "value") else req_algo_raw
-        ).lower()
+        req_algo = str(req_algo_raw.value if hasattr(req_algo_raw, "value") else req_algo_raw).lower()
         search_fn = dijkstra_search if req_algo == "dijkstra" else astar_search
 
         if req_algo == "compare":
@@ -448,9 +437,7 @@ class RouteService:
                 )
                 w_col = max(0, min(w_col, cropped_meta.width - 1))
                 w_row = max(0, min(w_row, cropped_meta.height - 1))
-                check_cell_traversability(
-                    w_col, w_row, traversable_mask, wp, f"Science Waypoint #{idx + 1}"
-                )
+                check_cell_traversability(w_col, w_row, traversable_mask, wp, f"Science Waypoint #{idx + 1}")
                 waypoint_pixels.append((w_row, w_col))
 
             all_leg_pixels = [(s_row, s_col)] + waypoint_pixels + [(d_row, d_col)]
@@ -599,10 +586,12 @@ class RouteService:
 
                     # Hard constraint: Reject detours exceeding 2.5x direct cost
                     if detour_ratio > 2.5:
-                        rejected_candidates.append({
-                            "poi": poi.name,
-                            "reason": f"Detour ratio {detour_ratio:.2f}x exceeds maximum allowance (2.50x)"
-                        })
+                        rejected_candidates.append(
+                            {
+                                "poi": poi.name,
+                                "reason": f"Detour ratio {detour_ratio:.2f}x exceeds maximum allowance (2.50x)",
+                            }
+                        )
                         continue
 
                     # Multi-criteria scoring: prioritize high scientific priority relative to detour ratio
@@ -915,15 +904,11 @@ class RouteService:
                     )
 
             r_alt.summary.max_return_time_minutes = (
-                round(max(ret_vals_min), 1)
-                if (ret_vals_min and not has_unreach_ret)
-                else None
+                round(max(ret_vals_min), 1) if (ret_vals_min and not has_unreach_ret) else None
             )
             r_alt.summary.exceeds_return_budget = bool(exceeds_ret)
             r_alt.summary.max_rescue_time_minutes = (
-                round(max(res_vals_min), 1)
-                if (res_vals_min and not has_unreach_res)
-                else None
+                round(max(res_vals_min), 1) if (res_vals_min and not has_unreach_res) else None
             )
             r_alt.summary.rescue_flagged_distance_meters = round(rescue_flagged_dist, 1)
             r_alt.summary.provenance = {
@@ -1002,7 +987,12 @@ class RouteService:
                 r_alt.pareto_archetype = p_info["pareto_archetype"]
 
         primary_route = routes[0] if routes else None
-        if primary_route and primary_route.uncertainty_summary and primary_route.science_eva_plan and primary_route.mission_clock:
+        if (
+            primary_route
+            and primary_route.uncertainty_summary
+            and primary_route.science_eva_plan
+            and primary_route.mission_clock
+        ):
             recon_plan = plan_next_best_reconnaissance(
                 uncertainty_summary=primary_route.uncertainty_summary,
                 coordinates=primary_route.geometry.coordinates,
@@ -1061,6 +1051,40 @@ class RouteService:
             rescue_zone_payload["speed_m_s"] = round(rescue_speed_m_s, 3)
             rescue_zone_payload["max_slope_deg"] = round(rescue_max_slope_deg, 1)
             rescue_zone_payload["threshold_minutes"] = round(rescue_threshold_min, 1)
+
+        # 11. Compute Marswalk Survivability Score for each route alternative
+        is_spe = bool(getattr(request, "is_spe_scenario", False))
+        eva_budget = float(getattr(request, "max_eva_hours", 8.0) or 8.0)
+
+        for r in routes:
+            r_dist_km = (r.summary.total_distance_meters or 0.0) / 1000.0
+            r_max_slope = float(r.summary.max_slope_deg or 0.0)
+            r_avg_slope = float(getattr(r.summary, "average_slope_deg", r_max_slope * 0.5) or 0.0)
+            r_tri = float(getattr(r.summary, "roughness_tri", 0.35) or 0.35)
+            r_dur_h = float(r.summary.estimated_duration_hours or 1.0)
+
+            t_buf = 120.0
+            if r.turnaround and isinstance(r.turnaround, dict):
+                t_buf = float(r.turnaround.get("safe_turnaround_buffer_min", 120.0) or 120.0)
+
+            mid_coords = None
+            if r.geometry and hasattr(r.geometry, "coordinates") and r.geometry.coordinates:
+                coords = r.geometry.coordinates
+                mid_idx = len(coords) // 2
+                mid_coords = (float(coords[mid_idx][0]), float(coords[mid_idx][1]))
+
+            r.marswalk_survivability = compute_marswalk_survivability(
+                distance_km=r_dist_km,
+                max_slope_deg=r_max_slope,
+                average_slope_deg=r_avg_slope,
+                roughness_tri=r_tri,
+                eva_duration_hours=r_dur_h,
+                turnaround_buffer_min=t_buf,
+                thermal_inertia_tiu=385.0,
+                is_spe_active=is_spe,
+                corridor_midpoint=mid_coords,
+                eva_budget_hours=eva_budget,
+            )
 
         return RoutePlanResponse(
             mission_id=mission_id,

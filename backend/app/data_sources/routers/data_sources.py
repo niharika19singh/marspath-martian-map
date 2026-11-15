@@ -128,7 +128,9 @@ async def search_data_catalogue(
     instrument: str | None = Query(None, description="Filter by instrument (HiRISE, CTX, CRISM, SHARAD, MEDA, THEMIS)"),
     spacecraft: str | None = Query(None, description="Filter by spacecraft (MRO, Mars 2020, MSL, Odyssey)"),
     source_id: str | None = Query(None, description="Filter by originating NASA source ID"),
-    product_type: str | None = Query(None, description="Filter by product type (IMAGERY_RDR, TERRAIN_DTM, ATMOSPHERIC_TIMESERIES, etc.)"),
+    product_type: str | None = Query(
+        None, description="Filter by product type (IMAGERY_RDR, TERRAIN_DTM, ATMOSPHERIC_TIMESERIES, etc.)"
+    ),
     min_sol: int | None = Query(None, description="Minimum Martian sol"),
     max_sol: int | None = Query(None, description="Maximum Martian sol"),
     min_lon: float | None = Query(None, description="Bounding box min longitude (East)"),

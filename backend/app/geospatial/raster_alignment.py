@@ -44,12 +44,8 @@ def crop_mission_corridor(
     max_lat = min(max(pts_lats) + pad_lat_deg, meta.max_lat)
 
     # Convert to master raster pixel indices
-    c_min, r_min = geo_to_pixel(
-        min_lon, max_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
-    )
-    c_max, r_max = geo_to_pixel(
-        max_lon, min_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
-    )
+    c_min, r_min = geo_to_pixel(min_lon, max_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
+    c_max, r_max = geo_to_pixel(max_lon, min_lat, meta.min_lon, meta.max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
 
     # Clamp indices to valid raster bounds
     c_min = max(0, min(c_min, meta.width - 1))
@@ -110,9 +106,7 @@ def crop_mission_corridor(
     s_col, s_row = geo_to_pixel(
         start.lon, start.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
     )
-    d_col, d_row = geo_to_pixel(
-        dest.lon, dest.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat
-    )
+    d_col, d_row = geo_to_pixel(dest.lon, dest.lat, sub_min_lon, sub_max_lat, meta.deg_per_px_lon, meta.deg_per_px_lat)
 
     # Clamp within subgrid
     s_col = max(0, min(s_col, crop_w - 1))

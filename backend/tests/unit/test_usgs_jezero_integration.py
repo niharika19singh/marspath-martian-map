@@ -40,7 +40,7 @@ def test_usgs_official_dataset_catalog_metadata():
     assert dtm["resolution_meters"] == 1.0
     assert dtm["data_type"] == "elevation"
     assert dtm["vertical_units"] == "meters"
-    assert dtm["nodata_value"] == pytest.approx(-3.4028226550889045e+38, rel=1e-4)
+    assert dtm["nodata_value"] == pytest.approx(-3.4028226550889045e38, rel=1e-4)
     b = dtm["bounds"]
     assert b["min_lon"] == pytest.approx(77.2229331)
     assert b["min_lat"] == pytest.approx(18.3067994)
@@ -97,6 +97,7 @@ def test_hirise_provider_loading_and_provenance(monkeypatch):
     monkeypatch.setenv("MARSPATH_USE_HIRISE_DEM", "true")
 
     from app.core.config import get_settings
+
     get_settings.cache_clear()
     provider = HiRISERasterProvider(enabled=True)
     assert provider.enabled is True
@@ -172,7 +173,9 @@ def test_api_wmts_capabilities_endpoint():
     for lid in layer_ids:
         resp = client.get(f"/api/v1/wmts/capabilities/{lid}")
         assert resp.status_code == 200, f"Failed for {lid}: {resp.status_code}"
-        assert resp.headers["content-type"].startswith("application/xml") or resp.headers["content-type"].startswith("text/xml")
+        assert resp.headers["content-type"].startswith("application/xml") or resp.headers["content-type"].startswith(
+            "text/xml"
+        )
         xml_text = resp.text
         assert "<Capabilities" in xml_text
         assert lid in xml_text

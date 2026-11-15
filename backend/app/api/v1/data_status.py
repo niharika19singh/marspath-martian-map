@@ -6,9 +6,7 @@ from backend.app.services.data_catalog import DataCatalogService
 router = APIRouter(prefix="/api/v1/data", tags=["Data Status"])
 
 
-@router.get(
-    "/status", response_model=DataStatusResponse, summary="Inspect planetary data readiness and CRS"
-)
+@router.get("/status", response_model=DataStatusResponse, summary="Inspect planetary data readiness and CRS")
 def get_data_status():
     """
     Returns the real-time operational status of NASA datasets,

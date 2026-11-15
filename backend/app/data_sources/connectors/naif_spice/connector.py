@@ -65,6 +65,7 @@ class NaifSpiceConnector(BaseDataSourceConnector):
         self._spiceypy_available = False
         try:
             import spiceypy  # noqa: F401
+
             self._spiceypy_available = True
         except ImportError:
             self._spiceypy_available = False
@@ -92,7 +93,14 @@ class NaifSpiceConnector(BaseDataSourceConnector):
             "ephemeris_engine": "Two-body Keplerian with J2 Quadrupole Secular Perturbation & IAU2000 Mars Rotation",
             "official_kernels_indexed": len(OFFICIAL_SPICE_KERNELS),
             "kernels": OFFICIAL_SPICE_KERNELS,
-            "supported_spacecraft": ["MRO", "2001 Mars Odyssey", "MAVEN", "Mars Express", "Trace Gas Orbiter", "Mars 2020"],
+            "supported_spacecraft": [
+                "MRO",
+                "2001 Mars Odyssey",
+                "MAVEN",
+                "Mars Express",
+                "Trace Gas Orbiter",
+                "Mars 2020",
+            ],
             "calculation_capabilities": [
                 "Sub-spacecraft aerocentric longitude and latitude",
                 "Orbiter altitude above IAU triaxial reference areoid",

@@ -115,19 +115,13 @@ def compute_roughness_index(
     # Number of valid cells in local window
     window_cells = float(kernel_size * kernel_size)
     valid_count = (
-        ndimage.uniform_filter(
-            valid_mask.astype(np.float64), size=kernel_size, mode="constant", cval=0.0
-        )
+        ndimage.uniform_filter(valid_mask.astype(np.float64), size=kernel_size, mode="constant", cval=0.0)
         * window_cells
     )
 
     # Sum of elevation and sum of squared elevation in window
-    elev_sum = (
-        ndimage.uniform_filter(elev, size=kernel_size, mode="constant", cval=0.0) * window_cells
-    )
-    elev_sq_sum = (
-        ndimage.uniform_filter(elev**2, size=kernel_size, mode="constant", cval=0.0) * window_cells
-    )
+    elev_sum = ndimage.uniform_filter(elev, size=kernel_size, mode="constant", cval=0.0) * window_cells
+    elev_sq_sum = ndimage.uniform_filter(elev**2, size=kernel_size, mode="constant", cval=0.0) * window_cells
 
     # Safe division avoiding division by zero
     safe_valid = valid_count >= 3.0  # Require at least 3 valid samples in window
@@ -173,9 +167,7 @@ def build_traversability_mask(
     valid_slope = ~np.isnan(slope_deg)
     valid_rough = ~np.isnan(roughness)
 
-    traversable = (
-        (slope_deg <= max_slope_deg) & (roughness <= max_roughness) & valid_slope & valid_rough
-    )
+    traversable = (slope_deg <= max_slope_deg) & (roughness <= max_roughness) & valid_slope & valid_rough
 
     if nodata_mask is not None:
         # Nodata cells are always impassable

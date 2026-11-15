@@ -108,9 +108,7 @@ def evaluate_route_mission_clock(
             avail_mars_h = m24_start.sunset_ltst_hours - m24_start.ltst_hours
             avail_daylight_earth_h = max(0.0, avail_mars_h * MARS_SOL_RATIO)
             sunset_seconds_from_dep = avail_daylight_earth_h * 3600.0
-            sunset_utc_str = (dt_start + timedelta(seconds=sunset_seconds_from_dep)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            sunset_utc_str = (dt_start + timedelta(seconds=sunset_seconds_from_dep)).strftime("%Y-%m-%dT%H:%M:%SZ")
             in_daylight_at_departure = True
         else:
             avail_daylight_earth_h = 0.0
@@ -118,9 +116,9 @@ def evaluate_route_mission_clock(
                 next_sunset_mars_h = m24_start.sunset_ltst_hours - m24_start.ltst_hours
             else:
                 next_sunset_mars_h = (24.0 - m24_start.ltst_hours) + m24_start.sunset_ltst_hours
-            sunset_utc_str = (
-                dt_start + timedelta(seconds=next_sunset_mars_h * MARS_SOL_RATIO * 3600.0)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            sunset_utc_str = (dt_start + timedelta(seconds=next_sunset_mars_h * MARS_SOL_RATIO * 3600.0)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
     else:
         avail_daylight_earth_h = 0.0
 
@@ -205,9 +203,7 @@ def evaluate_route_mission_clock(
         m24_seg = compute_mars24(lat1, lon1, arr_dt)
 
         if idx % stride == 0 or idx == len(coordinates) - 2:
-            sh = shadow_analyzer.evaluate_shadow(
-                lat1, lon1, m24_seg.solar_elevation_deg, m24_seg.solar_azimuth_deg
-            )
+            sh = shadow_analyzer.evaluate_shadow(lat1, lon1, m24_seg.solar_elevation_deg, m24_seg.solar_azimuth_deg)
             last_shadow_state = sh.shadow_state
         else:
             sh_state = "BELOW_HORIZON" if m24_seg.solar_elevation_deg <= 0.0 else last_shadow_state
@@ -287,14 +283,10 @@ def evaluate_route_mission_clock(
             m24_seg = compute_mars24(lat1, lon1, arr_dt)
 
             if idx % stride == 0 or idx == len(rev_coords) - 2:
-                sh = shadow_analyzer.evaluate_shadow(
-                    lat1, lon1, m24_seg.solar_elevation_deg, m24_seg.solar_azimuth_deg
-                )
+                sh = shadow_analyzer.evaluate_shadow(lat1, lon1, m24_seg.solar_elevation_deg, m24_seg.solar_azimuth_deg)
                 last_shadow_state = sh.shadow_state
             else:
-                last_shadow_state = (
-                    "BELOW_HORIZON" if m24_seg.solar_elevation_deg <= 0.0 else last_shadow_state
-                )
+                last_shadow_state = "BELOW_HORIZON" if m24_seg.solar_elevation_deg <= 0.0 else last_shadow_state
 
             is_dark = m24_seg.solar_elevation_deg <= 0.0
             is_terr_sh = last_shadow_state == "TERRAIN_SHADOWED"
@@ -355,8 +347,7 @@ def evaluate_route_mission_clock(
 
     hard_deadline_s = min(eva_deadline_s, effective_sunset_s)
     feasible_before_sunset = bool(
-        (m24_start.polar_day_state == "POLAR_CONTINUOUS_DAY")
-        or (in_daylight_at_departure and effective_sunset_s > 0.0)
+        (m24_start.polar_day_state == "POLAR_CONTINUOUS_DAY") or (in_daylight_at_departure and effective_sunset_s > 0.0)
     )
     if not in_daylight_at_departure:
         if m24_start.polar_day_state == "POLAR_CONTINUOUS_NIGHT":
@@ -394,12 +385,8 @@ def evaluate_route_mission_clock(
                 break
         span = max(1e-6, roundtrip_totals[k_idx + 1] - roundtrip_totals[k_idx])
         alpha = max(0.0, min(1.0, (hard_deadline_s - roundtrip_totals[k_idx]) / span))
-        lon_t = float(coordinates[k_idx][0]) + alpha * (
-            float(coordinates[k_idx + 1][0]) - float(coordinates[k_idx][0])
-        )
-        lat_t = float(coordinates[k_idx][1]) + alpha * (
-            float(coordinates[k_idx + 1][1]) - float(coordinates[k_idx][1])
-        )
+        lon_t = float(coordinates[k_idx][0]) + alpha * (float(coordinates[k_idx + 1][0]) - float(coordinates[k_idx][0]))
+        lat_t = float(coordinates[k_idx][1]) + alpha * (float(coordinates[k_idx + 1][1]) - float(coordinates[k_idx][1]))
         turn_coord = [round(lon_t, 6), round(lat_t, 6)]
         turn_dist_m = round(
             vertex_cum_dist_m[k_idx] + alpha * (vertex_cum_dist_m[k_idx + 1] - vertex_cum_dist_m[k_idx]),

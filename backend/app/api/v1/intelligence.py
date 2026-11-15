@@ -199,7 +199,9 @@ def list_observations(
     max_ls: Annotated[float | None, Query(description="Maximum solar longitude Ls (0-360)")] = None,
     spacecraft_id: Annotated[str | None, Query(description="Filter by spacecraft ID (e.g. mro, mex)")] = None,
     instrument: Annotated[str | None, Query(description="Filter by instrument (e.g. hirise, ctx, themis)")] = None,
-    provenance_kind: Annotated[str | None, Query(description="Filter by kind: measured, historical, computed, modeled, derived")] = None,
+    provenance_kind: Annotated[
+        str | None, Query(description="Filter by kind: measured, historical, computed, modeled, derived")
+    ] = None,
     quality_tier: Annotated[str | None, Query(description="Filter by tier: GOLD, SILVER, BRONZE, UNVERIFIED")] = None,
     measurement_type: Annotated[str | None, Query(description="Filter by measurement type")] = None,
     limit: Annotated[int, Query(ge=1, le=200, description="Maximum number of observations")] = 50,
@@ -236,7 +238,9 @@ def list_observations(
     summary="Query geospatial mission knowledge graph",
 )
 def get_mission_knowledge_graph(
-    node_type: Annotated[str | None, Query(description="Filter by node type (e.g. observation, hazard, route_segment)")] = None,
+    node_type: Annotated[
+        str | None, Query(description="Filter by node type (e.g. observation, hazard, route_segment)")
+    ] = None,
     max_nodes: Annotated[int, Query(ge=1, le=500, description="Maximum nodes in subgraph")] = 100,
 ):
     """
@@ -400,4 +404,3 @@ def sync_intelligence_data(request: SyncRequest | None = None):
     """
     req = request or SyncRequest()
     return get_service().sync_data(force_refresh=req.force_refresh, source_filter=req.source_filter)
-

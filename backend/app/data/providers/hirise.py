@@ -120,9 +120,7 @@ class HiRISERasterProvider(BaseRasterProvider):
 
     MAX_CACHE_ENTRIES = 2
     _CACHE_LOCK = threading.RLock()
-    _PROCESS_CACHE: OrderedDict[tuple[str, int, int, int, int, int], _HiRISECachedEntry] = (
-        OrderedDict()
-    )
+    _PROCESS_CACHE: OrderedDict[tuple[str, int, int, int, int, int], _HiRISECachedEntry] = OrderedDict()
 
     def __init__(self, dem_path: str | None = None, enabled: bool | None = None):
         settings = get_settings()
@@ -156,9 +154,7 @@ class HiRISERasterProvider(BaseRasterProvider):
         keep_identity: tuple[str, int, int, int, int, int] | None = None,
     ) -> None:
         stale_keys = [
-            k
-            for k in cls._PROCESS_CACHE
-            if k[0] == resolved_path and (keep_identity is None or k != keep_identity)
+            k for k in cls._PROCESS_CACHE if k[0] == resolved_path and (keep_identity is None or k != keep_identity)
         ]
         for k in stale_keys:
             cls._PROCESS_CACHE.pop(k, None)
@@ -252,12 +248,7 @@ class HiRISERasterProvider(BaseRasterProvider):
 
                     tr = src.transform
                     det = tr.a * tr.e - tr.b * tr.d
-                    if (
-                        tr == rasterio.Affine.identity()
-                        or abs(det) < 1e-18
-                        or src.res[0] <= 0.0
-                        or src.res[1] <= 0.0
-                    ):
+                    if tr == rasterio.Affine.identity() or abs(det) < 1e-18 or src.res[0] <= 0.0 or src.res[1] <= 0.0:
                         return HiRISEValidationResult(
                             is_valid=False,
                             status_code="rejected_invalid_georeferencing",
@@ -309,11 +300,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                 raster=None,
             )
         except MarsPathError as exc:
-            code = (
-                "rejected_missing_crs"
-                if "lacks a crs" in str(exc).lower()
-                else "rejected_invalid_georeferencing"
-            )
+            code = "rejected_missing_crs" if "lacks a crs" in str(exc).lower() else "rejected_invalid_georeferencing"
             return HiRISEValidationResult(
                 is_valid=False,
                 status_code=code,
@@ -332,9 +319,7 @@ class HiRISERasterProvider(BaseRasterProvider):
 
         # Positive vertical unit gate for non-GeoTIFF formats (.npz/.npy) as well
         if meta.metadata_tags.get("_VERTICAL_UNIT_VALID") != "true":
-            unit_code = meta.metadata_tags.get(
-                "_VERTICAL_UNIT_STATUS", "rejected_unknown_vertical_units"
-            )
+            unit_code = meta.metadata_tags.get("_VERTICAL_UNIT_STATUS", "rejected_unknown_vertical_units")
             unit_msg = meta.metadata_tags.get(
                 "_VERTICAL_UNIT_REASON",
                 "HiRISE raster lacks explicit vertical elevation unit metadata (expected meters).",
@@ -394,13 +379,7 @@ class HiRISERasterProvider(BaseRasterProvider):
             and meta.min_lat < self.DELTA_REGION_MAX_LAT
             and meta.max_lat > self.DELTA_REGION_MIN_LAT
         )
-        if (
-            not overlaps_delta
-            or lon_span <= 0.0
-            or lat_span <= 0.0
-            or lon_span > 0.40
-            or lat_span > 0.40
-        ):
+        if not overlaps_delta or lon_span <= 0.0 or lat_span <= 0.0 or lon_span > 0.40 or lat_span > 0.40:
             return HiRISEValidationResult(
                 is_valid=False,
                 status_code="rejected_outside_jezero_delta_bounds",
@@ -413,19 +392,13 @@ class HiRISERasterProvider(BaseRasterProvider):
             )
 
         valid_mask = (
-            ~raster.nodata_mask
-            & np.isfinite(raster.data)
-            & (raster.data >= -9000.0)
-            & (raster.data <= 25000.0)
+            ~raster.nodata_mask & np.isfinite(raster.data) & (raster.data >= -9000.0) & (raster.data <= 25000.0)
         )
         valid_count = int(np.sum(valid_mask))
         total_count = int(raster.data.size)
         valid_fraction = valid_count / total_count if total_count > 0 else 0.0
 
-        if (
-            valid_count < self.MIN_VALID_CELL_COUNT
-            or valid_fraction < self.MIN_VALID_OBSERVATION_FRACTION
-        ):
+        if valid_count < self.MIN_VALID_CELL_COUNT or valid_fraction < self.MIN_VALID_OBSERVATION_FRACTION:
             return HiRISEValidationResult(
                 is_valid=False,
                 status_code="rejected_insufficient_valid_observations",
@@ -447,10 +420,7 @@ class HiRISERasterProvider(BaseRasterProvider):
     def _validate_mars_crs_object(self, crs_obj: Any) -> str | None:
         crs_str = str(crs_obj).strip()
         crs_upper = crs_str.upper()
-        if any(
-            tok in crs_upper
-            for tok in ("WGS", "EPSG:4326", "EPSG:3857", "EARTH", "NAD83", "NAD27")
-        ):
+        if any(tok in crs_upper for tok in ("WGS", "EPSG:4326", "EPSG:3857", "EARTH", "NAD83", "NAD27")):
             return f"Earth CRS '{crs_str}' is forbidden for Mars HiRISE terrain analysis."
 
         if not EvidenceService._is_established_mars_crs(crs_str):
@@ -474,9 +444,7 @@ class HiRISERasterProvider(BaseRasterProvider):
     def get_dem_raster(self) -> RasterData:
         res = self.validate_hirise_raster()
         if not res.is_valid or res.raster is None:
-            raise TerrainDataUnavailableError(
-                f"HiRISE DTM unavailable ({res.status_code}): {res.reason}"
-            )
+            raise TerrainDataUnavailableError(f"HiRISE DTM unavailable ({res.status_code}): {res.reason}")
         return res.raster
 
     def get_bounds(self) -> BoundingBox:
@@ -544,11 +512,7 @@ class HiRISERasterProvider(BaseRasterProvider):
 
         with self._CACHE_LOCK:
             entry = self._PROCESS_CACHE.get(file_id) if file_id is not None else None
-            if (
-                entry is not None
-                and entry.provenance is not None
-                and entry.sidecar_identity == sidecar_id
-            ):
+            if entry is not None and entry.provenance is not None and entry.sidecar_identity == sidecar_id:
                 return copy.deepcopy(entry.provenance)
 
             meta = res.raster.metadata
@@ -570,8 +534,7 @@ class HiRISERasterProvider(BaseRasterProvider):
 
             is_geotiff = self.dem_path.lower().endswith((".tif", ".tiff"))
             is_pds3 = (
-                self.dem_path.lower().endswith((".img", ".lbl"))
-                or meta.metadata_tags.get("_HAS_PDS3_LABEL") == "true"
+                self.dem_path.lower().endswith((".img", ".lbl")) or meta.metadata_tags.get("_HAS_PDS3_LABEL") == "true"
             )
             if is_pds3 and not is_geotiff:
                 file_format = "PDS3 LBL" if self.dem_path.lower().endswith(".lbl") else "PDS3 IMG"
@@ -587,15 +550,10 @@ class HiRISERasterProvider(BaseRasterProvider):
             if meta.metadata_tags.get("_HAS_PDS3_LABEL") == "true":
                 pds3_meta = {
                     "pds_version_id": "PDS3",
-                    "product_id": meta.metadata_tags.get("PDS3_PRODUCT_ID")
-                    or meta.metadata_tags.get("PRODUCT_ID"),
+                    "product_id": meta.metadata_tags.get("PDS3_PRODUCT_ID") or meta.metadata_tags.get("PRODUCT_ID"),
                     "data_set_id": meta.metadata_tags.get("DATA_SET_ID"),
-                    "source_product_id": [
-                        s for s in meta.metadata_tags.get("SOURCE_PRODUCT_ID", "").split(",") if s
-                    ],
-                    "producer_institution_name": meta.metadata_tags.get(
-                        "PRODUCER_INSTITUTION_NAME"
-                    ),
+                    "source_product_id": [s for s in meta.metadata_tags.get("SOURCE_PRODUCT_ID", "").split(",") if s],
+                    "producer_institution_name": meta.metadata_tags.get("PRODUCER_INSTITUTION_NAME"),
                     "sample_type": meta.metadata_tags.get("PDS3_SAMPLE_TYPE"),
                     "sample_bits": int(meta.metadata_tags["PDS3_SAMPLE_BITS"])
                     if meta.metadata_tags.get("PDS3_SAMPLE_BITS", "").isdigit()
@@ -639,12 +597,9 @@ class HiRISERasterProvider(BaseRasterProvider):
                     "mission_instruments": matched_manifest.get(
                         "mission_instruments", ["MRO HiRISE Stereo Processing"]
                     ),
-                    "data_publisher": matched_manifest.get(
-                        "publisher", "USGS Astrogeology / University of Arizona"
-                    ),
+                    "data_publisher": matched_manifest.get("publisher", "USGS Astrogeology / University of Arizona"),
                     "pds_doi": matched_manifest.get("pds_doi") or matched_manifest.get("doi"),
-                    "official_source_url": matched_manifest.get("landing_page")
-                    or matched_manifest.get("official_url"),
+                    "official_source_url": matched_manifest.get("landing_page") or matched_manifest.get("official_url"),
                     "data_mode": "real",
                     "source_tier": "localized_high_resolution_dtm",
                     "hirise_enabled": self.enabled,
@@ -694,9 +649,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                         "mission_instruments",
                         ["MRO HiRISE", "Mars Global Surveyor MOLA", "USGS ISIS3/SOCET SET"],
                     ),
-                    "data_publisher": matched_manifest.get(
-                        "publisher", "USGS Astrogeology Science Center / NASA PDS"
-                    ),
+                    "data_publisher": matched_manifest.get("publisher", "USGS Astrogeology Science Center / NASA PDS"),
                     "pds_doi": matched_manifest.get("pds_doi") or matched_manifest.get("doi"),
                     "official_source_url": matched_manifest.get("landing_page")
                     or matched_manifest.get("official_url")
@@ -746,10 +699,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                 ):
                     local_ok = False
 
-                declared_pds_id = (
-                    meta.metadata_tags.get("PDS3_PRODUCT_ID")
-                    or meta.metadata_tags.get("PRODUCT_ID")
-                )
+                declared_pds_id = meta.metadata_tags.get("PDS3_PRODUCT_ID") or meta.metadata_tags.get("PRODUCT_ID")
                 limitations.insert(
                     0,
                     "Raster is numerically valid and georeferenced to the Mars Jezero Western Delta region, "
@@ -759,9 +709,7 @@ class HiRISERasterProvider(BaseRasterProvider):
                     "dataset_name": f"Local Unverified Mars High-Resolution DTM ({os.path.basename(self.dem_path)})",
                     "official_product_id": None,
                     "declared_product_id": declared_pds_id,
-                    "matched_catalog_product_id": matched_manifest["id"]
-                    if matched_manifest
-                    else None,
+                    "matched_catalog_product_id": matched_manifest["id"] if matched_manifest else None,
                     "mission_instruments": ["Unverified Local High-Resolution Stereo DTM"],
                     "data_publisher": "Unknown / Local Origin",
                     "pds_doi": None,

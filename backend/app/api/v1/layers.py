@@ -42,9 +42,7 @@ _TILE_CACHE: OrderedDict[tuple[str, int, int, int], tuple[bytes, str]] = Ordered
 _MAX_CACHED_TILES = 512
 
 
-@router.get(
-    "/layers", response_model=LayerListResponse, summary="List configured Martian geospatial layers"
-)
+@router.get("/layers", response_model=LayerListResponse, summary="List configured Martian geospatial layers")
 def list_layers():
     """
     Returns metadata for all available numerical and visual map layers,
@@ -142,9 +140,7 @@ async def proxy_wmts_tile(layer_id: str, z: int, y: int, x: int):
 
     ext = str(layer_cfg["ext"])
     expected_media = str(layer_cfg["media_type"])
-    upstream_url = (
-        f"https://trek.nasa.gov/tiles/Mars/EQ/{layer_id}/1.0.0/default/default028mm/{z}/{y}/{x}.{ext}"
-    )
+    upstream_url = f"https://trek.nasa.gov/tiles/Mars/EQ/{layer_id}/1.0.0/default/default028mm/{z}/{y}/{x}.{ext}"
     try:
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
             resp = await client.get(upstream_url)

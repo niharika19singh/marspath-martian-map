@@ -73,19 +73,13 @@ def validate_cors_origins(raw_origins: str | list[str]) -> list[str]:
     validated: list[str] = []
     for origin in candidates:
         if "*" in origin:
-            raise ValueError(
-                f"Wildcard CORS origin '{origin}' is not permitted; explicit origins are required."
-            )
+            raise ValueError(f"Wildcard CORS origin '{origin}' is not permitted; explicit origins are required.")
         if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in origin):
-            raise ValueError(
-                f"Invalid CORS origin '{origin}': whitespace or control characters are not permitted."
-            )
+            raise ValueError(f"Invalid CORS origin '{origin}': whitespace or control characters are not permitted.")
         try:
             parsed = urlsplit(origin)
         except ValueError as exc:
-            raise ValueError(
-                f"Invalid CORS origin '{origin}': malformed URL structure."
-            ) from exc
+            raise ValueError(f"Invalid CORS origin '{origin}': malformed URL structure.") from exc
 
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError(
@@ -103,29 +97,21 @@ def validate_cors_origins(raw_origins: str | list[str]) -> list[str]:
         try:
             port = parsed.port
         except ValueError as exc:
-            raise ValueError(
-                f"Invalid CORS origin '{origin}': malformed or out-of-range port."
-            ) from exc
+            raise ValueError(f"Invalid CORS origin '{origin}': malformed or out-of-range port.") from exc
 
         if port is not None and not (1 <= port <= 65535):
-            raise ValueError(
-                f"Invalid CORS origin '{origin}': port must be between 1 and 65535."
-            )
+            raise ValueError(f"Invalid CORS origin '{origin}': port must be between 1 and 65535.")
 
         hostname = parsed.hostname
         is_bracketed_ipv6 = parsed.netloc.startswith("[")
         if not hostname or not _is_valid_origin_hostname(hostname, is_bracketed_ipv6):
-            raise ValueError(
-                f"Invalid CORS origin '{origin}': malformed or missing hostname."
-            )
+            raise ValueError(f"Invalid CORS origin '{origin}': malformed or missing hostname.")
 
         expected_host = f"[{hostname}]" if is_bracketed_ipv6 else hostname
         expected_netloc = f"{expected_host}:{port}" if port is not None else expected_host
         expected_origin = f"{parsed.scheme}://{expected_netloc}"
         if origin != expected_origin:
-            raise ValueError(
-                f"Invalid CORS origin '{origin}': non-canonical authority or unnormalized origin syntax."
-            )
+            raise ValueError(f"Invalid CORS origin '{origin}': non-canonical authority or unnormalized origin syntax.")
 
         validated.append(origin)
 
@@ -266,9 +252,7 @@ else:
         APP_NAME: str = "MARSPath — Mars Exploration Route Intelligence and Science Planner"
         APP_VERSION: str = "0.1.0"
         HOST: str = Field(default_factory=lambda: os.getenv("MARSPATH_HOST", "0.0.0.0"))
-        PORT: int = Field(
-            default_factory=lambda: int(os.getenv("PORT", os.getenv("MARSPATH_PORT", "8000")))
-        )
+        PORT: int = Field(default_factory=lambda: int(os.getenv("PORT", os.getenv("MARSPATH_PORT", "8000"))))
         LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("MARSPATH_LOG_LEVEL", "INFO"))
 
         CORS_ORIGINS: str = Field(
@@ -285,12 +269,9 @@ else:
             )
         )
 
-        DATA_DIR: str = Field(
-            default_factory=lambda: os.getenv("MARSPATH_DATA_DIR", "backend/app/data")
-        )
+        DATA_DIR: str = Field(default_factory=lambda: os.getenv("MARSPATH_DATA_DIR", "backend/app/data"))
         USE_REAL_DEM: bool = Field(
-            default_factory=lambda: os.getenv("MARSPATH_USE_REAL_DEM", "false").lower()
-            in ("true", "1")
+            default_factory=lambda: os.getenv("MARSPATH_USE_REAL_DEM", "false").lower() in ("true", "1")
         )
         DEM_PATH: str = Field(
             default_factory=lambda: os.getenv(
@@ -298,14 +279,10 @@ else:
             )
         )
         ALLOW_SYNTHETIC_FALLBACK: bool = Field(
-            default_factory=lambda: os.getenv(
-                "MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true"
-            ).lower()
-            in ("true", "1")
+            default_factory=lambda: os.getenv("MARSPATH_ALLOW_SYNTHETIC_FALLBACK", "true").lower() in ("true", "1")
         )
         USE_HIRISE_DEM: bool = Field(
-            default_factory=lambda: os.getenv("MARSPATH_USE_HIRISE_DEM", "false").lower()
-            in ("true", "1")
+            default_factory=lambda: os.getenv("MARSPATH_USE_HIRISE_DEM", "false").lower() in ("true", "1")
         )
         HIRISE_DEM_PATH: str = Field(
             default_factory=lambda: os.getenv(
@@ -325,18 +302,12 @@ else:
         JEZERO_MIN_LAT: float = 18.15
         JEZERO_MAX_LAT: float = 18.65
 
-        MAX_GRID_CELLS: int = Field(
-            default_factory=lambda: int(os.getenv("MARSPATH_MAX_GRID_CELLS", "250000"))
-        )
+        MAX_GRID_CELLS: int = Field(default_factory=lambda: int(os.getenv("MARSPATH_MAX_GRID_CELLS", "250000")))
         MAX_SEARCH_RADIUS_METERS: float = Field(
-            default_factory=lambda: float(
-                os.getenv("MARSPATH_MAX_SEARCH_RADIUS_METERS", "50000.0")
-            )
+            default_factory=lambda: float(os.getenv("MARSPATH_MAX_SEARCH_RADIUS_METERS", "50000.0"))
         )
         ROUTING_TIMEOUT_SECONDS: float = Field(
-            default_factory=lambda: float(
-                os.getenv("MARSPATH_ROUTING_TIMEOUT_SECONDS", "10.0")
-            ),
+            default_factory=lambda: float(os.getenv("MARSPATH_ROUTING_TIMEOUT_SECONDS", "10.0")),
             description=(
                 "Maximum wall-clock seconds allocated specifically for route graph traversal "
                 "(A* search across primary path, multi-point waypoint legs, and alternative corridors). "

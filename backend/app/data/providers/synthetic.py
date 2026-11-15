@@ -120,9 +120,7 @@ class SyntheticTerrainProvider(BaseRasterProvider):
         belva_dy = lat_grid - 18.41
         belva_dist_km = np.sqrt(belva_dx**2 + belva_dy**2) * 59.274
         belva_mask = belva_dist_km < 0.65
-        elev[belva_mask] -= (80.0 * (1.0 - (belva_dist_km[belva_mask] / 0.65) ** 2)).astype(
-            np.float32
-        )
+        elev[belva_mask] -= (80.0 * (1.0 - (belva_dist_km[belva_mask] / 0.65) ** 2)).astype(np.float32)
 
         # Western Breach: Neretva Vallis gorge cutting through rim
         vallis_mask = (np.abs(lat_grid - 18.43) < 0.015) & (lon_grid >= 77.25) & (lon_grid <= 77.38)
@@ -195,9 +193,7 @@ class SyntheticTerrainProvider(BaseRasterProvider):
             "is_synthetic": True,
             "pilot_region": "Jezero Crater, Mars",
             "model_description": "Deterministic procedural simulation of Jezero Crater morphology (rim, delta, floor, Belva)",
-            "nominal_resolution_meters": round(
-                ((self.max_lon - self.min_lon) / self.cols) * 56250.0, 1
-            ),
+            "nominal_resolution_meters": round(((self.max_lon - self.min_lon) / self.cols) * 56250.0, 1),
             "reference_datum": "Mars IAU2000 Sphere (R=3,396,190m)",
             "intended_use": "Deterministic algorithm verification, test suite execution, frontend integration sandbox",
             "warning": "Do NOT use synthetic test data for operational flight planning or genuine mission risk assessment.",

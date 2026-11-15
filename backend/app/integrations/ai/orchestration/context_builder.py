@@ -35,7 +35,9 @@ class ContextBuilder:
             "target_name": getattr(product, "mission", "Mars Exploration"),
             "spatial_resolution_m_per_px": getattr(product, "spatial_resolution_m", 1.0),
             "martian_sol": getattr(product, "martian_sol", None),
-            "acquisition_utc": product.acquisition_timestamp.isoformat() if getattr(product, "acquisition_timestamp", None) else None,
+            "acquisition_utc": product.acquisition_timestamp.isoformat()
+            if getattr(product, "acquisition_timestamp", None)
+            else None,
             "doi": doi_val,
             "archive_url": getattr(product, "official_archive_url", getattr(product, "archive_url", None)),
             "download_url": getattr(product, "download_url", None),
@@ -72,7 +74,9 @@ class ContextBuilder:
                     "target": "Jezero Crater Region",
                     "thermal_inertia_tiu": getattr(t, "thermal_inertia_tiu", None),
                     "brightness_temp_k": getattr(t, "brightness_temp_k", None),
-                    "risk_category": "LOW_RISK" if (getattr(t, "thermal_inertia_tiu", 0) or 0) > 250 else "MODERATE_RISK",
+                    "risk_category": "LOW_RISK"
+                    if (getattr(t, "thermal_inertia_tiu", 0) or 0) > 250
+                    else "MODERATE_RISK",
                 }
                 for t in themis_obs
             ]

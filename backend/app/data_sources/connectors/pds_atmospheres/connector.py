@@ -142,7 +142,11 @@ class PdsAtmospheresConnector(BaseDataSourceConnector):
             "supported_sensors": [
                 {"sensor": "ATS", "name": "Air Temperature Sensor (5 detectors)", "unit": "Celsius"},
                 {"sensor": "PS", "name": "Barometric Pressure Sensor", "unit": "Pascal (Pa)"},
-                {"sensor": "RDS", "name": "Radiation & Dust Optical Depth Sensor", "unit": "Optical depth tau / W m^-2"},
+                {
+                    "sensor": "RDS",
+                    "name": "Radiation & Dust Optical Depth Sensor",
+                    "unit": "Optical depth tau / W m^-2",
+                },
                 {"sensor": "RHS", "name": "Relative Humidity Sensor", "unit": "Percentage (%)"},
                 {"sensor": "TIRS", "name": "Thermal Infrared Ground/Sky Sensor", "unit": "Celsius / Kelvin"},
                 {"sensor": "WIND", "name": "Wind Sensor Boom 1 & 2", "unit": "m/s and degrees azimuth"},

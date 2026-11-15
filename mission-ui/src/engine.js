@@ -530,6 +530,114 @@ function search(t, start, end, request, penalty, returnBlockedMask = null) {
   throw new Error('No traversable route connects these pins within the selected constraints. Try another destination or less restrictive limits.');
 }
 
+export function computeClientMarswalkSurvivability({
+  maxSlopeDeg,
+  averageRoughness,
+  durationHours,
+  maxEvaHours = 8.0,
+  bufferMinutes = 120.0,
+  themisTiu = 380.0,
+  isSpeActive = false,
+  coordinates = [],
+}) {
+  let slopePenalty = 0.0;
+  if (maxSlopeDeg > 12.0) {
+    slopePenalty = Math.min(35.0, 18.0 + (maxSlopeDeg - 12.0) * 8.5);
+  } else if (maxSlopeDeg > 6.0) {
+    slopePenalty = (maxSlopeDeg - 6.0) * 3.0;
+  }
+
+  let roughnessPenalty = 0.0;
+  if (averageRoughness > 0.6) {
+    roughnessPenalty = Math.min(20.0, 8.0 + (averageRoughness - 0.6) * 30.0);
+  } else if (averageRoughness > 0.2) {
+    roughnessPenalty = (averageRoughness - 0.2) * 20.0;
+  }
+
+  const remainingHours = Math.max(0.0, maxEvaHours - (durationHours * 2.0));
+  const reservePct = maxEvaHours > 0 ? (remainingHours / maxEvaHours) * 100.0 : 0.0;
+  let consumablesPenalty = 0.0;
+  if (reservePct < 20.0) {
+    consumablesPenalty = Math.min(30.0, 15.0 + (20.0 - reservePct) * 0.75);
+  } else if (reservePct < 40.0) {
+    consumablesPenalty = (40.0 - reservePct) * 0.75;
+  }
+
+  let bufferPenalty = 0.0;
+  if (bufferMinutes < 30.0) {
+    bufferPenalty = Math.min(25.0, 12.0 + (30.0 - bufferMinutes) * 0.43);
+  } else if (bufferMinutes < 60.0) {
+    bufferPenalty = (60.0 - bufferMinutes) * 0.4;
+  }
+
+  let sinkagePenalty = 0.0;
+  if (themisTiu < 150.0) {
+    sinkagePenalty = Math.min(20.0, 10.0 + (150.0 - themisTiu) * 0.1);
+  } else if (themisTiu < 300.0) {
+    sinkagePenalty = (300.0 - themisTiu) * (10.0 / 150.0);
+  }
+
+  let radiationPenalty = isSpeActive ? 32.0 : 0.0;
+  let shelterBonus = 0.0;
+  let nearestShelterDist = 99999.0;
+  let recommendedShelterId = null;
+
+  const shelters = [
+    { id: 'shelter_west_rim_overhang', lat: 18.460, lon: 77.215, name: 'Western Rim Delta Escarpment' },
+    { id: 'shelter_belva_terraces', lat: 18.510, lon: 77.380, name: 'Belva Crater Impact Wall Terraces' },
+    { id: 'shelter_seitah_swale', lat: 18.440, lon: 77.440, name: 'Séítah Ridge Inter-Dune Swale' },
+  ];
+
+  if (coordinates.length > 0) {
+    for (const sh of shelters) {
+      for (const [lon, lat] of coordinates) {
+        const dLat = (lat - sh.lat) * (Math.PI / 180.0) * 3389500.0;
+        const dLon = (lon - sh.lon) * (Math.PI / 180.0) * 3389500.0 * Math.cos(lat * Math.PI / 180.0);
+        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+        if (dist < nearestShelterDist) {
+          nearestShelterDist = dist;
+          recommendedShelterId = sh.id;
+        }
+      }
+    }
+  }
+
+  if (isSpeActive) {
+    if (nearestShelterDist <= 1200.0) {
+      radiationPenalty = 8.0;
+      shelterBonus = 8.0 * (1.0 - nearestShelterDist / 1200.0);
+    } else if (nearestShelterDist <= 3000.0) {
+      radiationPenalty = 18.0;
+      shelterBonus = 4.0 * (1.0 - (nearestShelterDist - 1200.0) / 1800.0);
+    }
+  }
+
+  const rawScore = 100.0 - (slopePenalty + roughnessPenalty + consumablesPenalty + bufferPenalty + sinkagePenalty + radiationPenalty) + shelterBonus;
+  const score = Math.max(0.0, Math.min(100.0, Math.round(rawScore * 10) / 10));
+
+  let category = 'CRITICAL';
+  if (score >= 80.0) category = 'OPTIMAL';
+  else if (score >= 65.0) category = 'GOOD';
+  else if (score >= 45.0) category = 'MODERATE';
+  else if (score >= 25.0) category = 'MARGINAL';
+
+  return {
+    score,
+    category,
+    mobility_exertion_penalty: Math.round(slopePenalty * 10) / 10,
+    terrain_roughness_penalty: Math.round(roughnessPenalty * 10) / 10,
+    eva_consumables_penalty: Math.round(consumablesPenalty * 10) / 10,
+    return_buffer_penalty: Math.round(bufferPenalty * 10) / 10,
+    regolith_sinkage_penalty: Math.round(sinkagePenalty * 10) / 10,
+    radiation_exposure_penalty: Math.round(radiationPenalty * 10) / 10,
+    topographic_shelter_bonus: Math.round(shelterBonus * 10) / 10,
+    is_spe_active: isSpeActive,
+    shelter_proximity_meters: nearestShelterDist < 90000 ? Math.round(nearestShelterDist * 10) / 10 : null,
+    recommended_shelter_id: recommendedShelterId,
+    disclaimer: 'Conceptual decision-support score based on terrestrial human terramechanics and NASA analog models. Not a certified flight safety rating.',
+  };
+}
+
 function summarize(t, path, request, rank, returnRes = null, rescueRes = null) {
   const coordinates = path.map(i => toCoordinate(t, i));
   let distance = 0,
@@ -782,6 +890,16 @@ function summarize(t, path, request, rank, returnRes = null, rescueRes = null) {
       ],
       segments,
     },
+    marswalk_survivability: computeClientMarswalkSurvivability({
+      maxSlopeDeg: smax,
+      averageRoughness: rsum / n,
+      durationHours: timeS / 3600,
+      maxEvaHours: Number(request.max_eva_hours || 8.0),
+      bufferMinutes: turnaround?.sunset_margin_minutes ?? 120.0,
+      themisTiu: 380.0,
+      isSpeActive: Boolean(request.is_spe_scenario),
+      coordinates,
+    }),
     _cells: path,
   };
 }

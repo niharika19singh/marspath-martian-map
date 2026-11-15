@@ -118,17 +118,19 @@ class MarsTrekConnector(BaseDataSourceConnector):
 
         layers_info = []
         for layer in MARS_TREK_OFFICIAL_LAYERS:
-            layers_info.append({
-                "identifier": layer["layer_identifier"],
-                "title": layer["title"],
-                "format": layer["format"],
-                "spatial_resolution_m": layer["spatial_resolution_m"],
-                "tile_matrix_set": "default028mm",
-                "projection": "EPSG:4326 (IAU2000:49900 equivalent equirectangular)",
-                "min_zoom": layer["min_zoom"],
-                "max_zoom": layer["max_zoom"],
-                "bounds": layer["bounds"],
-            })
+            layers_info.append(
+                {
+                    "identifier": layer["layer_identifier"],
+                    "title": layer["title"],
+                    "format": layer["format"],
+                    "spatial_resolution_m": layer["spatial_resolution_m"],
+                    "tile_matrix_set": "default028mm",
+                    "projection": "EPSG:4326 (IAU2000:49900 equivalent equirectangular)",
+                    "min_zoom": layer["min_zoom"],
+                    "max_zoom": layer["max_zoom"],
+                    "bounds": layer["bounds"],
+                }
+            )
 
         meta = {
             "service": "OGC WMTS",

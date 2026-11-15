@@ -96,9 +96,7 @@ class TerrainGridGraph:
     def is_in_bounds(self, r: int, c: int) -> bool:
         return 0 <= r < self.rows and 0 <= c < self.cols
 
-    def compute_edge_geometry(
-        self, r: int, c: int, nr: int, nc: int
-    ) -> tuple[float, float, float, float, float]:
+    def compute_edge_geometry(self, r: int, c: int, nr: int, nc: int) -> tuple[float, float, float, float, float]:
         """
         Returns (d2d, delta_z, dist_3d, along_slope_deg, cross_slope_deg) for directed step (r,c)->(nr,nc).
         """
@@ -144,9 +142,7 @@ class TerrainGridGraph:
         self, r: int, c: int, nr: int, nc: int, extra_penalty: float = 0.0
     ) -> tuple[float, float, float, float, float, dict[str, float]]:
         """Computes directed edge cost and geometric attributes using graph cost_mode & effort_model."""
-        d2d, delta_z, dist_3d, along_slope_deg, cross_slope_deg = self.compute_edge_geometry(
-            r, c, nr, nc
-        )
+        d2d, delta_z, dist_3d, along_slope_deg, cross_slope_deg = self.compute_edge_geometry(r, c, nr, nc)
         slope = float(self.slope_deg[nr, nc])
         rough = float(self.roughness[nr, nc])
         cost, breakdown = calculate_edge_cost(
@@ -199,7 +195,5 @@ class TerrainGridGraph:
             if penalized_edges and ((r, c), (nr, nc)) in penalized_edges:
                 extra_pen = penalized_edges[((r, c), (nr, nc))]
 
-            cost, dist_3d, slope, rough, delta_z, _ = self.edge_cost(
-                r, c, nr, nc, extra_penalty=extra_pen
-            )
+            cost, dist_3d, slope, rough, delta_z, _ = self.edge_cost(r, c, nr, nc, extra_penalty=extra_pen)
             yield (nr, nc), cost, dist_3d, slope, rough, delta_z

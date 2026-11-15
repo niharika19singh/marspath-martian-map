@@ -47,11 +47,11 @@ logger = logging.getLogger("marspath.ingestion")
 # Authoritative upstream catalog metadata (Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2)
 USGS_MOLA_HRSC_PRODUCT_ID = "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
 USGS_MOLA_HRSC_PRODUCT_NAME = "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2"
-USGS_MOLA_HRSC_LANDING_PAGE = (
-    "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m"
-)
+USGS_MOLA_HRSC_LANDING_PAGE = "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m"
 USGS_MOLA_HRSC_GLOBAL_URL = "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif"
-USGS_MOLA_HRSC_BACKUP_URL = "https://planetarymaps.usgs.gov/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif"
+USGS_MOLA_HRSC_BACKUP_URL = (
+    "https://planetarymaps.usgs.gov/mosaic/Mars/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif"
+)
 USGS_MOLA_HRSC_MD5 = "e98092a06bea74d5ec9a704dcd1fe318"
 USGS_MOLA_HRSC_PDS3_LBL = "https://astrogeology.usgs.gov/ckan/dataset/6c177b5f-97af-4d70-adc3-92cf362b9890/resource/99f5a18a-b4fb-4e87-8417-7408d8440651/download/mars_hrsc_mola_blenddem_global_200mp_v2_pds3.lbl"
 USGS_MOLA_HRSC_ISIS3_LBL = "https://astrogeology.usgs.gov/ckan/dataset/6c177b5f-97af-4d70-adc3-92cf362b9890/resource/9b3025b4-484e-47b1-a782-d88abc387cc1/download/mars_hrsc_mola_blenddem_global_200mp_v2.lbl"
@@ -62,9 +62,7 @@ OFFICIAL_USGS_ENDPOINTS = {
 }
 
 # Authoritative upstream catalog metadata (Mars 2020 TRN HiRISE DTM Mosaic 1m)
-USGS_HIRISE_TRN_PRODUCT_ID = (
-    "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40"
-)
+USGS_HIRISE_TRN_PRODUCT_ID = "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40"
 USGS_HIRISE_TRN_PRODUCT_NAME = "Mars 2020 Terrain Relative Navigation HiRISE DTM Mosaic"
 USGS_HIRISE_TRN_DOI = "10.5066/P9REJ9JN"
 USGS_HIRISE_TRN_LANDING_PAGE = (
@@ -117,11 +115,7 @@ def compute_array_sha256(arr: np.ndarray) -> str:
 def get_provenance_sidecar_path(raster_path: str | Path) -> Path:
     """Returns the expected path to the cryptographic provenance sidecar JSON."""
     rp = Path(raster_path)
-    return (
-        rp.with_name(f"{rp.name}.provenance.json")
-        if not str(rp).endswith(".provenance.json")
-        else rp
-    )
+    return rp.with_name(f"{rp.name}.provenance.json") if not str(rp).endswith(".provenance.json") else rp
 
 
 def verify_local_integrity(raster_path: str | Path) -> tuple[bool, str, dict[str, Any] | None]:
@@ -272,9 +266,7 @@ def ingest_jezero_dem(
         for item in effective_manifest:
             cat_md5 = str(item.get("upstream_md5") or "").lower().strip()
             cat_sha = str(item.get("sha256") or "").lower().strip()
-            if (cat_md5 and computed_source_md5 == cat_md5) or (
-                cat_sha and computed_source_sha256 == cat_sha
-            ):
+            if (cat_md5 and computed_source_md5 == cat_md5) or (cat_sha and computed_source_sha256 == cat_sha):
                 matched_catalog_item = item
                 break
 
@@ -305,9 +297,7 @@ def ingest_jezero_dem(
     data = None
     for cand_src in candidate_sources:
         cand_vsi = (
-            f"/vsicurl/{cand_src}"
-            if (cand_src.startswith("http://") or cand_src.startswith("https://"))
-            else cand_src
+            f"/vsicurl/{cand_src}" if (cand_src.startswith("http://") or cand_src.startswith("https://")) else cand_src
         )
         try:
             with rasterio.open(cand_vsi) as src:
@@ -392,9 +382,7 @@ def ingest_jezero_dem(
         "published_upstream_md5": published_upstream_md5,
         "source_checksum_verified": source_checksum_verified,
         "local_integrity_verified": True,
-        "source_pds3_label_url": (
-            USGS_MOLA_HRSC_PDS3_LBL if source_product_id == USGS_MOLA_HRSC_PRODUCT_ID else None
-        ),
+        "source_pds3_label_url": (USGS_MOLA_HRSC_PDS3_LBL if source_product_id == USGS_MOLA_HRSC_PRODUCT_ID else None),
         "source_isis3_label_url": (
             USGS_MOLA_HRSC_ISIS3_LBL if source_product_id == USGS_MOLA_HRSC_PRODUCT_ID else None
         ),
@@ -485,9 +473,7 @@ def provision_runtime_dem(
     settings = get_settings()
     target_path = Path(dem_path or settings.DEM_PATH)
     effective_use_real = settings.USE_REAL_DEM if use_real_dem is None else use_real_dem
-    effective_fallback = (
-        settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
-    )
+    effective_fallback = settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
     sidecar_path = get_provenance_sidecar_path(target_path)
     error_marker_path = Path(f"{target_path}.provision_error.json")
 
@@ -640,9 +626,7 @@ def verify_runtime_dem(
     settings = get_settings()
     target_path = Path(dem_path or settings.DEM_PATH)
     effective_use_real = settings.USE_REAL_DEM if use_real_dem is None else use_real_dem
-    effective_fallback = (
-        settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
-    )
+    effective_fallback = settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
     sidecar_path = get_provenance_sidecar_path(target_path)
 
     if not effective_use_real:
@@ -666,9 +650,7 @@ def verify_runtime_dem(
         if target_path.stat().st_size == 0:
             raise RuntimeError(f"Runtime DEM raster is empty (0 bytes) at '{target_path}'.")
         if not sidecar_path.is_file():
-            raise RuntimeError(
-                f"Runtime DEM provenance sidecar missing at '{sidecar_path}'."
-            )
+            raise RuntimeError(f"Runtime DEM provenance sidecar missing at '{sidecar_path}'.")
 
         try:
             with open(sidecar_path, encoding="utf-8") as f:
@@ -680,9 +662,7 @@ def verify_runtime_dem(
 
         integrity_ok, reason, _ = verify_local_integrity(target_path)
         if not integrity_ok:
-            raise RuntimeError(
-                f"Runtime DEM local SHA-256 integrity verification failed: {reason}"
-            )
+            raise RuntimeError(f"Runtime DEM local SHA-256 integrity verification failed: {reason}")
 
         try:
             provider = MOLAHRSCRasterProvider(
@@ -693,9 +673,7 @@ def verify_runtime_dem(
             raster = provider.get_dem_raster()
             provenance = provider.get_provenance()
         except Exception as exc:
-            raise RuntimeError(
-                f"Runtime DEM provider failed to load raster at '{target_path}': {exc}"
-            ) from exc
+            raise RuntimeError(f"Runtime DEM provider failed to load raster at '{target_path}': {exc}") from exc
 
         readiness = evaluate_terrain_readiness(
             is_synthetic=raster.metadata.is_synthetic,
@@ -720,9 +698,7 @@ def verify_runtime_dem(
                 f"Runtime DEM validation_status '{val_status}' not in acceptable statuses: {sorted(ACCEPTABLE_REAL_VALIDATION_STATUSES)}"
             )
         if readiness.get("blocking_errors"):
-            raise RuntimeError(
-                f"Runtime DEM blocking errors present: {readiness.get('blocking_errors')}"
-            )
+            raise RuntimeError(f"Runtime DEM blocking errors present: {readiness.get('blocking_errors')}")
 
         logger.info(
             "Runtime DEM verification passed for %s (status=%s, SHA-256=%s...)",
@@ -800,9 +776,7 @@ def ingest_jezero_hirise_dtm(
             return sidecar
 
     candidate_sources = (
-        [source_url_or_path]
-        if source_url_or_path
-        else [USGS_HIRISE_TRN_S3_URL, USGS_HIRISE_TRN_GLOBAL_URL]
+        [source_url_or_path] if source_url_or_path else [USGS_HIRISE_TRN_S3_URL, USGS_HIRISE_TRN_GLOBAL_URL]
     )
     col_off, row_off, width, height = pixel_window
     window = Window(col_off=col_off, row_off=row_off, width=width, height=height)
@@ -811,11 +785,7 @@ def ingest_jezero_hirise_dtm(
     last_err: Exception | None = None
     used_source = candidate_sources[0]
     for cand in candidate_sources:
-        vsi = (
-            f"/vsicurl/{cand}"
-            if (cand.startswith("http://") or cand.startswith("https://"))
-            else cand
-        )
+        vsi = f"/vsicurl/{cand}" if (cand.startswith("http://") or cand.startswith("https://")) else cand
         try:
             with rasterio.Env(
                 GDAL_HTTP_MERGE_CONSECUTIVE_RANGES="YES",
@@ -869,8 +839,7 @@ def ingest_jezero_hirise_dtm(
     arr_sha256 = compute_array_sha256(data)
     is_official_remote = used_source in OFFICIAL_HIRISE_ENDPOINTS
     array_matches_pinned = (
-        pixel_window == DEFAULT_HIRISE_PIXEL_WINDOW
-        and arr_sha256 == USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256
+        pixel_window == DEFAULT_HIRISE_PIXEL_WINDOW and arr_sha256 == USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256
     )
     validation_status = (
         "official_endpoint_retrieved_checksum_unverified"
@@ -878,9 +847,7 @@ def ingest_jezero_hirise_dtm(
         else "valid_numeric_raster_unverified_source"
     )
     ingestion_method = (
-        "official_endpoint_vsicurl_range_extract"
-        if is_official_remote
-        else "unverified_local_or_remote_range_extract"
+        "official_endpoint_vsicurl_range_extract" if is_official_remote else "unverified_local_or_remote_range_extract"
     )
 
     with rasterio.open(
@@ -1021,9 +988,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest Jezero Crater DEM from USGS PDS archive.")
     parser.add_argument("--output", type=str, default=None, help="Output GeoTIFF path")
     parser.add_argument("--source", type=str, default=None, help="Source URL or local file path")
-    parser.add_argument(
-        "--force", action="store_true", help="Force re-ingestion even if local extract exists"
-    )
+    parser.add_argument("--force", action="store_true", help="Force re-ingestion even if local extract exists")
     parser.add_argument(
         "--provision-runtime",
         action="store_true",

@@ -123,9 +123,7 @@ def reconstruct_route_summary(
         dc = curr_c - prev_c
 
         if prev_valid and curr_valid:
-            d2d, dz, d3d, along_slope_deg, cross_slope_deg = graph.compute_edge_geometry(
-                prev_r, prev_c, curr_r, curr_c
-            )
+            d2d, dz, d3d, along_slope_deg, cross_slope_deg = graph.compute_edge_geometry(prev_r, prev_c, curr_r, curr_c)
             valid_elev_transition_count += 1
             observed_3d_dist += d3d
             if dz > 0:
@@ -143,11 +141,7 @@ def reconstruct_route_summary(
                 suit_load_factor=graph.suit_load_factor,
             )
         else:
-            d2d = (
-                graph.dist_diag
-                if (dr != 0 and dc != 0)
-                else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
-            )
+            d2d = graph.dist_diag if (dr != 0 and dc != 0) else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
             dz = 0.0
             d3d = d2d
             along_slope_deg = 0.0
@@ -238,9 +232,7 @@ def reconstruct_route_summary(
 
     num_steps = max(len(path_nodes) - 1, 0)
     all_elev_transitions_valid = all_elevations_valid and (valid_elev_transition_count == num_steps)
-    all_duration_steps_valid = all_elev_transitions_valid and (
-        observed_duration_step_count == num_steps
-    )
+    all_duration_steps_valid = all_elev_transitions_valid and (observed_duration_step_count == num_steps)
     all_steps_fully_observed = is_complete_measurement and (unobserved_step_meters == 0.0)
 
     # Distance: distinguish complete 3D surface distance from horizontal 2D distance
@@ -258,9 +250,7 @@ def reconstruct_route_summary(
     observed_dur_partial: float | None = (
         round(observed_duration_seconds / 3600.0, 2) if observed_duration_step_count > 0 else None
     )
-    estimated_dur_val: float | None = (
-        observed_dur_partial if all_duration_steps_valid else None
-    )
+    estimated_dur_val: float | None = observed_dur_partial if all_duration_steps_valid else None
 
     # Energy: complete only when all elevation transitions are observed
     if all_elev_transitions_valid:
@@ -269,17 +259,13 @@ def reconstruct_route_summary(
     else:
         energy_val = None
         observed_energy_partial = (
-            round((observed_3d_dist * 0.001) + (elev_gain * 0.02), 2)
-            if valid_elev_transition_count > 0
-            else None
+            round((observed_3d_dist * 0.001) + (elev_gain * 0.02), 2) if valid_elev_transition_count > 0 else None
         )
 
     # Hazard exposure: complete only when all steps are fully observed
     observed_hazard_min = round(observed_hazard_meters, 1)
     unobserved_dist_val = round(unobserved_step_meters, 1)
-    hazard_exposure_val: float | None = (
-        observed_hazard_min if all_steps_fully_observed else None
-    )
+    hazard_exposure_val: float | None = observed_hazard_min if all_steps_fully_observed else None
 
     # Distinguish science targets visited vs in proximity using Mars metric distance
     visited_target_ids: list[str] = []
@@ -364,9 +350,7 @@ def reconstruct_route_summary(
         risk_assessment_status=risk_assessment_status,
         cost_mode=graph.cost_mode,
         effort_model=graph.effort_model,
-        estimated_relative_effort=(
-            round(total_relative_effort, 1) if all_elev_transitions_valid else None
-        ),
+        estimated_relative_effort=(round(total_relative_effort, 1) if all_elev_transitions_valid else None),
         average_cross_slope_deg=avg_cross_slope,
         max_cross_slope_deg=max_cross_slope,
     )
@@ -518,9 +502,7 @@ def generate_route_alternatives(
                     geometry=geom_2,
                     science_targets_visited=visited_2,
                     science_targets_nearby=nearby_2,
-                    warnings=[
-                        "Alternative corridor avoids high-traffic bottlenecks of primary route."
-                    ],
+                    warnings=["Alternative corridor avoids high-traffic bottlenecks of primary route."],
                     evidence_passport=passport_2,
                 )
             )
@@ -539,9 +521,7 @@ def generate_route_alternatives(
         results[0].warnings.append(f"Secondary corridor search unviable: {e.message}")
     except Exception as e:
         logger.warning("Unexpected error during secondary alternative search: %s", e)
-        results[0].warnings.append(
-            "Secondary corridor search encountered an unexpected traversal barrier."
-        )
+        results[0].warnings.append("Secondary corridor search encountered an unexpected traversal barrier.")
 
     # 3. Third alternative if requested and mode was not safety_first
     if num_alternatives >= 3 and len(results) < 3:
@@ -602,9 +582,7 @@ def generate_route_alternatives(
                         geometry=geom_3,
                         science_targets_visited=visited_3,
                         science_targets_nearby=nearby_3,
-                        warnings=[
-                            "Strict 14° slope constraint enforced; prioritizes minimum roughness."
-                        ],
+                        warnings=["Strict 14° slope constraint enforced; prioritizes minimum roughness."],
                         evidence_passport=passport_3,
                     )
                 )
