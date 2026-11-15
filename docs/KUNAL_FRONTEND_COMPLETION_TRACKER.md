@@ -82,5 +82,5 @@ The following potential endpoints have been architected and integrated on the fr
   - `check-kunal-completion.mjs` — PASS
   - `check-map-fix-traverse-window.mjs` — PASS
   - `check-astronaut-survival.mjs` — PASS (All 10 modules verified)
-- **Production Bundle:** Verified clean build via `npx vite build` (`dist/mission-control/index.html`, `dist/mission-control/assets/index-_xz_L6p3.js`, `assets/index-BnZ-T9Rv.css`).
-- **Live Browser Acceptance Verification:** Executed by autonomous browser subagent covering all 8 acceptance steps.
+- **Production Bundle:** Verified clean build via `npx vite build` (`dist/mission-control/index.html`, `dist/mission-control/assets/index-b8QjiXzZ.js`, `assets/index-BnZ-T9Rv.css`).
+- **Live Browser Acceptance Verification:** Executed by autonomous browser subagent covering all 9 acceptance steps (`docs/evidence/astronaut-survival/step1` through `step9`).
