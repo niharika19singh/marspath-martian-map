@@ -31,6 +31,12 @@ import {
   buildTimeOverlayCanvas,
   calculateEdgeFeatherGradients,
 } from './map_rendering.js';
+import {
+  HABITAT_BASE_COORD,
+  PLANETARY_PROTECTION_ZONES,
+  getDualRadiusWalkBackGeoJSON,
+  AUTHENTIC_NASA_SURFACE_IMAGERY,
+} from './survivability.js';
 
 export { computeTimeOverlayPixels, buildTimeOverlayCanvas, calculateEdgeFeatherGradients };
 
@@ -98,6 +104,8 @@ export default function MapView(props) {
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
     showReachableZone = false, showRescueMap = false,
+    showWalkBackEnvelopes = true, showPlanetaryProtection = true, showAuthenticPhotos = true,
+    onSelectProtectionZone, onSelectNasaPhoto,
   } = props;
 
   const [selectedScienceTarget, setSelectedScienceTarget] = useState(null);
@@ -331,11 +339,14 @@ export default function MapView(props) {
     const rescueZoneLayer = new ImageLayer({ zIndex: 13.9, visible: false, opacity: 0.78 });
     const risk = new ImageLayer({ zIndex: 14, visible: false });
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
+    const walkBackEnvelopesLayer = new VectorLayer({ source: new VectorSource(), zIndex: 14.7, visible: Boolean(props.showWalkBackEnvelopes ?? true) });
+    const planetaryProtectionLayer = new VectorLayer({ source: new VectorSource(), zIndex: 14.9, visible: Boolean(props.showPlanetaryProtection ?? true) });
     const passiveTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
     const highlightedTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
     const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16.5 });
     const historyPins = new VectorLayer({ source: new VectorSource(), zIndex: 17 });
     const roverMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18 });
+    const authenticPhotosLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18.5, visible: Boolean(props.showAuthenticPhotos ?? true) });
     const scienceTargetsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 19 });
     const routes = new VectorLayer({ source: new VectorSource(), zIndex: 20 });
     const pins = new VectorLayer({ source: new VectorSource(), zIndex: 22 });
@@ -390,11 +401,14 @@ export default function MapView(props) {
         groundTracksLayer,
         data,
         risk,
+        walkBackEnvelopesLayer,
+        planetaryProtectionLayer,
         passiveTraverseLayer,
         highlightedTraverseLayer,
         curiosityLayer,
         historyPins,
         roverMarkerLayer,
+        authenticPhotosLayer,
         scienceTargetsLayer,
         routes,
         pins,
@@ -495,9 +509,12 @@ export default function MapView(props) {
       groundTracksLayer,
       risk,
       data,
+      walkBackEnvelopesLayer,
+      planetaryProtectionLayer,
       passiveTraverseLayer,
       highlightedTraverseLayer,
       roverMarkerLayer,
+      authenticPhotosLayer,
       historyLayer: highlightedTraverseLayer,
       curiosityLayer,
       historyPins,
@@ -549,15 +566,25 @@ export default function MapView(props) {
 
     map.on('singleclick', e => {
       interact();
-      let routeId = null, recorded = null, obsId = null, scId = null, sciTgt = null;
+      let routeId = null, recorded = null, obsId = null, scId = null, sciTgt = null, protZone = null, nasaPhoto = null;
       map.forEachFeatureAtPixel(e.pixel, f => {
+        if (f.get('nasaPhoto')) { nasaPhoto = f.get('nasaPhoto'); return true; }
+        if (f.get('protectionZone')) { protZone = f.get('protectionZone'); return true; }
         if (f.get('scienceTarget')) { sciTgt = f.get('scienceTarget'); return true; }
         if (f.get('observationId')) { obsId = f.get('observationId'); return true; }
         if (f.get('spacecraftId')) { scId = f.get('spacecraftId'); return true; }
         if (f.get('waypoint')) { recorded = f.get('waypoint'); return true; }
         if (f.get('driveRecord')) { recorded = f.get('driveRecord'); return true; }
         if (f.get('routeId')) { routeId = f.get('routeId'); return true; }
-      }, { hitTolerance: 6 });
+      }, { hitTolerance: 14 });
+      if (nasaPhoto) {
+        callbacks.current.props.onSelectNasaPhoto?.(nasaPhoto);
+        return;
+      }
+      if (protZone) {
+        callbacks.current.props.onSelectProtectionZone?.(protZone);
+        return;
+      }
       if (sciTgt) {
         setSelectedScienceTarget(prev => prev === sciTgt.target_id ? null : sciTgt.target_id);
         callbacks.current.props.onSelectScienceTarget?.(sciTgt);
@@ -1314,6 +1341,134 @@ export default function MapView(props) {
       pinsSrc.addFeature(f);
     });
   }, [waypoints, roverWaypoint, showHistory, showWaypoints, maxSol, waypoint]);
+
+  // 4. Dual-Radius Walk-Back Safety Envelopes (Rover-Assisted vs On-Foot)
+  useEffect(() => {
+    if (!mapRef.current || !layers.current.walkBackEnvelopesLayer) return;
+    const l = layers.current.walkBackEnvelopesLayer;
+    const src = l.getSource();
+    src.clear();
+    l.setVisible(Boolean(showWalkBackEnvelopes));
+    if (!showWalkBackEnvelopes) return;
+
+    const envelopesGeo = getDualRadiusWalkBackGeoJSON(HABITAT_BASE_COORD);
+    for (const feat of envelopesGeo.features) {
+      const coords = feat.geometry.coordinates[0];
+      const olPoly = new Polygon([coords]);
+      const olFeat = new Feature({
+        geometry: olPoly,
+        properties: feat.properties,
+        walkBackSafety: feat.properties,
+      });
+
+      const isRover = feat.properties.envelope === 'rover_assisted';
+      olFeat.setStyle((f, resolution) => {
+        const resM = resolution * M_PER_DEG;
+        return new Style({
+          stroke: new Stroke({
+            color: isRover ? '#00d4ff' : '#5cffb0',
+            width: isRover ? 1.8 : 2.2,
+            lineDash: isRover ? [6, 4] : undefined,
+          }),
+          fill: new Fill({
+            color: isRover ? 'rgba(0, 212, 255, 0.07)' : 'rgba(92, 255, 176, 0.10)',
+          }),
+          text: new Text({
+            text: isRover
+              ? (resM > 60 ? 'ROVER ENVELOPE (5.2 km)' : 'ROVER-ASSISTED REACHABLE ENVELOPE (5.2 km)')
+              : (resM > 60 ? 'FOOT LIMIT (1.8 km)' : 'ON-FOOT ASTRONAUT SAFE RETURN RADIUS (1.8 km)'),
+            font: '600 11px Inter, sans-serif',
+            offsetY: isRover ? -18 : 16,
+            fill: new Fill({ color: isRover ? '#7dd3fc' : '#a3f4ca' }),
+            stroke: new Stroke({ color: '#091319', width: 3 }),
+          }),
+        });
+      });
+      src.addFeature(olFeat);
+    }
+  }, [showWalkBackEnvelopes]);
+
+  // 5. Planetary Protection Special Regions (COSPAR Cat IVc, Candidate, Science Zones)
+  useEffect(() => {
+    if (!mapRef.current || !layers.current.planetaryProtectionLayer) return;
+    const l = layers.current.planetaryProtectionLayer;
+    const src = l.getSource();
+    src.clear();
+    l.setVisible(Boolean(showPlanetaryProtection));
+    if (!showPlanetaryProtection) return;
+
+    for (const zone of PLANETARY_PROTECTION_ZONES) {
+      const coords = zone.coordinates[0];
+      const olPoly = new Polygon([coords]);
+      const olFeat = new Feature({
+        geometry: olPoly,
+        protectionZone: zone,
+      });
+
+      const isCatIVc = zone.category === 'COSPAR Category IVc';
+      const isCandidate = zone.category === 'Candidate Sensitive';
+      const strokeColor = isCatIVc ? '#ef4444' : isCandidate ? '#f59e0b' : '#c084fc';
+      const fillColor = isCatIVc ? 'rgba(239, 68, 68, 0.22)' : isCandidate ? 'rgba(245, 158, 11, 0.18)' : 'rgba(168, 85, 247, 0.16)';
+
+      olFeat.setStyle((f, resolution) => {
+        const resM = resolution * M_PER_DEG;
+        return new Style({
+          stroke: new Stroke({
+            color: strokeColor,
+            width: 2.0,
+            lineDash: isCandidate ? [6, 4] : undefined,
+          }),
+          fill: new Fill({ color: fillColor }),
+          text: new Text({
+            text: resM > 120 ? zone.id : `${zone.id} · ${zone.name} (${zone.category})`,
+            font: '600 11px Inter, sans-serif',
+            offsetY: -12,
+            fill: new Fill({ color: strokeColor }),
+            stroke: new Stroke({ color: '#091319', width: 3.2 }),
+          }),
+        });
+      });
+      src.addFeature(olFeat);
+    }
+  }, [showPlanetaryProtection]);
+
+  // 6. Authentic NASA Surface Photo Vantage Points (Perseverance Mastcam-Z & SuperCam)
+  useEffect(() => {
+    if (!mapRef.current || !layers.current.authenticPhotosLayer) return;
+    const l = layers.current.authenticPhotosLayer;
+    const src = l.getSource();
+    src.clear();
+    l.setVisible(Boolean(showAuthenticPhotos));
+    if (!showAuthenticPhotos) return;
+
+    for (const key of Object.keys(AUTHENTIC_NASA_SURFACE_IMAGERY)) {
+      const photo = AUTHENTIC_NASA_SURFACE_IMAGERY[key];
+      const olPt = new Point(photo.coordinates);
+      const olFeat = new Feature({
+        geometry: olPt,
+        nasaPhoto: photo,
+      });
+
+      olFeat.setStyle((f, resolution) => {
+        const resM = resolution * M_PER_DEG;
+        return new Style({
+          image: new CircleStyle({
+            radius: 7.5,
+            fill: new Fill({ color: '#38bdf8' }),
+            stroke: new Stroke({ color: '#08121a', width: 2.5 }),
+          }),
+          text: new Text({
+            text: resM > 90 ? `📷 ${photo.pdsPhotojournalId}` : `📷 ${photo.pdsPhotojournalId} · ${photo.name} (${photo.instrument})`,
+            font: '600 11px Inter, sans-serif',
+            offsetY: -18,
+            fill: new Fill({ color: '#e0f2fe' }),
+            stroke: new Stroke({ color: '#0b1319', width: 3.5 }),
+          }),
+        });
+      });
+      src.addFeature(olFeat);
+    }
+  }, [showAuthenticPhotos]);
 
   const fitFullTraverse = () => {
     if (view3d) { terrain3D.current?.fit(); return; }

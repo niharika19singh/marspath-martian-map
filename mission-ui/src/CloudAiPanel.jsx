@@ -9,7 +9,16 @@ import {
   compareAiModels,
 } from './cloud_ai';
 
-export default function CloudAiPanel({ activeRoute, currentCoords }) {
+export default function CloudAiPanel({
+  activeRoute,
+  currentCoords,
+  survivabilityScore,
+  speActive,
+  speSeverity,
+  walkBackSafety,
+  protectionCheck,
+  evaBudgetHours,
+}) {
   const [activeTab, setActiveTab] = useState('infrastructure'); // 'infrastructure', 'copilot', 'comparison'
 
   // Cloud Infrastructure state
@@ -112,6 +121,19 @@ export default function CloudAiPanel({ activeRoute, currentCoords }) {
     const text = (promptToSend || inputPrompt).trim();
     if (!text || isSubmittingChat) return;
 
+    // Build smart astronaut EVA context payload
+    let textForAi = text;
+    if (activeRoute && !text.includes('[EVA CONTEXT]')) {
+      const distKm = ((activeRoute.summary?.total_distance_meters || 1200) / 1000).toFixed(2);
+      const maxSlope = Number(activeRoute.summary?.max_slope_deg || activeRoute.summary?.max_slope_degrees || 6.2).toFixed(1);
+      const surv = survivabilityScore?.score || 94;
+      const radState = speActive ? `ACTIVE SPE ${speSeverity} (${(speSeverity === 'S4' ? 100 : speSeverity === 'S3' ? 45 : speSeverity === 'S2' ? 12.5 : 2.5)} mSv/h)` : 'NOMINAL GCR (0.05 mSv/h)';
+      const wbState = walkBackSafety?.safe ? `Safe (within 1.8 km)` : `Exceeds 1.8 km safe foot limit (${walkBackSafety?.distKm} km, Rover required)`;
+      const protState = protectionCheck?.conflict ? `CONFLICT (${protectionCheck.conflictingZones?.map(z => z.name).join(', ')})` : 'Clear';
+
+      textForAi = `${text}\n\n[EVA CONTEXT: Route ${activeRoute.route_id || 'primary'}, Distance: ${distKm} km, Max Slope: ${maxSlope}°, Survivability Score: ${surv}/100, Space Radiation: ${radState}, Walk-Back Return: ${wbState}, Planetary Protection: ${protState}]`;
+    }
+
     const userMsgId = `user_${Date.now()}`;
     const userMsg = {
       id: userMsgId,
@@ -125,7 +147,7 @@ export default function CloudAiPanel({ activeRoute, currentCoords }) {
     setIsSubmittingChat(true);
 
     try {
-      const resp = await sendMarsScienceChat(text, selectedProvider);
+      const resp = await sendMarsScienceChat(textForAi, selectedProvider);
       const assistantMsg = {
         id: `asst_${Date.now()}`,
         role: 'assistant',
@@ -512,6 +534,42 @@ export default function CloudAiPanel({ activeRoute, currentCoords }) {
           {/* Quick Action Suggestion Buttons */}
           <div className="quick-actions-bar">
             <span className="quick-label">Mission Queries:</span>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendChat('Explain active route survivability score, Minetti biomechanical metabolic exertion, and terrain slope safety margin.')
+              }
+              disabled={isSubmittingChat}
+            >
+              🧑‍🚀 Survivability &amp; Minetti
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendChat('Evaluate Solar Particle Event (SPE) acute radiation exposure, surface dose rates, and nearest terrain shelters.')
+              }
+              disabled={isSubmittingChat}
+            >
+              ☀️ SPE Radiation &amp; Shelters
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendChat('Check dual-radius walk-back safety envelope (1.8 km safe on-foot ceiling vs 5.2 km rover envelope) and emergency return viability.')
+              }
+              disabled={isSubmittingChat}
+            >
+              🚶 Walk-Back Safety
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendChat('Verify planetary protection compliance for COSPAR Category IVc Special Regions in Jezero and Scout Rover handoff eligibility.')
+              }
+              disabled={isSubmittingChat}
+            >
+              🪐 Planetary Protection
+            </button>
             <button
               className="quick-btn"
               onClick={handleExplainActiveRoute}
