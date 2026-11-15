@@ -7,6 +7,9 @@ from backend.app.api.v1.data_status import router as data_status_router
 from backend.app.api.v1.health import router as health_router
 from backend.app.api.v1.intelligence import router as intelligence_router
 from backend.app.api.v1.layers import router as layers_router
+from backend.app.api.v1.planetary_protection import (
+    router as planetary_protection_router,
+)
 from backend.app.api.v1.routes import router as routes_router
 from backend.app.core.config import Settings, get_settings, validate_cors_origins
 from backend.app.core.exceptions import MarsPathError
@@ -67,6 +70,7 @@ app.include_router(health_router)
 app.include_router(layers_router)
 app.include_router(data_status_router)
 app.include_router(routes_router)
+app.include_router(planetary_protection_router)
 app.include_router(intelligence_router)
 app.include_router(conditions_router, prefix="/api")
 app.include_router(conditions_router, prefix="/api/v1")

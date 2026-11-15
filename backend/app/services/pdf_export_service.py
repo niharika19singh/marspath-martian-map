@@ -416,8 +416,79 @@ def generate_mission_pdf(
     story.append(t_env)
     story.append(Spacer(1, 10))
 
-    # 6. AI Mission Intelligence & Synthetic Risk Assessment (Assisted)
-    story.append(Paragraph("6. AI Mission Intelligence & Synthetic Risk Assessment (Assisted)", h1_style))
+    # 6. Dual-Radius Walk-Back Safety & Planetary Protection Geofence
+    story.append(Paragraph("6. Dual-Radius Walk-Back Safety & Planetary Protection Geofence", h1_style))
+    wb = active_route.get("walk_back_assessment") or plan_data.get("walk_back_assessment") or {}
+    on_foot = wb.get("on_foot_feasibility") or {}
+    rf = wb.get("rf_communication") or {}
+    pp = active_route.get("planetary_protection_assessment") or plan_data.get("planetary_protection") or {}
+
+    wb_status = on_foot.get("status", "SAFE WITHIN CONFIGURED LIMIT")
+    wb_dur = on_foot.get("walk_back_duration_formatted", "1h 45m")
+    wb_dist = float(on_foot.get("walk_back_distance_km", 2.8) or 2.8)
+    wb_margin = float(on_foot.get("emergency_resource_margin_pct", 55.0) or 55.0)
+    wb_diff = str(on_foot.get("terrain_difficulty", "MODERATE"))
+    pp_approved = bool(pp.get("human_route_approved", True))
+    pp_status_str = "HUMAN ROUTE APPROVED (Clear)" if pp_approved else "RESTRICTED — HUMAN ACCESS BARRED"
+    rf_los = str(rf.get("direct_habitat_los", "CONNECTED"))
+    rf_shadow = str(rf.get("terrain_shadow_risk", "LOW"))
+
+    safety_table_data = [
+        [
+            Paragraph("<b>On-Foot Feasibility:</b>", bold_style),
+            Paragraph(f"<b>{wb_status}</b>", bold_style),
+            Paragraph("<b>Planetary Protection:</b>", bold_style),
+            Paragraph(f"<b>{pp_status_str}</b>", bold_style),
+        ],
+        [
+            Paragraph("<b>Emergency Walk Distance:</b>", bold_style),
+            Paragraph(f"{wb_dist:.2f} km", body_style),
+            Paragraph("<b>Emergency Walk Duration:</b>", bold_style),
+            Paragraph(
+                f"{wb_dur} (Limit: {float(on_foot.get('max_permitted_walking_hours', 3.5) or 3.5):.1f}h)", body_style
+            ),
+        ],
+        [
+            Paragraph("<b>Life-Support Margin:</b>", bold_style),
+            Paragraph(f"{wb_margin:.1f}% suit reserve", body_style),
+            Paragraph("<b>Terrain Bottlenecks:</b>", bold_style),
+            Paragraph(f"Difficulty: {wb_diff}", body_style),
+        ],
+        [
+            Paragraph("<b>Direct Habitat RF LOS:</b>", bold_style),
+            Paragraph(f"{rf_los}", body_style),
+            Paragraph("<b>RF Terrain Shadow:</b>", bold_style),
+            Paragraph(f"Risk: {rf_shadow}", body_style),
+        ],
+    ]
+    t_safety = Table(safety_table_data, colWidths=[130, 140, 130, 140])
+    t_safety.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, -1),
+                    colors.HexColor("#F0FDF4") if pp_approved else colors.HexColor("#FEF2F2"),
+                ),
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.HexColor("#86EFAC") if pp_approved else colors.HexColor("#FCA5A5"),
+                ),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    story.append(t_safety)
+    story.append(Spacer(1, 10))
+
+    # 7. AI Mission Intelligence & Synthetic Risk Assessment (Assisted)
+    story.append(Paragraph("7. AI Mission Intelligence & Synthetic Risk Assessment (Assisted)", h1_style))
 
     engine = get_mission_intelligence_engine()
 
@@ -576,8 +647,8 @@ def generate_mission_pdf(
         )
         story.append(Spacer(1, 8))
 
-    # 7. Engineering Limitations & Mandatory Disclaimer Box
-    story.append(Paragraph("7. Engineering Limitations & Mandatory Disclaimers", h1_style))
+    # 8. Engineering Limitations & Mandatory Disclaimer Box
+    story.append(Paragraph("8. Engineering Limitations & Mandatory Disclaimers", h1_style))
 
     lim_items = plan_data.get("limitations", [])
     if not lim_items:

@@ -38,6 +38,24 @@ export function computeTimeOverlayPixels(zone, kind = 'return') {
             rgb = [228, 102, 86];
             a = 110;
           }
+        } else if (kind === 'rover') {
+          if (val <= budget) {
+            const frac = Math.min(1, val / Math.max(1, budget));
+            rgb = [0, Math.round(180 + frac * 40), 255]; // Cyan translucent vehicle envelope
+            a = Math.round(55 + frac * 35);
+          } else {
+            rgb = [226, 112, 92];
+            a = 40;
+          }
+        } else if (kind === 'walkback') {
+          if (val <= budget) {
+            const frac = Math.min(1, val / Math.max(1, budget));
+            rgb = [Math.round(20 + frac * 30), 230, Math.round(110 - frac * 30)]; // Green translucent suited pedestrian envelope
+            a = Math.round(60 + frac * 35);
+          } else {
+            rgb = [226, 112, 92];
+            a = 40;
+          }
         } else {
           if (val <= budget) {
             const frac = Math.min(1, val / Math.max(1, budget));

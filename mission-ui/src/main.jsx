@@ -39,6 +39,10 @@ import {
   fetchIntelligenceTimeline,
   propagateKeplerian
 } from './intelligence.js';
+import WalkBackSafetyPanel from './WalkBackSafetyPanel.jsx';
+import PlanetaryProtectionPanel from './PlanetaryProtectionPanel.jsx';
+import { evaluateOnFootFeasibility, evaluateRFCommunication } from './walkback.js';
+import { evaluateRouteGeofenceClient, JEZERO_SPECIAL_REGIONS } from './planetary_protection.js';
 
 const INITIAL = { start: { lon: 77.40, lat: 18.39 }, destination: { lon: 77.44, lat: 18.42 } };
 const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }) : '—');
@@ -303,6 +307,14 @@ function App() {
   const [rescueThresholdMinutes, setRescueThresholdMinutes] = useState(30);
   const [showReachableZone, setShowReachableZone] = useState(true);
   const [showRescueMap, setShowRescueMap] = useState(false);
+  const [showRoverEnvelope, setShowRoverEnvelope] = useState(true);
+  const [showWalkbackEnvelope, setShowWalkbackEnvelope] = useState(true);
+  const [envelopeOverlayMode, setEnvelopeOverlayMode] = useState('combined');
+  const [showOfficialZones, setShowOfficialZones] = useState(true);
+  const [showCandidateZones, setShowCandidateZones] = useState(true);
+  const [showDemoZones, setShowDemoZones] = useState(true);
+  const [selectedSpecialRegionId, setSelectedSpecialRegionId] = useState('ppz_jezero_delta_aquifer');
+  const [habitatBase, setHabitatBase] = useState(INITIAL.start);
 
   // Results & analysis state
   const [result, setResult] = useState(null);
@@ -1228,6 +1240,14 @@ function App() {
           terrainOpacity={terrainOpacity}
           showReachableZone={showReachableZone}
           showRescueMap={showRescueMap}
+          showRoverEnvelope={showRoverEnvelope}
+          showWalkbackEnvelope={showWalkbackEnvelope}
+          overlayMode={envelopeOverlayMode}
+          showOfficialZones={showOfficialZones}
+          showCandidateZones={showCandidateZones}
+          showDemoZones={showDemoZones}
+          onSelectSpecialRegion={setSelectedSpecialRegionId}
+          habitat={habitatBase || start}
           showOrbiters={showOrbiters}
           showGroundTracks={showGroundTracks}
           showFootprints={showFootprints}
@@ -1389,6 +1409,25 @@ function App() {
                         )}
                         {r.marswalk_survivability.topographic_shelter_bonus > 0 && (
                           <span className="shelter-badge-chip">⛰️ Sheltered (+{r.marswalk_survivability.topographic_shelter_bonus})</span>
+                        )}
+                      </div>
+                    )}
+                    {(r.walk_back_assessment || r.planetary_protection_assessment) && (
+                      <div className="card-survivability-row mt-1">
+                        {r.walk_back_assessment?.on_foot_feasibility && (
+                          <span className={`badge-pill text-[10px] ${r.walk_back_assessment.on_foot_feasibility.destination_exceeds_limit ? 'status-exceeded' : r.walk_back_assessment.on_foot_feasibility.status === 'LIMITED MARGIN' ? 'status-limited' : 'status-safe'}`}>
+                            🚶 Walk-Back: {r.walk_back_assessment.on_foot_feasibility.walk_back_duration_formatted} ({r.walk_back_assessment.on_foot_feasibility.status === 'SAFE WITHIN CONFIGURED LIMIT' ? 'SAFE' : r.walk_back_assessment.on_foot_feasibility.destination_exceeds_limit ? 'EXCEEDED' : 'LIMITED'})
+                          </span>
+                        )}
+                        {r.planetary_protection_assessment?.human_route_approved === false && (
+                          <span className="badge-pill text-[10px] status-exceeded">
+                            🛑 PPZ Restricted
+                          </span>
+                        )}
+                        {r.planetary_protection_assessment?.human_route_approved !== false && r.planetary_protection_assessment?.total_intersections > 0 && (
+                          <span className="badge-pill text-[10px] status-limited">
+                            ⚠️ PPZ Advisory
+                          </span>
                         )}
                       </div>
                     )}
@@ -2189,6 +2228,54 @@ function App() {
                   )}
                 </button>
               </form>
+
+              {/* Astronaut Walk-Back Safety & Planetary Protection Panels */}
+              <WalkBackSafetyPanel
+                walkBackAssessment={
+                  active?.walk_back_assessment ||
+                  result?.walk_back_assessment ||
+                  (result ? {
+                    on_foot_feasibility: evaluateOnFootFeasibility({
+                      routeDistanceKm: (active?.summary?.total_distance_meters || 2000) / 1000,
+                      routeMaxSlopeDeg: active?.summary?.max_slope_deg || 5.0,
+                      routeAvgSlopeDeg: (active?.summary?.max_slope_deg || 5.0) * 0.5,
+                      routeRoughnessTri: active?.summary?.roughness_tri || 0.35,
+                      coordinates: active?.geometry?.coordinates || [],
+                      evaBudgetHours: evaBudgetHours,
+                    }),
+                    rover_assisted_return_hours: ((active?.summary?.total_distance_meters || 2000) / 1000) / 10.0,
+                    rover_vs_foot_ratio: 2.5,
+                    rf_communication: evaluateRFCommunication({
+                      habitatCoord: habitatBase || start,
+                      routeCoords: active?.geometry?.coordinates || [],
+                      maxSlopeDeg: active?.summary?.max_slope_deg || 5.0,
+                    }),
+                  } : null)
+                }
+                showRoverEnvelope={showRoverEnvelope}
+                setShowRoverEnvelope={setShowRoverEnvelope}
+                showWalkbackEnvelope={showWalkbackEnvelope}
+                setShowWalkbackEnvelope={setShowWalkbackEnvelope}
+                overlayMode={envelopeOverlayMode}
+                setOverlayMode={setEnvelopeOverlayMode}
+              />
+
+              <PlanetaryProtectionPanel
+                planetaryProtectionAssessment={
+                  active?.planetary_protection_assessment ||
+                  result?.planetary_protection ||
+                  (active?.geometry?.coordinates ? evaluateRouteGeofenceClient(active.geometry.coordinates) : null)
+                }
+                showOfficialZones={showOfficialZones}
+                setShowOfficialZones={setShowOfficialZones}
+                showCandidateZones={showCandidateZones}
+                setShowCandidateZones={setShowCandidateZones}
+                showDemoZones={showDemoZones}
+                setShowDemoZones={setShowDemoZones}
+                selectedRegionId={selectedSpecialRegionId}
+                setSelectedRegionId={setSelectedSpecialRegionId}
+                apiUrl={api?.url || apiUrl || ''}
+              />
               <p className="route-caption">Jezero pilot region · IAU2000:49900</p>
             </>
           )}

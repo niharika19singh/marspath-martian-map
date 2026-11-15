@@ -31,6 +31,7 @@ import {
   buildTimeOverlayCanvas,
   calculateEdgeFeatherGradients,
 } from './map_rendering.js';
+import { JEZERO_SPECIAL_REGIONS } from './planetary_protection.js';
 
 export { computeTimeOverlayPixels, buildTimeOverlayCanvas, calculateEdgeFeatherGradients };
 
@@ -96,6 +97,9 @@ export default function MapView(props) {
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
     showReachableZone = true, showRescueMap = false, onOpenSurfacePov,
+    showRoverEnvelope = true, showWalkbackEnvelope = true, overlayMode = 'combined',
+    showOfficialZones = true, showCandidateZones = true, showDemoZones = true,
+    onSelectSpecialRegion, habitat,
   } = props;
 
   const effectiveTerrain = activeDemTerrain || terrain;
@@ -310,6 +314,10 @@ export default function MapView(props) {
     const demBoundaryLayer = new VectorLayer({ source: new VectorSource(), zIndex: 13.5 });
     const returnZoneLayer = new ImageLayer({ zIndex: 13.8, visible: false, opacity: 0.78 });
     const rescueZoneLayer = new ImageLayer({ zIndex: 13.9, visible: false, opacity: 0.78 });
+    const roverEnvelopeLayer = new ImageLayer({ zIndex: 13.7, visible: false, opacity: 0.72 });
+    const walkbackEnvelopeLayer = new ImageLayer({ zIndex: 13.85, visible: false, opacity: 0.75 });
+    const planetaryProtectionLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18 });
+    const habitatMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 22.5 });
     const risk = new ImageLayer({ zIndex: 14, visible: false });
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
     const historyLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
@@ -364,6 +372,9 @@ export default function MapView(props) {
         demBoundaryLayer,
         returnZoneLayer,
         rescueZoneLayer,
+        roverEnvelopeLayer,
+        walkbackEnvelopeLayer,
+        planetaryProtectionLayer,
         themisLayer,
         footprintsLayer,
         groundTracksLayer,
@@ -375,6 +386,7 @@ export default function MapView(props) {
         scienceTargetsLayer,
         routes,
         pins,
+        habitatMarkerLayer,
         turnaroundLayer,
         hoverLayer,
         roverReplayLayer,
@@ -467,6 +479,10 @@ export default function MapView(props) {
       demBoundaryLayer,
       returnZoneLayer,
       rescueZoneLayer,
+      roverEnvelopeLayer,
+      walkbackEnvelopeLayer,
+      planetaryProtectionLayer,
+      habitatMarkerLayer,
       themisLayer,
       footprintsLayer,
       groundTracksLayer,
@@ -523,14 +539,19 @@ export default function MapView(props) {
 
     map.on('singleclick', e => {
       interact();
-      let routeId = null, recorded = null, obsId = null, scId = null;
+      let routeId = null, recorded = null, obsId = null, scId = null, zoneData = null;
       map.forEachFeatureAtPixel(e.pixel, f => {
+        if (f.get('zoneData')) { zoneData = f.get('zoneData'); return true; }
         if (f.get('observationId')) { obsId = f.get('observationId'); return true; }
         if (f.get('spacecraftId')) { scId = f.get('spacecraftId'); return true; }
         if (f.get('waypoint')) { recorded = f.get('waypoint'); return true; }
         if (f.get('driveRecord')) { recorded = f.get('driveRecord'); return true; }
         if (f.get('routeId')) { routeId = f.get('routeId'); return true; }
       }, { hitTolerance: 6 });
+      if (zoneData && !callbacks.current.pick) {
+        callbacks.current.props.onSelectSpecialRegion?.(zoneData.id);
+        return;
+      }
       if (obsId) { callbacks.current.props.onSelectObservation?.(obsId); return; }
       if (scId) { callbacks.current.props.onSelectSpacecraft?.(scId); return; }
       if (recorded && !callbacks.current.pick) {
@@ -944,7 +965,127 @@ export default function MapView(props) {
         turnSrc.addFeature(tf);
       }
     }
-  }, [response, activeRoute, showRoute, showReachableZone, showRescueMap]);
+
+    // Dual-Radius Envelopes: Rover-Assisted (Cyan) & On-Foot Walk-Back (Green)
+    const roverGrid = response?.dual_envelopes?.rover_assisted?.time_grid || response?.rescue_zone;
+    const shouldShowRover = showRoute && (overlayMode === 'combined' || showRoverEnvelope);
+    if (shouldShowRover && roverGrid?.minutes_grid?.length && roverGrid?.bounds?.length === 4) {
+      l.roverEnvelopeLayer?.setSource(
+        new ImageStatic({
+          url: buildTimeOverlayCanvas(roverGrid, 'rover'),
+          imageExtent: roverGrid.bounds,
+          projection: l.projection,
+          interpolate: false,
+        })
+      );
+      l.roverEnvelopeLayer?.setVisible(true);
+    } else {
+      l.roverEnvelopeLayer?.setVisible(false);
+    }
+
+    const walkGrid = response?.dual_envelopes?.on_foot_walkback?.time_grid || response?.return_zone;
+    const shouldShowWalk = showRoute && (overlayMode === 'combined' || showWalkbackEnvelope);
+    if (shouldShowWalk && walkGrid?.minutes_grid?.length && walkGrid?.bounds?.length === 4) {
+      l.walkbackEnvelopeLayer?.setSource(
+        new ImageStatic({
+          url: buildTimeOverlayCanvas(walkGrid, 'walkback'),
+          imageExtent: walkGrid.bounds,
+          projection: l.projection,
+          interpolate: false,
+        })
+      );
+      l.walkbackEnvelopeLayer?.setVisible(true);
+    } else {
+      l.walkbackEnvelopeLayer?.setVisible(false);
+    }
+
+    // Planetary Protection Special-Region Geofence Polygons
+    const ppSrc = l.planetaryProtectionLayer?.getSource();
+    if (ppSrc) {
+      ppSrc.clear();
+      const zones = response?.special_regions || JEZERO_SPECIAL_REGIONS;
+      zones.forEach(zone => {
+        const isOfficial = zone.classification === 'official_restricted_zone';
+        const isCandidate = zone.classification === 'candidate_sensitive_region';
+        const isDemo = zone.classification === 'demonstration_scenario';
+
+        if (isOfficial && !showOfficialZones) return;
+        if (isCandidate && !showCandidateZones) return;
+        if (isDemo && !showDemoZones) return;
+
+        const polyFeature = new Feature({
+          geometry: new Polygon([zone.coordinates]),
+          zoneData: zone,
+        });
+
+        const strokeColor = isOfficial ? '#ef4444' : (isCandidate ? '#f59e0b' : '#a855f7');
+        const fillColor = isOfficial ? 'rgba(239, 68, 68, 0.22)' : (isCandidate ? 'rgba(245, 158, 11, 0.20)' : 'rgba(168, 85, 247, 0.18)');
+        const lineDash = isDemo ? [8, 6] : undefined;
+
+        polyFeature.setStyle(new Style({
+          stroke: new Stroke({ color: strokeColor, width: isOfficial ? 2.5 : 2.0, lineDash }),
+          fill: new Fill({ color: fillColor }),
+          text: new Text({
+            text: `${zone.name}\n[${isOfficial ? 'OFFICIAL RESTRICTED' : isCandidate ? 'CANDIDATE SENSITIVE' : 'DEMO DRILL'}]`,
+            font: '600 11px Inter, sans-serif',
+            offsetY: -10,
+            fill: new Fill({ color: strokeColor }),
+            stroke: new Stroke({ color: '#090d11', width: 3.5 }),
+          }),
+        }));
+
+        ppSrc.addFeature(polyFeature);
+      });
+    }
+
+    // Habitat Base Marker Layer
+    const habSrc = l.habitatMarkerLayer?.getSource();
+    if (habSrc) {
+      habSrc.clear();
+      const habCoord = habitat || response?.dual_envelopes?.habitat_coordinate || start;
+      const habLon = habCoord?.lon ?? habCoord?.[0];
+      const habLat = habCoord?.lat ?? habCoord?.[1];
+
+      if (Number.isFinite(habLon) && Number.isFinite(habLat)) {
+        const habFeature = new Feature({
+          geometry: new Point([habLon, habLat]),
+          name: 'Base Habitat Alpha',
+        });
+        habFeature.setStyle(new Style({
+          image: new RegularShape({
+            fill: new Fill({ color: '#00e676' }),
+            stroke: new Stroke({ color: '#090d11', width: 2.5 }),
+            points: 5,
+            radius: 12,
+            radius2: 6,
+            angle: 0,
+          }),
+          text: new Text({
+            text: 'HABITAT BASE',
+            font: '700 11px Inter, sans-serif',
+            offsetY: -18,
+            fill: new Fill({ color: '#86efac' }),
+            stroke: new Stroke({ color: '#090d11', width: 3.5 }),
+          }),
+        }));
+        habSrc.addFeature(habFeature);
+      }
+    }
+  }, [
+    response,
+    activeRoute,
+    showRoute,
+    showReachableZone,
+    showRescueMap,
+    showRoverEnvelope,
+    showWalkbackEnvelope,
+    overlayMode,
+    showOfficialZones,
+    showCandidateZones,
+    showDemoZones,
+    habitat,
+    start,
+  ]);
 
   const routeProfile = useMemo(() => {
     if (!activeRoute?.geometry?.coordinates || activeRoute.geometry.coordinates.length < 2) return null;
