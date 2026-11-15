@@ -81,22 +81,26 @@ function buildThemisThermalCanvas(terrain) {
 export default function MapView(props) {
   const {
     historyMode, drives = [], waypoints = [], showHistory = true, showWaypoints = true, historyFit, waypoint, onWaypoint,
+    fullTraverse = null, roverWaypoint = null, windowStats = null, solCut = 2022, maxSol = 2022, minSol = 14, onSolChange,
+    selectedScienceTarget: propSelectedSciTarget, onSelectScienceTarget,
     terrain, activeDemTerrain, start, destination, pick, onPin, base = 'auto',
     hazards = false, coverage = false, showHillshade = false, showSlope = false, showRoughness = false,
-    showViking = true, showCtx = true, showHirise = true, showMolaTerrain = false,
+    showViking = true, showCtx = false, showHirise = false, showMolaTerrain = false,
     vikingOpacity, ctxOpacity, hiriseOpacity, molaOpacity = 0.78,
     imageryOpacity = 1.0, terrainOpacity = 0.72,
     maxSlope = 20, maxRough = 0.85, response, selected, onSelectRoute,
     hover, fitToken, live, backendStatus, provenance, showRoute = true, showAlternatives = false, hoveredRoute = null,
     view3d = false, layersOpen, onLayersToggle, onTiltToggle, actionsRef,
     leftOpen = true, rightExpanded = false, profileExpanded = false,
-    showOrbiters = true, showGroundTracks = true, showFootprints = true, showCuriosity = false,
+    showOrbiters = false, showGroundTracks = false, showFootprints = false, showCuriosity = false,
     spacecraftPositions = [], groundTracks = [], orbitalObservations = [], selectedObservation = null, selectedSpacecraft = null,
     onSelectObservation, onSelectSpacecraft, curiosityTraverse = null, curiosityWaypoints = [], focusedProduct = null,
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
     showReachableZone = true, showRescueMap = false,
   } = props;
+
+  const [selectedScienceTarget, setSelectedScienceTarget] = useState(null);
 
   const effectiveTerrain = activeDemTerrain || terrain;
   const terrainRef = useRef(effectiveTerrain);
@@ -250,6 +254,7 @@ export default function MapView(props) {
       maxResolution: 800 / M_PER_DEG,
       zIndex: 2,
       opacity: 1.0,
+      visible: false,
       preload: 2,
     });
 
@@ -261,6 +266,7 @@ export default function MapView(props) {
       maxResolution: 25 / M_PER_DEG,
       zIndex: 3,
       opacity: 1.0,
+      visible: false,
       preload: 1,
     });
 
@@ -304,24 +310,26 @@ export default function MapView(props) {
     const slopeLayer = new ImageLayer({ opacity: 0.72, zIndex: 6, visible: false });
     const roughnessLayer = new ImageLayer({ opacity: 0.72, zIndex: 7, visible: false });
     const themisLayer = new ImageLayer({ zIndex: 10, visible: false });
-    const footprintsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 11 });
-    const groundTracksLayer = new VectorLayer({ source: new VectorSource(), zIndex: 12 });
-    const hiriseBoundary = new VectorLayer({ source: new VectorSource(), zIndex: 13 });
-    const demBoundaryLayer = new VectorLayer({ source: new VectorSource(), zIndex: 13.5 });
+    const footprintsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 11, visible: false });
+    const groundTracksLayer = new VectorLayer({ source: new VectorSource(), zIndex: 12, visible: false });
+    const hiriseBoundary = new VectorLayer({ source: new VectorSource(), zIndex: 13, visible: false });
+    const demBoundaryLayer = new VectorLayer({ source: new VectorSource(), zIndex: 13.5, visible: false });
     const returnZoneLayer = new ImageLayer({ zIndex: 13.8, visible: false, opacity: 0.78 });
     const rescueZoneLayer = new ImageLayer({ zIndex: 13.9, visible: false, opacity: 0.78 });
     const risk = new ImageLayer({ zIndex: 14, visible: false });
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
-    const historyLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
-    const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
+    const passiveTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
+    const highlightedTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
+    const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16.5 });
     const historyPins = new VectorLayer({ source: new VectorSource(), zIndex: 17 });
+    const roverMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18 });
     const scienceTargetsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 19 });
     const routes = new VectorLayer({ source: new VectorSource(), zIndex: 20 });
     const pins = new VectorLayer({ source: new VectorSource(), zIndex: 22 });
     const turnaroundLayer = new VectorLayer({ source: new VectorSource(), zIndex: 23 });
     const hoverLayer = new VectorLayer({ source: new VectorSource(), zIndex: 24 });
     const roverReplayLayer = new VectorLayer({ source: new VectorSource(), zIndex: 25 });
-    const spacecraftLayer = new VectorLayer({ source: new VectorSource(), zIndex: 26 });
+    const spacecraftLayer = new VectorLayer({ source: new VectorSource(), zIndex: 26, visible: false });
     const playbackLayer = new VectorLayer({ source: new VectorSource(), zIndex: 27 });
 
     // Populate DEM & Imagery Coverage Boundaries (visible strictly when coverage toggle is active)
@@ -369,9 +377,11 @@ export default function MapView(props) {
         groundTracksLayer,
         data,
         risk,
-        historyLayer,
+        passiveTraverseLayer,
+        highlightedTraverseLayer,
         curiosityLayer,
         historyPins,
+        roverMarkerLayer,
         scienceTargetsLayer,
         routes,
         pins,
@@ -472,7 +482,10 @@ export default function MapView(props) {
       groundTracksLayer,
       risk,
       data,
-      historyLayer,
+      passiveTraverseLayer,
+      highlightedTraverseLayer,
+      roverMarkerLayer,
+      historyLayer: highlightedTraverseLayer,
       curiosityLayer,
       historyPins,
       scienceTargetsLayer,
@@ -523,14 +536,20 @@ export default function MapView(props) {
 
     map.on('singleclick', e => {
       interact();
-      let routeId = null, recorded = null, obsId = null, scId = null;
+      let routeId = null, recorded = null, obsId = null, scId = null, sciTgt = null;
       map.forEachFeatureAtPixel(e.pixel, f => {
+        if (f.get('scienceTarget')) { sciTgt = f.get('scienceTarget'); return true; }
         if (f.get('observationId')) { obsId = f.get('observationId'); return true; }
         if (f.get('spacecraftId')) { scId = f.get('spacecraftId'); return true; }
         if (f.get('waypoint')) { recorded = f.get('waypoint'); return true; }
         if (f.get('driveRecord')) { recorded = f.get('driveRecord'); return true; }
         if (f.get('routeId')) { routeId = f.get('routeId'); return true; }
       }, { hitTolerance: 6 });
+      if (sciTgt) {
+        setSelectedScienceTarget(prev => prev === sciTgt.target_id ? null : sciTgt.target_id);
+        callbacks.current.props.onSelectScienceTarget?.(sciTgt);
+        return;
+      }
       if (obsId) { callbacks.current.props.onSelectObservation?.(obsId); return; }
       if (scId) { callbacks.current.props.onSelectSpacecraft?.(scId); return; }
       if (recorded && !callbacks.current.pick) {
@@ -645,16 +664,16 @@ export default function MapView(props) {
     l.wmtsMolaTerrain?.setVisible(molaVisible);
     l.wmtsMolaTerrain?.setOpacity(molaOpacity);
 
-    // 2. Regional CTX (6 m/px)
-    const ctxVisible = Boolean(showCtx && (isAuto || isCtx || isHirise || !isViking));
-    l.wmtsCtxRegional?.setVisible(ctxVisible && !isViking);
-    l.wmtsCtxRegional?.setMaxResolution((isCtx ? 8000 : 800) / M_PER_DEG);
+    // 2. Regional CTX (6 m/px) - Optional, off by default to avoid square patches
+    const ctxVisible = Boolean(showCtx && (isCtx || (!isViking && !isAuto)));
+    l.wmtsCtxRegional?.setVisible(ctxVisible);
+    l.wmtsCtxRegional?.setMaxResolution((isCtx ? 8000 : 150) / M_PER_DEG);
     l.wmtsCtxRegional?.setOpacity(effCtxOpacity);
 
-    // 3. Local HiRISE (0.25 m/px)
-    const hiriseVisible = Boolean(showHirise && (isAuto || isHirise));
-    l.wmtsHiriseLocal?.setVisible(hiriseVisible && !isViking && !isCtx);
-    l.wmtsHiriseLocal?.setMaxResolution((isHirise ? 2500 : 25) / M_PER_DEG);
+    // 3. Local HiRISE (0.25 m/px) - Optional, off by default, only shown at close zoom
+    const hiriseVisible = Boolean(showHirise && (isHirise || (!isViking && !isAuto)));
+    l.wmtsHiriseLocal?.setVisible(hiriseVisible);
+    l.wmtsHiriseLocal?.setMaxResolution((isHirise ? 2500 : 8) / M_PER_DEG);
     l.wmtsHiriseLocal?.setOpacity(effHiriseOpacity);
 
     if (!effectiveTerrain) return;
@@ -696,13 +715,14 @@ export default function MapView(props) {
     l.risk.setOpacity(terrainOpacity);
     l.data.setVisible(Boolean(coverage));
     l.data.setOpacity(terrainOpacity);
+    l.demBoundaryLayer?.setVisible(Boolean(coverage));
     l.demBoundaryLayer?.changed();
 
-    // Update HiRISE & CTX coverage boundary vectors
+    // Update HiRISE & CTX coverage boundary vectors (visible strictly when coverage toggle is active)
     if (l.hiriseBoundary) {
       const src = l.hiriseBoundary.getSource();
       src.clear();
-      if (coverage || isHirise) {
+      if (coverage) {
         const orthoE = JEZERO_HIRISE_ORTHO_BOUNDS;
         const fOrtho = new Feature(new Polygon([[
           [orthoE[0], orthoE[1]], [orthoE[2], orthoE[1]], [orthoE[2], orthoE[3]], [orthoE[0], orthoE[3]], [orthoE[0], orthoE[1]],
@@ -747,36 +767,39 @@ export default function MapView(props) {
     maxSlope, maxRough, live, showThemisOverlay,
   ]);
 
-  // Science Target markers
+  // Science Target markers: compact golden stars at wide zoom; labels revealed on selection or closer zoom
   useEffect(() => {
     if (!mapRef.current || !layers.current.scienceTargetsLayer) return;
     const l = layers.current, src = l.scienceTargetsLayer.getSource();
     src.clear();
     l.scienceTargetsLayer.setVisible(Boolean(showScienceTargets));
     if (!showScienceTargets || !scienceTargets?.length) return;
+    const activeSelectedId = propSelectedSciTarget ?? selectedScienceTarget;
     scienceTargets.forEach(tgt => {
       if (!Number.isFinite(tgt.lon) || !Number.isFinite(tgt.lat)) return;
+      const isSelected = activeSelectedId === tgt.target_id;
       const f = new Feature({ geometry: new Point([tgt.lon, tgt.lat]), scienceTarget: tgt });
       f.setStyle((feature, resolution) => {
         const resM = resolution * M_PER_DEG;
+        const showLabel = isSelected || resM <= 3.5;
         return new Style({
           image: new CircleStyle({
-            radius: resM > 400 ? 3.5 : 5.5,
-            fill: new Fill({ color: '#ffd166' }),
-            stroke: new Stroke({ color: '#141008', width: 1.8 }),
+            radius: isSelected ? 7 : (resM > 12 ? 3.5 : 5),
+            fill: new Fill({ color: isSelected ? '#5cffb0' : '#ffd166' }),
+            stroke: new Stroke({ color: '#141008', width: isSelected ? 2.5 : 1.5 }),
           }),
-          text: resM > 400 ? undefined : new Text({
+          text: showLabel ? new Text({
             text: `★ ${tgt.name} (${tgt.science_value_points} pts)`,
-            font: '500 10px Inter, sans-serif',
-            offsetY: 14,
-            fill: new Fill({ color: '#ffe8a3' }),
+            font: isSelected ? '600 11px Inter, sans-serif' : '500 10px Inter, sans-serif',
+            offsetY: 15,
+            fill: new Fill({ color: isSelected ? '#a3f4ca' : '#ffe8a3' }),
             stroke: new Stroke({ color: '#0b1012', width: 3 }),
-          }),
+          }) : undefined,
         });
       });
       src.addFeature(f);
     });
-  }, [terrain, showScienceTargets, scienceTargets]);
+  }, [terrain, showScienceTargets, scienceTargets, selectedScienceTarget, propSelectedSciTarget]);
 
   // Synchronized Rover Replay marker from Mars Time Machine
   useEffect(() => {
@@ -1153,47 +1176,141 @@ export default function MapView(props) {
     }
   }, [currentPlayback, historyMode, isPlaying]);
 
+  // 1. Full Recorded Traverse Layer (All 559 published drives across Jezero archive)
   useEffect(() => {
-    if (!mapRef.current) return;
-    const l = layers.current, source = l.historyLayer.getSource(), pins = l.historyPins.getSource();
-    source.clear();
-    pins.clear();
-    l.historyLayer.setVisible(showHistory);
-    l.historyPins.setVisible(showHistory && showWaypoints);
-    for (const drive of drives) {
-      const f = new Feature({ geometry: new LineString(drive.geometry.coordinates.map(c => [c[0], c[1]])), driveRecord: drive });
-      f.setStyle([new Style({ stroke: new Stroke({ color: '#101318ed', width: 8, lineCap: 'round', lineJoin: 'round' }) }), new Style({ stroke: new Stroke({ color: '#ffb867', width: 4, lineCap: 'round', lineJoin: 'round' }) }), new Style({ stroke: new Stroke({ color: '#ffe1aa', width: 1 }) })]);
-      source.addFeature(f);
-    }
-    waypoints.forEach((w, i) => {
-      const latest = i === waypoints.length - 1, chosen = w === waypoint, c = w.geometry.coordinates, f = new Feature({ geometry: new Point([c[0], c[1]]), waypoint: w });
-      f.setStyle((feature, resolution) => {
-        const resM = resolution * M_PER_DEG;
-        const ring = latest || chosen || i % 25 === 0 || resM < 2;
-        return [
-          new Style({ image: new CircleStyle({ radius: latest ? 7 : chosen ? 6 : 2.5, fill: new Fill({ color: latest ? '#87f1ee' : chosen ? '#f6a7f3' : '#c982d9' }), stroke: new Stroke({ color: '#18151e', width: 1.5 }) }) }),
-          ...(ring ? [new Style({ image: new CircleStyle({ radius: latest ? 15 : chosen ? 20 : 10, stroke: new Stroke({ color: latest ? '#8bf3eeaa' : '#d38ce4aa', width: 1.5 }) }), text: latest || chosen ? new Text({ text: 'Sol ' + w.properties.sol, font: '500 12px Inter, sans-serif', offsetY: -24, fill: new Fill({ color: '#f7e5fd' }), stroke: new Stroke({ color: '#10151a', width: 4 }) }) : undefined })] : []),
-        ];
-      });
-      pins.addFeature(f);
-    });
-  }, [terrain, drives, waypoints, showHistory, showWaypoints, waypoint]);
+    if (!mapRef.current || !layers.current.passiveTraverseLayer) return;
+    const l = layers.current;
+    const src = l.passiveTraverseLayer.getSource();
+    src.clear();
+    l.passiveTraverseLayer.setVisible(Boolean(showHistory));
 
-  function fitHistory() {
+    const allFeats = fullTraverse?.features || drives;
+    if (!allFeats?.length) return;
+
+    for (const drive of allFeats) {
+      if (!drive.geometry?.coordinates || drive.geometry.coordinates.length < 2) continue;
+      const f = new Feature({
+        geometry: new LineString(drive.geometry.coordinates.map(c => [c[0], c[1]])),
+        driveRecord: drive,
+      });
+      f.setStyle([
+        new Style({
+          stroke: new Stroke({ color: '#090d10ee', width: 4.5, lineCap: 'round', lineJoin: 'round' }),
+        }),
+        new Style({
+          stroke: new Stroke({ color: '#bfa07a', width: 1.8, lineCap: 'round', lineJoin: 'round' }),
+        }),
+      ]);
+      src.addFeature(f);
+    }
+  }, [fullTraverse, showHistory]);
+
+  // 2. Highlighted 15-Sol Trailing Window Layer
+  useEffect(() => {
+    if (!mapRef.current || !layers.current.highlightedTraverseLayer) return;
+    const l = layers.current;
+    const src = l.highlightedTraverseLayer.getSource();
+    src.clear();
+    l.highlightedTraverseLayer.setVisible(Boolean(showHistory));
+
+    for (const drive of drives) {
+      if (!drive.geometry?.coordinates || drive.geometry.coordinates.length < 2) continue;
+      const f = new Feature({
+        geometry: new LineString(drive.geometry.coordinates.map(c => [c[0], c[1]])),
+        driveRecord: drive,
+      });
+      f.setStyle([
+        new Style({
+          stroke: new Stroke({ color: '#090d10ee', width: 8.5, lineCap: 'round', lineJoin: 'round' }),
+        }),
+        new Style({
+          stroke: new Stroke({ color: '#ffb867', width: 4.2, lineCap: 'round', lineJoin: 'round' }),
+        }),
+        new Style({
+          stroke: new Stroke({ color: '#ffeab8', width: 1.6, lineCap: 'round', lineJoin: 'round' }),
+        }),
+      ]);
+      src.addFeature(f);
+    }
+  }, [drives, showHistory]);
+
+  // 3. Rover Marker & Milestone Waypoint Stops
+  useEffect(() => {
+    if (!mapRef.current || !layers.current.roverMarkerLayer || !layers.current.historyPins) return;
+    const l = layers.current;
+    const markerSrc = l.roverMarkerLayer.getSource();
+    const pinsSrc = l.historyPins.getSource();
+    markerSrc.clear();
+    pinsSrc.clear();
+    l.roverMarkerLayer.setVisible(Boolean(showHistory));
+    l.historyPins.setVisible(Boolean(showHistory && showWaypoints));
+
+    const activeWp = roverWaypoint || waypoints?.at(-1);
+    if (activeWp?.geometry?.coordinates) {
+      const c = activeWp.geometry.coordinates;
+      const f = new Feature({
+        geometry: new Point([c[0], c[1]]),
+        waypoint: activeWp,
+      });
+      const isLatest = activeWp.properties.sol >= (maxSol || 2022);
+      const markerLabel = isLatest
+        ? `Last recorded position · Sol ${maxSol || 2022}`
+        : `Perseverance · Sol ${activeWp.properties.sol}`;
+
+      f.setStyle(
+        new Style({
+          image: new CircleStyle({
+            radius: 8.5,
+            fill: new Fill({ color: '#ffb867' }),
+            stroke: new Stroke({ color: '#0b1014', width: 2.5 }),
+          }),
+          text: new Text({
+            text: markerLabel,
+            font: '600 11px Inter, sans-serif',
+            offsetY: -22,
+            fill: new Fill({ color: '#ffe2b8' }),
+            stroke: new Stroke({ color: '#0b1014', width: 3.5 }),
+          }),
+        })
+      );
+      markerSrc.addFeature(f);
+    }
+
+    waypoints.forEach(w => {
+      if (!w.geometry?.coordinates) return;
+      const c = w.geometry.coordinates;
+      const isCurrent = w === activeWp;
+      if (isCurrent) return;
+      const f = new Feature({ geometry: new Point([c[0], c[1]]), waypoint: w });
+      f.setStyle(
+        new Style({
+          image: new CircleStyle({
+            radius: 3.5,
+            fill: new Fill({ color: '#f6a7f3' }),
+            stroke: new Stroke({ color: '#18151e', width: 1.5 }),
+          }),
+        })
+      );
+      pinsSrc.addFeature(f);
+    });
+  }, [waypoints, roverWaypoint, showHistory, showWaypoints, maxSol]);
+
+  const fitFullTraverse = () => {
     if (view3d) { terrain3D.current?.fit(); return; }
-    const coords = drives.flatMap(f => f.geometry.coordinates).map(c => [c[0], c[1]]);
+    const feats = fullTraverse?.features || drives;
+    const coords = feats?.flatMap(f => f.geometry.coordinates).map(c => [c[0], c[1]]) || [];
     if (!coords.length || !mapRef.current) return;
     const xs = coords.map(p => p[0]), ys = coords.map(p => p[1]), mobile = innerWidth < 850;
-    const padDeg = 250 / M_PER_DEG;
+    const padDeg = 150 / M_PER_DEG;
     mapRef.current.getView().fit(
       [Math.min(...xs) - padDeg, Math.min(...ys) - padDeg, Math.max(...xs) + padDeg, Math.max(...ys) + padDeg],
-      { padding: mobile ? [200, 75, 150, 25] : [90, 125, 160, 395], duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450, minResolution: 0.8 / M_PER_DEG }
+      { padding: mobile ? [160, 50, 140, 30] : [90, 120, 150, 380], duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500, minResolution: 0.8 / M_PER_DEG }
     );
-  }
-  useEffect(() => { if (historyMode) fitHistory(); }, [terrain, historyFit]);
+  };
+  useEffect(() => { if (historyMode) fitFullTraverse(); }, [terrain, historyFit]);
 
   const fit = () => {
-    if (historyMode) { fitHistory(); return; }
+    if (historyMode) { fitFullTraverse(); return; }
     if (view3d) { terrain3D.current?.fit(); return; }
     mapRef.current?.getView().fit(layers.current.extent, { padding: [60, 70, 110, 70], duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450 });
   };
@@ -1217,7 +1334,7 @@ export default function MapView(props) {
       view.setResolution(12 / M_PER_DEG);
     }
   };
-  useEffect(() => { if (actionsRef) actionsRef.current = { fit, zoom, focus }; }, [view3d, terrain, historyMode, drives]);
+  useEffect(() => { if (actionsRef) actionsRef.current = { fit, zoom, focus, fitFullTraverse }; }, [view3d, terrain, historyMode, drives, fullTraverse]);
 
   useEffect(() => {
     if (historyMode || !response || !mapRef.current) return;
@@ -1244,7 +1361,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
     const l = layers.current, src = l.spacecraftLayer.getSource();
     src.clear();
-    l.spacecraftLayer.setVisible(showOrbiters);
+    l.spacecraftLayer.setVisible(Boolean(showOrbiters));
     if (!showOrbiters || !spacecraftPositions.length) return;
     spacecraftPositions.forEach(ship => {
       if (!Number.isFinite(ship.lon) || !Number.isFinite(ship.lat)) return;
@@ -1259,7 +1376,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
     const l = layers.current, src = l.groundTracksLayer.getSource();
     src.clear();
-    l.groundTracksLayer.setVisible(showGroundTracks);
+    l.groundTracksLayer.setVisible(Boolean(showGroundTracks));
     if (!showGroundTracks || !groundTracks.length) return;
     groundTracks.forEach(gt => {
       if (!gt.points || gt.points.length < 2) return;
@@ -1288,7 +1405,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
     const l = layers.current, src = l.footprintsLayer.getSource();
     src.clear();
-    l.footprintsLayer.setVisible(showFootprints);
+    l.footprintsLayer.setVisible(Boolean(showFootprints));
     if (!showFootprints || !orbitalObservations.length) return;
     orbitalObservations.forEach(obs => {
       const coords = obs.footprint_geojson?.geometry?.coordinates?.[0];
@@ -1453,6 +1570,51 @@ export default function MapView(props) {
           </button>
         ))}
       </div>
+
+      {/* Traverse Legend HUD (Full Archive + Highlighted 15-sol Window) */}
+      {showHistory && (
+        <div
+          className="traverse-legend-hud glass"
+          style={{
+            left: corridorCenterStyle,
+            maxWidth: corridorWidthStyle,
+            top: (showRoute && response?.routes?.length) ? '134px' : undefined,
+          }}
+          data-testid="traverse-legend-hud"
+        >
+          <div className="traverse-legend-item">
+            <span className="traverse-swatch passive" />
+            <span>Full recorded traverse</span>
+          </div>
+          <div className="traverse-legend-item">
+            <span className="traverse-swatch highlighted" />
+            <span>
+              Highlighted window: <strong>15 sols</strong> (Sol {Math.max(0, (solCut ?? 2022) - 14)}–{solCut ?? 2022})
+            </span>
+          </div>
+          <div className="traverse-legend-item">
+            <span className="traverse-marker-dot" />
+            <span>
+              {(solCut ?? 2022) >= (maxSol || 2022)
+                ? `Last recorded position · Sol ${maxSol || 2022}`
+                : `Perseverance position · Sol ${solCut}`}
+            </span>
+          </div>
+          {windowStats && windowStats.segments === 0 && (
+            <span className="empty-window-pill">
+              No recorded drives in this window
+            </span>
+          )}
+          <button
+            type="button"
+            className="fit-traverse-btn"
+            onClick={() => { interact(); fitFullTraverse(); }}
+            title="Fit full recorded traverse in view"
+          >
+            Fit full traverse
+          </button>
+        </div>
+      )}
 
       <div className="map-control-stack glass">
         <button aria-label="Zoom in" onClick={() => zoom(1)}><Icon name="plus" /></button>

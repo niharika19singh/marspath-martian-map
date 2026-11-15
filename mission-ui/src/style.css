@@ -2410,3 +2410,100 @@
   }
 }
 
+/* Traverse Legend HUD & Highlight Styling */
+.traverse-legend-hud {
+  position: absolute;
+  top: 78px;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(9, 15, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  font-size: 11px;
+  color: #c9d6cf;
+  white-space: nowrap;
+  pointer-events: auto;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  transition: left 0.22s ease;
+}
+.traverse-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.traverse-swatch.passive {
+  display: inline-block;
+  width: 16px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: #bfa07a;
+  box-shadow: 0 0 0 1px #090d10ee;
+}
+.traverse-swatch.highlighted {
+  display: inline-block;
+  width: 16px;
+  height: 3.5px;
+  border-radius: 2px;
+  background: #ffb867;
+  box-shadow: 0 0 5px rgba(255, 184, 103, 0.6);
+}
+.traverse-marker-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffb867;
+  border: 1.5px solid #0b1014;
+}
+.empty-window-pill {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #ffbb70;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.fit-traverse-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  color: #e2ede7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+.fit-traverse-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+.traverse-key .highlighted {
+  background: #ffb867;
+  width: 15px;
+  height: 3px;
+  display: block;
+  border-radius: 3px;
+}
+@media (max-width: 850px) {
+  .traverse-legend-hud {
+    top: auto;
+    bottom: 110px;
+    font-size: 10px;
+    gap: 8px;
+    padding: 4px 10px;
+    max-width: 95vw;
+    overflow-x: auto;
+  }
+}
+
+

@@ -1,4 +1,13 @@
-import { validateTraverse, visibleDrives, visibleWaypoints, traverseStats, exportTraverse } from './traverse.js';
+import {
+  validateTraverse,
+  visibleDrives,
+  visibleWaypoints,
+  windowedDrives,
+  windowedWaypoints,
+  latestWaypointThroughSol,
+  traverseStats,
+  exportTraverse,
+} from './traverse.js';
 import { TraversePanel, TraverseTimeline } from './TraversePanel.jsx';
 import { ConditionsPanel } from './ConditionsPanel.jsx';
 import { computeClientMars24 } from './conditions.js';
@@ -111,9 +120,9 @@ function App() {
   const [curiosityTraverse, setCuriosityTraverse] = useState(null);
   const [curiosityWaypoints, setCuriosityWaypoints] = useState(null);
   const [timelineEvents, setTimelineEvents] = useState([]);
-  const [showOrbiters, setShowOrbiters] = useState(true);
-  const [showGroundTracks, setShowGroundTracks] = useState(true);
-  const [showFootprints, setShowFootprints] = useState(true);
+  const [showOrbiters, setShowOrbiters] = useState(false);
+  const [showGroundTracks, setShowGroundTracks] = useState(false);
+  const [showFootprints, setShowFootprints] = useState(false);
   const [showCuriosity, setShowCuriosity] = useState(false);
   const [showThemisOverlay, setShowThemisOverlay] = useState(false);
   const [showScienceTargets, setShowScienceTargets] = useState(true);
@@ -164,10 +173,17 @@ function App() {
   const nasaDataMode = missionView === 'nasa-data';
   const cloudAiMode = missionView === 'cloud-ai';
   const plannerMode = missionView === 'planner';
-  const drives = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
-  const waypoints = useMemo(() => visibleWaypoints(waypointData, solCut), [waypointData, solCut]);
-  const historyStats = useMemo(() => traverseStats(drives, waypoints), [drives, waypoints]);
-  const maxSol = traverse ? Math.max(...traverse.features.map(f => f.properties.sol)) : 2022;
+  const maxSol = useMemo(() => (traverse?.features ? Math.max(...traverse.features.map(f => f.properties.sol)) : 2022), [traverse]);
+  const minSol = useMemo(() => (traverse?.features ? Math.min(...traverse.features.map(f => f.properties.sol)) : 14), [traverse]);
+
+  // Windowed 15-sol trailing window drives & waypoints: [solCut - 14, solCut]
+  const highlightedDrives = useMemo(() => windowedDrives(traverse, solCut, 15), [traverse, solCut]);
+  const highlightedWaypoints = useMemo(() => windowedWaypoints(waypointData, solCut, 15), [waypointData, solCut]);
+  const activeRoverWp = useMemo(() => latestWaypointThroughSol(waypointData, solCut), [waypointData, solCut]);
+  const windowStats = useMemo(() => traverseStats(highlightedDrives, highlightedWaypoints), [highlightedDrives, highlightedWaypoints]);
+  const totalArchiveStats = useMemo(() => traverseStats(traverse?.features || [], waypointData || []), [traverse, waypointData]);
+  const drivesThroughSol = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
+  const historyStats = useMemo(() => traverseStats(drivesThroughSol, visibleWaypoints(waypointData, solCut)), [drivesThroughSol, waypointData, solCut]);
 
   useEffect(() => {
     let cancelled = false;
@@ -283,8 +299,8 @@ function App() {
   const [base, setBase] = useState('auto');
   const [activeBookmark, setActiveBookmark] = useState('jezero');
   const [showViking, setShowViking] = useState(true);
-  const [showCtx, setShowCtx] = useState(true);
-  const [showHirise, setShowHirise] = useState(true);
+  const [showCtx, setShowCtx] = useState(false);
+  const [showHirise, setShowHirise] = useState(false);
   const [showMolaTerrain, setShowMolaTerrain] = useState(false);
   const [showHillshade, setShowHillshade] = useState(false);
   const [showSlope, setShowSlope] = useState(false);
@@ -1124,8 +1140,16 @@ function App() {
       <main className="map-stage" aria-label="MarsPath mission planner">
         <MapView
           historyMode={historyMode}
-          drives={drives}
-          waypoints={waypoints}
+          drives={highlightedDrives}
+          waypoints={highlightedWaypoints}
+          fullTraverse={traverse}
+          fullWaypoints={waypointData}
+          roverWaypoint={activeRoverWp}
+          windowStats={windowStats}
+          solCut={solCut}
+          maxSol={maxSol}
+          minSol={minSol}
+          onSolChange={setSolCut}
           showHistory={showHistory}
           showWaypoints={showWaypoints}
           historyFit={historyFit}
@@ -1481,13 +1505,16 @@ function App() {
           ) : historyMode ? (
             <TraversePanel
               data={traverse}
-              waypoints={waypoints}
-              stats={historyStats}
+              waypoints={highlightedWaypoints}
+              stats={totalArchiveStats}
+              windowStats={windowStats}
               selected={waypoint}
-              onFit={showAllHistory}
+              onFit={() => mapActions.current?.fitFullTraverse?.()}
               onExport={exportHistory}
               onPlan={planFromWaypoint}
               error={traverseError}
+              solCut={solCut}
+              windowSize={15}
             />
           ) : (
             <>
@@ -3121,7 +3148,17 @@ function App() {
         )}
 
         {historyMode ? (
-          <TraverseTimeline cut={solCut} max={maxSol} stats={historyStats} onChange={v => { setSolCut(v); setWaypoint(null); }} onAll={showAllHistory} />
+          <TraverseTimeline
+            cut={solCut}
+            max={maxSol}
+            minSol={minSol}
+            stats={historyStats}
+            windowStats={windowStats}
+            onChange={v => { setSolCut(v); setWaypoint(null); }}
+            onAll={showAllHistory}
+            onFit={() => mapActions.current?.fitFullTraverse?.()}
+            windowSize={15}
+          />
         ) : plannerMode ? (
           <Profile
             route={active}
@@ -3135,7 +3172,8 @@ function App() {
         ) : null}
 
         <div className="traverse-key glass">
-          <span><i className="recorded" />Recorded drives</span>
+          <span><i className="recorded" style={{ background: '#bfa07a' }} />Full traverse</span>
+          <span><i className="highlighted" style={{ background: '#ffb867' }} />15-sol window</span>
           <span><i className="stops" />Waypoints</span>
           {showRoute && <span><i className="planned" />Planned route</span>}
         </div>
