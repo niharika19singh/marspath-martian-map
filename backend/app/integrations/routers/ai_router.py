@@ -5,14 +5,22 @@ from pydantic import BaseModel, Field
 
 from backend.app.integrations.ai.schemas.models import (
     AIProviderInfo,
+    CandidateRouteComparisonRequest,
+    CandidateRouteComparisonResponse,
     ImageryInterpretationRequest,
     ImageryInterpretationResponse,
     MarsScienceChatRequest,
     MarsScienceChatResponse,
+    MissionRiskBriefingRequest,
+    MissionRiskBriefingResponse,
     ModelComparisonRequest,
     ModelComparisonResponse,
+    NaturalLanguageMissionPlanRequest,
+    NaturalLanguageMissionPlanResponse,
     RouteExplanationRequest,
     RouteExplanationResponse,
+    ScientificTerrainInterpretationRequest,
+    ScientificTerrainInterpretationResponse,
 )
 from backend.app.integrations.ai.services.mars_science_assistant import get_science_assistant
 
@@ -84,3 +92,68 @@ async def compare_ai_models(request: ModelComparisonRequest) -> ModelComparisonR
     """Executes side-by-side prompt against both Gemini and Azure AI Foundry for comparative evaluation."""
     assistant = get_science_assistant()
     return await assistant.compare_models(request)
+
+
+# ---------------------------------------------------------------------
+# AI Mission Intelligence Layer Endpoints
+# ---------------------------------------------------------------------
+
+
+@router.post(
+    "/mission/plan-from-prompt",
+    response_model=NaturalLanguageMissionPlanResponse,
+    summary="Natural-language mission planning and intent extraction",
+)
+async def plan_mission_from_natural_language(
+    request: NaturalLanguageMissionPlanRequest,
+) -> NaturalLanguageMissionPlanResponse:
+    """Translates user mission objectives into validated, schema-compliant routing parameters.
+    Resolves Jezero landmarks, detects out-of-bounds requests, and produces executable route requests.
+    """
+    assistant = get_science_assistant()
+    return await assistant.plan_mission_from_prompt(request)
+
+
+@router.post(
+    "/routes/compare-candidates",
+    response_model=CandidateRouteComparisonResponse,
+    summary="AI multi-criteria comparison of candidate routes",
+)
+async def compare_route_candidates(
+    request: CandidateRouteComparisonRequest,
+) -> CandidateRouteComparisonResponse:
+    """Grounded evaluation comparing candidate corridors across distance, slope, roughness,
+    EVA turnaround feasibility, and Monte Carlo robustness with exact numeric grounding.
+    """
+    assistant = get_science_assistant()
+    return await assistant.compare_route_candidates(request)
+
+
+@router.post(
+    "/terrain/interpret",
+    response_model=ScientificTerrainInterpretationResponse,
+    summary="Scientific terrain, geological, and thermal interpretation",
+)
+async def interpret_scientific_terrain(
+    request: ScientificTerrainInterpretationRequest,
+) -> ScientificTerrainInterpretationResponse:
+    """Explains geological formations, mineralogy, and thermal inertia along traversal corridor,
+    explicitly distinguishing measured data, derived metrics, and proxy indicators.
+    """
+    assistant = get_science_assistant()
+    return await assistant.interpret_scientific_terrain(request)
+
+
+@router.post(
+    "/mission/risk-briefing",
+    response_model=MissionRiskBriefingResponse,
+    summary="Executive mission risk briefing and contingency corridors",
+)
+async def generate_mission_risk_briefing(
+    request: MissionRiskBriefingRequest,
+) -> MissionRiskBriefingResponse:
+    """Synthesizes deterministic stress-test results (7 scenarios), Monte Carlo simulations (50 runs),
+    and return feasibility into an executive risk briefing. Enforces deterministic safety override prohibition.
+    """
+    assistant = get_science_assistant()
+    return await assistant.generate_mission_risk_briefing(request)

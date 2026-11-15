@@ -25,11 +25,14 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
+from backend.app.intelligence.mission_intelligence import get_mission_intelligence_engine
+
 
 def generate_mission_pdf(
     plan_data: dict[str, Any],
     selected_route_id: str | None = None,
     request_data: dict[str, Any] | None = None,
+    ai_mission_intel: dict[str, Any] | None = None,
 ) -> bytes:
     """
     Constructs a multi-page operational mission dossier PDF from planning results.
@@ -377,8 +380,150 @@ def generate_mission_pdf(
     story.append(t_env)
     story.append(Spacer(1, 10))
 
+    # 6. AI Mission Intelligence & Synthetic Risk Assessment (Assisted)
+    story.append(Paragraph("6. AI Mission Intelligence & Synthetic Risk Assessment (Assisted)", h1_style))
+
+    engine = get_mission_intelligence_engine()
+
+    candidate_list = list(routes)
+    if not candidate_list:
+        if "primary_route" in plan_data:
+            candidate_list.append(plan_data["primary_route"])
+        if "alternative_routes" in plan_data:
+            candidate_list.extend(plan_data["alternative_routes"])
+    if not candidate_list and active_route:
+        candidate_list = [active_route]
+
+    selected_route = active_route or (candidate_list[0] if candidate_list else {})
+    p_summary = summary or selected_route.get("summary", {})
+
+    ai_comparison = (ai_mission_intel.get("comparison") if ai_mission_intel else None)
+    if not ai_comparison and candidate_list:
+        try:
+            ai_comparison = engine.compare_route_candidates(
+                routes=candidate_list,
+                mission_objective=req.get("objective") if req else "Balanced traversal",
+            )
+        except Exception:
+            ai_comparison = None
+
+    ai_terrain = (ai_mission_intel.get("terrain") if ai_mission_intel else None)
+    if not ai_terrain:
+        try:
+            ai_terrain = engine.interpret_scientific_terrain(route_summary=p_summary)
+        except Exception:
+            ai_terrain = None
+
+    ai_risk = (ai_mission_intel.get("risk_briefing") if ai_mission_intel else None)
+    if not ai_risk and selected_route:
+        try:
+            ai_risk = engine.generate_mission_risk_briefing(selected_route=selected_route)
+        except Exception:
+            ai_risk = None
+
+    # AI Assistance Banner
+    ai_banner_text = (
+        "<b>AI ASSISTANCE NOTICE (Google Gemini / Azure AI Foundry):</b> Synthetic narrative interpretation and "
+        "candidate comparison grounded on deterministic route calculations and official NASA PDS archives. "
+        "<br/><b>MANDATORY SAFETY PROTOCOL:</b> AI-generated mission guidance is strictly advisory and cannot "
+        "override deterministic engineering safety ceilings (14.0° slope limit)."
+    )
+    t_ai_banner = Table([[Paragraph(ai_banner_text, body_style)]], colWidths=[540])
+    t_ai_banner.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EBF8FF")),
+            ("BOX", (0, 0), (-1, -1), 1.0, colors.HexColor("#3182CE")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ])
+    )
+    story.append(t_ai_banner)
+    story.append(Spacer(1, 6))
+
+    # Candidate Comparison Table if available
+    if ai_comparison and hasattr(ai_comparison, "candidate_evaluations"):
+        comp_rows = [
+            [
+                Paragraph("<b>Corridor</b>", bold_style),
+                Paragraph("<b>Profile</b>", bold_style),
+                Paragraph("<b>Distance</b>", bold_style),
+                Paragraph("<b>Cost</b>", bold_style),
+                Paragraph("<b>Max Slope</b>", bold_style),
+                Paragraph("<b>Return Feasibility</b>", bold_style),
+                Paragraph("<b>MC Reliability</b>", bold_style),
+            ]
+        ]
+        for ev in ai_comparison.candidate_evaluations[:4]:
+            comp_rows.append([
+                Paragraph(f"{ev.name} ({ev.route_id})", body_style),
+                Paragraph(f"{ev.routing_profile}", body_style),
+                Paragraph(f"{ev.distance_km:.2f} km", body_style),
+                Paragraph(f"{ev.total_cost:.1f}", body_style),
+                Paragraph(f"{ev.max_slope_deg:.1f}°", body_style),
+                Paragraph(f"{ev.return_feasibility} (+{ev.turnaround_buffer_min:.0f}m)", body_style),
+                Paragraph(f"{ev.monte_carlo_reliability_pct:.1f}%", body_style),
+            ])
+        t_ai_comp = Table(comp_rows, colWidths=[130, 65, 65, 55, 60, 105, 60])
+        t_ai_comp.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ])
+        )
+        story.append(t_ai_comp)
+        story.append(Spacer(1, 6))
+
+    # Scientific Provenance Table (Distinguishing Data Types)
+    if ai_terrain and hasattr(ai_terrain, "measured_data_evidence"):
+        story.append(Paragraph("<b>Planetary Terrain Evidence & Provenance:</b>", bold_style))
+        story.append(Spacer(1, 2))
+        prov_rows = [
+            [
+                Paragraph("<b>Data Type</b>", bold_style),
+                Paragraph("<b>Instrument / Source</b>", bold_style),
+                Paragraph("<b>Observed Parameter / Finding</b>", bold_style),
+                Paragraph("<b>Confidence</b>", bold_style),
+            ]
+        ]
+        for it in (ai_terrain.measured_data_evidence[:2] + ai_terrain.derived_metrics_evidence[:1] + ai_terrain.proxy_indicators_evidence[:1]):
+            badge_color = "#276749" if it.data_type == "measured" else ("#2B6CB0" if it.data_type == "derived" else "#C05621")
+            p_type = Paragraph(f"<font color='{badge_color}'><b>[{it.data_type.upper()}]</b></font>", body_style)
+            prov_rows.append([
+                p_type,
+                Paragraph(it.instrument_or_source, body_style),
+                Paragraph(f"<b>{it.parameter}:</b> {it.value_or_finding}", body_style),
+                Paragraph(it.confidence_level, body_style),
+            ])
+        t_prov = Table(prov_rows, colWidths=[80, 140, 260, 60])
+        t_prov.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ])
+        )
+        story.append(t_prov)
+        story.append(Spacer(1, 6))
+
+    # Risk Briefing & Contingency Corridors
+    if ai_risk and hasattr(ai_risk, "recommended_contingency_corridor"):
+        story.append(Paragraph("<b>Executive Risk Briefing & Contingency Corridor:</b>", bold_style))
+        story.append(Spacer(1, 2))
+        for hz in ai_risk.critical_hazards[:2]:
+            story.append(Paragraph(f"• <b>Hazard:</b> {hz}", body_style))
+            story.append(Spacer(1, 1))
+        story.append(Paragraph(f"• <b>Contingency Corridor:</b> {ai_risk.recommended_contingency_corridor}", body_style))
+        story.append(Spacer(1, 8))
+
     # 7. Engineering Limitations & Mandatory Disclaimer Box
-    story.append(Paragraph("6. Engineering Limitations & Mandatory Disclaimers", h1_style))
+    story.append(Paragraph("7. Engineering Limitations & Mandatory Disclaimers", h1_style))
 
     lim_items = plan_data.get("limitations", [])
     if not lim_items:
