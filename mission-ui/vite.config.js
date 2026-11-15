@@ -13,6 +13,13 @@ export default defineConfig(({ mode }) => {
         '/health': target,
         '/openapi.json': target
       }
+    },
+    preview: {
+      proxy: {
+        '/api': target,
+        '/health': target,
+        '/openapi.json': target
+      }
     }
   };
 });

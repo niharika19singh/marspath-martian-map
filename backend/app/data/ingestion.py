@@ -777,7 +777,10 @@ def ingest_jezero_hirise_dtm(
     (/vsicurl/) from official USGS / AWS S3 PDS endpoints (or local path), writes a
     tiled DEFLATE float32 GeoTIFF with explicit meter units, and generates its sidecar.
     """
+    import math
+
     import rasterio
+    from rasterio.transform import Affine
     from rasterio.windows import Window
 
     from backend.app.data.manifest import USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256
@@ -814,12 +817,19 @@ def ingest_jezero_hirise_dtm(
             else cand
         )
         try:
-            with rasterio.open(vsi) as src:
-                data = src.read(1, window=window).astype(np.float32)
-                win_transform = rasterio.windows.transform(window, src.transform)
-                win_bounds = rasterio.windows.bounds(window, src.transform)
-                src_crs = src.crs
-                nodata_val = float(src.nodata) if src.nodata is not None else -3.4028226550889045e38
+            with rasterio.Env(
+                GDAL_HTTP_MERGE_CONSECUTIVE_RANGES="YES",
+                VSI_CACHE="YES",
+                VSI_CACHE_SIZE="67108864",
+                GDAL_DISABLE_READDIR_ON_OPEN="YES",
+                CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
+            ):
+                with rasterio.open(vsi) as src:
+                    data = src.read(1, window=window).astype(np.float32)
+                    win_transform = rasterio.windows.transform(window, src.transform)
+                    win_bounds = rasterio.windows.bounds(window, src.transform)
+                    src_crs = src.crs
+                    nodata_val = float(src.nodata) if src.nodata is not None else -3.4028226550889045e38
             used_source = cand
             break
         except Exception as exc:
@@ -829,6 +839,32 @@ def ingest_jezero_hirise_dtm(
     if data is None:
         assert last_err is not None
         raise last_err
+
+    # Convert coordinates from projected Equirectangular meters to Mars Geographic degrees (IAU2000:49900)
+    # if the source CRS is projected or coordinates are in meters (>360 degrees).
+    mars_radius = 3396190.0
+    deg_per_meter = 180.0 / (math.pi * mars_radius)
+    if (
+        win_bounds[0] > 360.0
+        or win_bounds[2] > 360.0
+        or (src_crs is not None and getattr(src_crs, "is_projected", False))
+    ):
+        min_lon = win_transform.c * deg_per_meter
+        max_lat = win_transform.f * deg_per_meter
+        dx = win_transform.a * deg_per_meter
+        dy = win_transform.e * deg_per_meter
+        out_transform = Affine(dx, 0.0, min_lon, 0.0, dy, max_lat)
+        out_crs = "+proj=longlat +a=3396190 +b=3396190 +no_defs"
+        final_bounds = (
+            min_lon,
+            max_lat + dy * data.shape[0],
+            min_lon + dx * data.shape[1],
+            max_lat,
+        )
+    else:
+        out_transform = win_transform
+        out_crs = src_crs or "+proj=longlat +a=3396190 +b=3396190 +no_defs"
+        final_bounds = win_bounds
 
     arr_sha256 = compute_array_sha256(data)
     is_official_remote = used_source in OFFICIAL_HIRISE_ENDPOINTS
@@ -855,8 +891,8 @@ def ingest_jezero_hirise_dtm(
         width=int(data.shape[1]),
         count=1,
         dtype="float32",
-        crs=src_crs or "+proj=longlat +a=3396190 +b=3396190 +no_defs",
-        transform=win_transform,
+        crs=out_crs,
+        transform=out_transform,
         nodata=nodata_val,
         compress="deflate",
         tiled=True,
@@ -873,6 +909,7 @@ def ingest_jezero_hirise_dtm(
             SOURCE_URL=USGS_HIRISE_TRN_GLOBAL_URL,
             VERTICAL_DATUM="Mars 2000 MOLA Geoid (DeltaGeoid blend40)",
             VERTICAL_UNIT="meters",
+            AREA_OR_POINT="Area",
         )
         dst.update_tags(1, UNITS="meters", VERTICAL_UNIT="meters")
         dst.write(data, 1)
@@ -893,10 +930,10 @@ def ingest_jezero_hirise_dtm(
         "source_checksum_verified": False,
         "validation_status": validation_status,
         "window_bounds": {
-            "min_lon": round(float(win_bounds[0]), 7),
-            "min_lat": round(float(win_bounds[1]), 7),
-            "max_lon": round(float(win_bounds[2]), 7),
-            "max_lat": round(float(win_bounds[3]), 7),
+            "min_lon": round(float(final_bounds[0]), 7),
+            "min_lat": round(float(final_bounds[1]), 7),
+            "max_lon": round(float(final_bounds[2]), 7),
+            "max_lat": round(float(final_bounds[3]), 7),
         },
         "source_pixel_window": {
             "col_off": col_off,

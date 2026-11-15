@@ -8,7 +8,7 @@ import 'ol/ol.css';
 import './style.css';
 import MapView from './MapView.jsx';
 import Profile from './Profile.jsx';
-import { exportGeoJSON, exportCSV, exportJSON, exportMissionBriefMarkdown, exportMissionConfigJSON } from './export.js';
+import { exportGeoJSON, exportCSV, exportJSON, exportMissionBriefMarkdown, exportMissionConfigJSON, exportPDF } from './export.js';
 import { buildTerrain } from './terrain.js';
 import Icon from './Icons.jsx';
 import {
@@ -633,7 +633,7 @@ function App() {
         enabled: true,
         vertical_sigma_m: Number(robustnessConfig.vertical_sigma_m),
         correlation_length_m: Number(robustnessConfig.correlation_length_m),
-        scenario_count: Math.max(3, Math.min(20, Number(robustnessConfig.scenario_count))),
+        scenario_count: Math.max(3, Math.min(200, Number(robustnessConfig.scenario_count))),
         seed: Number(robustnessConfig.seed),
         cost_regret_threshold_fraction: Number(robustnessConfig.cost_regret_threshold_fraction)
       };
@@ -723,8 +723,8 @@ function App() {
       return;
     }
 
-    if (algorithm === 'dijkstra' && !api.algorithmSupported) {
-      setError('This backend only exposes A* through its API. Select A*, or use the bundled-grid planner for Dijkstra.');
+    if ((algorithm === 'dijkstra' || algorithm === 'compare') && !api.algorithmSupported) {
+      setError('This backend only exposes A* through its API. Select A*, or use the bundled-grid planner for Dijkstra and Comparison mode.');
       setBusy(false);
       return;
     }
@@ -887,12 +887,30 @@ function App() {
     setNotice('Disconnected from Python backend. Switched to bundled local planner.');
   }
 
-  function download() {
+  async function download() {
     if (!result) return;
     const missionId = result.mission_id || 'jezero-mission';
     let fileContent;
     let mimeType;
     let ext;
+
+    if (exportFormat === 'pdf') {
+      setNotice('Generating PDF Mission Dossier...');
+      try {
+        const blob = await exportPDF(result, active.route_id, lastRequest.current, api?.url || apiUrl || '');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `marspath-${missionId}-${active.route_id}.pdf`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setNotice(`Route ${active.name || active.route_id} exported as PDF Mission Dossier.`);
+      } catch (err) {
+        console.error('PDF export failed:', err);
+        setNotice(`PDF export error: ${err.message}`);
+      }
+      return;
+    }
 
     if (exportFormat === 'geojson') {
       fileContent = JSON.stringify(exportGeoJSON(result, active.route_id, lastRequest.current), null, 2);
@@ -1866,17 +1884,38 @@ function App() {
 
                             <div className="two-fields">
                               <label>
-                                Scenarios (3–20)
+                                Scenarios (3–200)
                                 <input
                                   type="number"
                                   min="3"
-                                  max="20"
+                                  max="200"
                                   step="1"
                                   value={robustnessConfig.scenario_count}
                                   onChange={e =>
                                     setRobustnessConfig(c => ({ ...c, scenario_count: Number(e.target.value) }))
                                   }
                                 />
+                                <div className="scenario-presets" style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                                  {[5, 20, 50, 100, 200].map(cnt => (
+                                    <button
+                                      key={cnt}
+                                      type="button"
+                                      className={`chip-button ${robustnessConfig.scenario_count === cnt ? 'active' : ''}`}
+                                      style={{
+                                        fontSize: '10px',
+                                        padding: '2px 6px',
+                                        background: robustnessConfig.scenario_count === cnt ? 'var(--accent, #e55)' : 'rgba(255,255,255,0.08)',
+                                        color: '#fff',
+                                        border: '1px solid rgba(255,255,255,0.2)',
+                                        borderRadius: '3px',
+                                        cursor: 'pointer'
+                                      }}
+                                      onClick={() => setRobustnessConfig(c => ({ ...c, scenario_count: cnt }))}
+                                    >
+                                      {cnt}
+                                    </button>
+                                  ))}
+                                </div>
                               </label>
                               <label>
                                 Random seed
@@ -2568,6 +2607,61 @@ function App() {
                             </div>
                           </div>
 
+                          {activeRouteRobustness?.reliability_classification && (
+                            <div className="metric-box reliability-box" style={{
+                              borderLeft: `4px solid ${
+                                activeRouteRobustness.reliability_classification === 'HIGH' ? '#5cffb0' :
+                                activeRouteRobustness.reliability_classification === 'MEDIUM' ? '#ffb867' : '#ff6b6b'
+                              }`,
+                              marginBottom: '12px'
+                            }}>
+                              <div className="box-header">
+                                <span>Reliability Classification</span>
+                                <span className={`badge-tag ${activeRouteRobustness.reliability_classification.toLowerCase()}`} style={{
+                                  fontWeight: 'bold',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  backgroundColor: activeRouteRobustness.reliability_classification === 'HIGH' ? 'rgba(92,255,176,0.15)' :
+                                    activeRouteRobustness.reliability_classification === 'MEDIUM' ? 'rgba(255,184,103,0.15)' : 'rgba(255,107,107,0.15)',
+                                  color: activeRouteRobustness.reliability_classification === 'HIGH' ? '#5cffb0' :
+                                    activeRouteRobustness.reliability_classification === 'MEDIUM' ? '#ffb867' : '#ff6b6b'
+                                }}>
+                                  {activeRouteRobustness.reliability_classification} ({fmt(activeRouteRobustness.reliability_score, 1)} / 100)
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#aaa', margin: '4px 0 8px 0', fontFamily: 'monospace' }}>
+                                {activeRouteRobustness.reliability_formula}
+                              </div>
+                              {activeRouteRobustness.reliability_factors && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', marginBottom: '8px' }}>
+                                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 6px', borderRadius: '4px' }}>
+                                    <span style={{ color: '#888' }}>M_data (Trust):</span> <b>{fmt(activeRouteRobustness.reliability_factors.M_data, 2)}</b>
+                                  </div>
+                                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 6px', borderRadius: '4px' }}>
+                                    <span style={{ color: '#888' }}>M_slope (Safety):</span> <b>{fmt(activeRouteRobustness.reliability_factors.M_slope, 2)}</b>
+                                  </div>
+                                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 6px', borderRadius: '4px' }}>
+                                    <span style={{ color: '#888' }}>S_ret (Regret):</span> <b>{fmt(activeRouteRobustness.reliability_factors.S_ret, 1)}%</b>
+                                  </div>
+                                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 6px', borderRadius: '4px' }}>
+                                    <span style={{ color: '#888' }}>S_feas (Feasibility):</span> <b>{fmt(activeRouteRobustness.reliability_factors.S_feas, 1)}%</b>
+                                  </div>
+                                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 6px', borderRadius: '4px' }}>
+                                    <span style={{ color: '#888' }}>S_cov (Spatial):</span> <b>{fmt(activeRouteRobustness.reliability_factors.S_cov, 1)}%</b>
+                                  </div>
+                                  <div style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 6px', borderRadius: '4px' }}>
+                                    <span style={{ color: '#888' }}>Duration:</span> <b>{fmt(activeRobustness.execution_duration_seconds, 2)}s</b>
+                                  </div>
+                                </div>
+                              )}
+                              {activeRouteRobustness.reliability_explanation && (
+                                <div style={{ fontSize: '11px', color: '#ffb867', fontStyle: 'italic', background: 'rgba(255,184,103,0.08)', padding: '6px 8px', borderRadius: '4px' }}>
+                                  ℹ️ {activeRouteRobustness.reliability_explanation}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {activeRouteRobustness ? (
                             <div className="metric-box">
                               <div className="box-header">
@@ -2635,6 +2729,7 @@ function App() {
                       <option value="json">JSON manifest</option>
                       <option value="geojson">GeoJSON Feature</option>
                       <option value="csv">CSV (Segments)</option>
+                      <option value="pdf">PDF Mission Dossier (.pdf)</option>
                       <option value="brief">Mission Brief (.md)</option>
                       <option value="config">Mission Config (.json)</option>
                     </select>

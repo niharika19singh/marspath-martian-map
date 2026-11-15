@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from backend.app.data_sources.registry.registry import DataSourceRegistry
@@ -53,15 +54,29 @@ class DataSourceSyncService:
             "pds_releases": self.catalog.releases,
         }
 
-        for s in sources:
+        async def check_single_source(s):
             try:
                 conn = connector_map.get(s.source_id)
                 if conn is not None:
                     conn_state, note = await conn.check_connection()
                 else:
                     conn_state, note = ConnectionState.CONNECTED, None
+                return s, conn_state, note, None
+            except Exception as exc:
+                return s, ConnectionState.ERROR, str(exc), f"{s.source_id}: {exc}"
 
-                # Keep source operational via verified local/ingested catalog even if upstream is STALE
+        check_results = await asyncio.gather(*(check_single_source(s) for s in sources))
+
+        for s, conn_state, note, err in check_results:
+            if err:
+                errors.append(err)
+                self.registry.update_source_status(
+                    s.source_id,
+                    ConnectionState.ERROR,
+                    s.ingestion_status,
+                    error_msg=note,
+                )
+            else:
                 effective_state = (
                     ConnectionState.CONNECTED
                     if conn_state == ConnectionState.CONNECTED
@@ -74,14 +89,6 @@ class DataSourceSyncService:
                     error_msg=note,
                 )
                 updated.append(s.source_id)
-            except Exception as exc:
-                errors.append(f"{s.source_id}: {exc}")
-                self.registry.update_source_status(
-                    s.source_id,
-                    ConnectionState.ERROR,
-                    s.ingestion_status,
-                    error_msg=str(exc),
-                )
 
         if force_refresh:
             self.catalog.invalidate_cache()

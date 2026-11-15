@@ -2194,3 +2194,10 @@
 .mission-presets-box {
   margin-bottom: 10px;
 }
+
+/* Multi-Resolution Planetary GIS Imagery Harmonization */
+.ol-layer-ctx canvas,
+.ol-layer-hirise canvas {
+  transition: opacity 0.35s ease-in-out;
+  filter: contrast(1.05) brightness(0.97) sepia(0.12) hue-rotate(-12deg);
+}

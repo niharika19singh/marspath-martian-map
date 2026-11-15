@@ -234,8 +234,8 @@ class RobustnessConfig(BaseModel):
     scenario_count: int = Field(
         default=5,
         ge=3,
-        le=20,
-        description="Number of independently generated perturbation scenarios (bounded between 3 and 20)",
+        le=200,
+        description="Number of independently generated perturbation scenarios (bounded between 3 and 200)",
     )
     seed: int = Field(
         default=42,
@@ -1077,6 +1077,26 @@ class BaselineRouteRobustness(BaseModel):
             "probability of mission success."
         ),
     )
+    reliability_classification: str = Field(
+        default="MEDIUM",
+        description="Categorical reliability tier: HIGH, MEDIUM, or LOW based on multi-factor decision formula",
+    )
+    reliability_score: float = Field(
+        default=50.0,
+        description="Composite reliability heuristic score [0.0 - 100.0]",
+    )
+    reliability_formula: str = Field(
+        default="Score = M_data * M_slope * (0.50 * S_ret + 0.30 * S_feas + 0.20 * S_cov)",
+        description="Explicit documented formula used to calculate reliability score",
+    )
+    reliability_factors: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Contributing numerical factors: data_quality_multiplier, slope_margin_multiplier, retention_score, feasibility_score, coverage_score",
+    )
+    reliability_explanation: str = Field(
+        default="",
+        description="Human-readable engineering justification explaining the assigned reliability tier",
+    )
     interpretation: str = Field(
         ...,
         description="Non-probabilistic engineering summary of route geometry overlap, feasibility, and cost regret",
@@ -1113,6 +1133,10 @@ class RouteRobustnessAssessment(BaseModel):
     failed_scenario_count: int = Field(
         ...,
         description="Number of perturbation scenarios where route optimization failed (e.g., untraversable endpoint, unreachable corridor, or search bound exceeded)",
+    )
+    execution_duration_seconds: float = Field(
+        default=0.0,
+        description="Total wall-clock duration of the perturbation stress-test runs in seconds",
     )
     baseline_data_mode: str = Field(
         ...,

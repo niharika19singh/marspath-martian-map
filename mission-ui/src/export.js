@@ -196,3 +196,24 @@ export function exportMissionConfigJSON(config){
     ...config,
   };
 }
+
+export async function exportPDF(response, selectedRouteId, request, baseUrl = '') {
+  const cleanBase = (baseUrl || '').replace(/\/+$/, '');
+  const url = cleanBase ? `${cleanBase}/api/v1/routes/export/pdf` : '/api/v1/routes/export/pdf';
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      route_response: response,
+      selected_route_id: selectedRouteId,
+      request: request || null
+    })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`PDF generation failed (${res.status}): ${errText}`);
+  }
+  return await res.blob();
+}

@@ -4,11 +4,17 @@
  * and AI copilot services (Google Gemini primary, Microsoft Azure AI Foundry evaluation).
  */
 
-const BASE_URL = '';
+function getBaseUrl() {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+  }
+  return '';
+}
 
 async function fetchJson(endpoint, options = {}) {
+  const url = `${getBaseUrl()}${endpoint}`;
   try {
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
+    const res = await fetch(url, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',

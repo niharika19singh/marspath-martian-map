@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import Any
 
 import numpy as np
@@ -546,6 +547,92 @@ def _build_route_interpretation(
     return " ".join(parts)
 
 
+def compute_route_reliability_assessment(
+    retention_fraction: float | None,
+    feasibility_fraction: float | None,
+    quality_tier: EvidenceQualityTier | str | None,
+    is_synthetic: bool,
+    route_summary: Any,
+    constraints: RouteConstraints,
+) -> tuple[str, float, str, dict[str, Any], str]:
+    """
+    Computes a multi-factor categorical reliability classification and composite score.
+    Formula:
+        Score = M_data * M_slope * (0.50 * S_ret + 0.30 * S_feas + 0.20 * S_cov)
+    """
+    tier_str = str(quality_tier).lower()
+    if is_synthetic or "unverified" in tier_str:
+        m_data = 0.40
+        data_label = "Synthetic / Unverified Test Fixture (Capped at 40%)"
+    elif "gold" in tier_str or "high" in tier_str or "hirise" in tier_str:
+        m_data = 1.00
+        data_label = "High-Resolution Verified DTM (1.0x)"
+    elif "silver" in tier_str or "regional" in tier_str or "mola" in tier_str:
+        m_data = 0.85
+        data_label = "Regional MOLA-HRSC Verified DEM (0.85x)"
+    else:
+        m_data = 0.70
+        data_label = "Standard Planetary DEM (0.70x)"
+
+    max_slope_deg = getattr(route_summary, "max_slope_deg", None)
+    if max_slope_deg is None:
+        max_slope_deg = getattr(route_summary, "max_slope_degrees", 10.0)
+    max_allowed_slope = float(getattr(constraints, "max_slope_deg", 15.0))
+    slope_margin = max_allowed_slope - float(max_slope_deg)
+
+    if slope_margin >= 5.0:
+        m_slope = 1.00
+    elif slope_margin >= 0.0:
+        m_slope = round(0.70 + 0.06 * slope_margin, 3)
+    else:
+        m_slope = 0.50
+
+    s_ret = (retention_fraction or 0.0) * 100.0
+    s_feas = (feasibility_fraction or 0.0) * 100.0
+    cov_frac = getattr(route_summary, "data_coverage_fraction", 1.0) or 1.0
+    s_cov = min(100.0, float(cov_frac) * 100.0)
+
+    raw_score = m_data * m_slope * (0.50 * s_ret + 0.30 * s_feas + 0.20 * s_cov)
+    score = round(max(0.0, min(100.0, raw_score)), 1)
+
+    if score >= 75.0 and m_data >= 0.85 and (feasibility_fraction or 0.0) >= 0.80:
+        classification = "HIGH"
+        explanation = (
+            f"High reliability ({score:.1f}/100): Validated real planetary terrain ({data_label}), "
+            f"high perturbation retention ({s_ret:.1f}%), and safe slope margin ({slope_margin:.1f}° below critical limit)."
+        )
+    elif score >= 45.0:
+        classification = "MEDIUM"
+        explanation = (
+            f"Medium reliability ({score:.1f}/100): Feasible traverse with moderate perturbation stability "
+            f"({s_ret:.1f}% retention). Note: {data_label}."
+        )
+    else:
+        classification = "LOW"
+        if is_synthetic or m_data < 0.50:
+            explanation = (
+                f"Low reliability ({score:.1f}/100): Operating on synthetic or unverified terrain; "
+                "not qualified for operational flight navigation."
+            )
+        else:
+            explanation = (
+                f"Low reliability ({score:.1f}/100): High perturbation sensitivity or narrow hazard margins "
+                f"(retention {s_ret:.1f}%, feasibility {s_feas:.1f}%)."
+            )
+
+    factors = {
+        "data_quality_multiplier": m_data,
+        "data_quality_label": data_label,
+        "slope_margin_multiplier": m_slope,
+        "slope_margin_degrees": round(slope_margin, 2),
+        "retention_score": round(s_ret, 1),
+        "feasibility_score": round(s_feas, 1),
+        "coverage_score": round(s_cov, 1),
+    }
+    formula_str = "Score = M_data * M_slope * (0.50 * S_ret + 0.30 * S_feas + 0.20 * S_cov)"
+    return classification, score, formula_str, factors, explanation
+
+
 class RobustnessService:
     """
     Executes deterministic spatially correlated Gaussian elevation perturbation stress tests
@@ -583,9 +670,9 @@ class RobustnessService:
                 "robustness testing is enabled. The backend does not invent correlation scales."
             )
 
-        if config.scenario_count < 3 or config.scenario_count > 20:
+        if config.scenario_count < 3 or config.scenario_count > 200:
             raise InvalidConstraintError(
-                f"robustness_config.scenario_count must be between 3 and 20, got {config.scenario_count}."
+                f"robustness_config.scenario_count must be between 3 and 200, got {config.scenario_count}."
             )
 
         if (
@@ -690,6 +777,8 @@ class RobustnessService:
         assert config is not None
         assert config.vertical_sigma_m is not None
         assert config.correlation_length_m is not None
+
+        t_robustness_start = time.perf_counter()
 
         settings = get_settings()
         allowed_cells = max_cells if max_cells is not None else settings.MAX_GRID_CELLS
@@ -1083,6 +1172,17 @@ class RobustnessService:
                 regret_threshold=config.cost_regret_threshold_fraction,
             )
 
+            route_obj = next((r for r in baseline_routes if r.route_id == r_id), None)
+            route_q_tier = getattr(route_obj.evidence_passport, "quality_tier", None) if route_obj else None
+            rel_class, rel_score, rel_form, rel_facts, rel_exp = compute_route_reliability_assessment(
+                retention_fraction=retention_fraction,
+                feasibility_fraction=feas_fraction,
+                quality_tier=route_q_tier,
+                is_synthetic=is_synthetic,
+                route_summary=getattr(route_obj, "summary", None),
+                constraints=constraints,
+            )
+
             baseline_assessments.append(
                 BaselineRouteRobustness(
                     route_id=r_id,
@@ -1100,6 +1200,11 @@ class RobustnessService:
                     within_regret_threshold_count=within_cnt,
                     exceeding_regret_threshold_count=exceed_cnt,
                     baseline_route_retention_fraction=retention_fraction,
+                    reliability_classification=rel_class,
+                    reliability_score=rel_score,
+                    reliability_formula=rel_form,
+                    reliability_factors=rel_facts,
+                    reliability_explanation=rel_exp,
                     interpretation=interp,
                 )
             )
@@ -1168,6 +1273,7 @@ class RobustnessService:
             requested_scenario_count=config.scenario_count,
             completed_scenario_count=completed_count,
             failed_scenario_count=failed_count,
+            execution_duration_seconds=round(time.perf_counter() - t_robustness_start, 3),
             baseline_data_mode=active_data_mode,
             baseline_quality_tier=primary_tier,
             baseline_is_synthetic=bool(is_synthetic),

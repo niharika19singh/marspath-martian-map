@@ -1,7 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Response
 
 from backend.app.core.exceptions import MarsPathError
 from backend.app.schemas.routes import RoutePlanRequest, RoutePlanResponse
+from backend.app.services.pdf_export_service import generate_mission_pdf
 from backend.app.services.planning_intelligence import (
     JEZERO_SCIENCE_TARGETS,
     MISSION_DEMONSTRATION_PRESETS,
@@ -52,3 +55,30 @@ def plan_route(request: RoutePlanRequest):
             status_code=500,
             detail={"error": f"Internal routing engine error: {str(e)}"},
         ) from e
+
+
+@router.post("/export/pdf", summary="Export mission plan as a formal PDF brief")
+def export_mission_plan_pdf(payload: dict[str, Any]):
+    """Generates a publication-grade PDF mission dossier for the provided route plan."""
+    try:
+        plan_data = payload.get("plan") or payload
+        selected_route_id = payload.get("selected_route_id")
+        request_data = payload.get("request")
+
+        pdf_bytes = generate_mission_pdf(
+            plan_data=plan_data,
+            selected_route_id=selected_route_id,
+            request_data=request_data,
+        )
+        mission_id = plan_data.get("mission_id", "jezero_mission")
+        filename = f"marspath_mission_{mission_id}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": f"Failed to generate mission PDF: {str(exc)}"},
+        ) from exc
