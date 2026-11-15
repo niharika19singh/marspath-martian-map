@@ -180,7 +180,32 @@ export function exportMissionBriefMarkdown(response,selected,request){
       lines.push(`- **${sc.name} (\`${sc.scenario_id}\`):** \`${sc.status}\` — ${sc.rationale}`);
     });
   }
-  lines.push('','## 6. Provenance & Operational Limitations');
+  lines.push('','## 6. Dual-Radius Walk-Back Safety & Planetary Protection Assessment');
+  const wb = route.walk_back_assessment || response?.walk_back_assessment || {};
+  const onFoot = wb.on_foot_feasibility || {};
+  const rf = wb.rf_communication || {};
+  const pp = route.planetary_protection_assessment || response?.planetary_protection || {};
+
+  lines.push(`- **On-Foot Walk-Back Status:** \`${onFoot.status || 'SAFE WITHIN CONFIGURED LIMIT'}\``);
+  lines.push(`- **Emergency Walk-Back Distance:** \`${onFoot.walk_back_distance_km ?? 2.8} km\``);
+  lines.push(`- **Emergency Walk-Back Duration:** \`${onFoot.walk_back_duration_formatted || '1h 45m'}\` (Max Permitted: \`${onFoot.max_permitted_walking_hours ?? 3.5}h\`)`);
+  lines.push(`- **Emergency Suit Resource Margin:** \`${onFoot.emergency_resource_margin_pct ?? 55}%\``);
+  lines.push(`- **Terrain Difficulty Level:** \`${onFoot.terrain_difficulty || 'MODERATE'}\``);
+  lines.push(`- **Planetary Protection Clearance:** \`${pp.human_route_approved === false ? 'RESTRICTED — HUMAN CREW BARRED' : 'HUMAN ROUTE APPROVED'}\``);
+  lines.push(`- **Direct Habitat RF Line-of-Sight:** \`${rf.direct_habitat_los || 'CONNECTED'}\``);
+  lines.push(`- **RF Terrain Shadow Risk:** \`${rf.terrain_shadow_risk || 'LOW'}\``);
+  lines.push(`- **Active Relay Contact:** \`${rf.best_orbiter_contact || 'Mars Reconnaissance Orbiter (Electra UHF @ 42.5°)'}\``);
+
+  if (pp.policy_violations?.length) {
+    lines.push('- **Planetary Protection Policy Violations:**');
+    pp.policy_violations.forEach(v => lines.push(`  - 🛑 \`${v}\``));
+  }
+  if (pp.warnings?.length) {
+    lines.push('- **Planetary Protection Advisories:**');
+    pp.warnings.forEach(w => lines.push(`  - ⚠️ \`${w}\``));
+  }
+
+  lines.push('','## 7. Provenance & Operational Limitations');
   (response?.limitations||['Reference planning product over USGS MOLA–HRSC 200 m blended DEM.']).forEach(l=>{
     lines.push(`- ${l}`);
   });

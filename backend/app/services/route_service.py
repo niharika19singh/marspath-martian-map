@@ -11,6 +11,7 @@ from backend.app.core.exceptions import (
     RoutingTimeoutError,
     UnreachableDestinationError,
 )
+from backend.app.data.planetary_protection import get_all_special_regions
 from backend.app.data.providers.base import BaseRasterProvider
 from backend.app.data.providers.hirise import (
     HiRISERasterProvider,
@@ -38,12 +39,18 @@ from backend.app.routing.alternatives import (
 )
 from backend.app.routing.astar import astar_search
 from backend.app.routing.dijkstra import dijkstra_search
+from backend.app.routing.geofence import evaluate_route_geofence
 from backend.app.routing.graph_builder import TerrainGridGraph
 from backend.app.routing.return_constraint import (
     compute_backward_time_grid,
     serialize_time_grid_overlay,
 )
+from backend.app.routing.rf_visibility import evaluate_rf_line_of_sight
 from backend.app.routing.survivability import compute_marswalk_survivability
+from backend.app.routing.walkback import (
+    compute_dual_radius_envelopes,
+    evaluate_on_foot_feasibility,
+)
 from backend.app.schemas.mission import OptimizationMode, RoutingAlgorithm
 from backend.app.schemas.routes import (
     AlgorithmComparisonReport,
@@ -53,6 +60,7 @@ from backend.app.schemas.routes import (
     RoutePlanRequest,
     RoutePlanResponse,
 )
+from backend.app.schemas.safety_envelopes import WalkBackAssessment
 from backend.app.services.evidence_service import EvidenceService
 from backend.app.services.planning_intelligence import (
     classify_route_uncertainty,
@@ -1052,7 +1060,33 @@ class RouteService:
             rescue_zone_payload["max_slope_deg"] = round(rescue_max_slope_deg, 1)
             rescue_zone_payload["threshold_minutes"] = round(rescue_threshold_min, 1)
 
-        # 11. Compute Marswalk Survivability Score for each route alternative
+        # 11. Compute Dual-Radius Envelopes (Rover-Assisted vs On-Foot Walk-Back)
+        hab_coord = request.habitat if getattr(request, "habitat", None) is not None else request.start
+        dest_coord = request.destination
+        walk_emergency_budget_h = min(4.0, max_eva_h * 0.5) if max_eva_h < 7.0 else 3.5
+
+        dual_envelopes, rover_env_grid, walk_env_grid = compute_dual_radius_envelopes(
+            elevation=cropped_elev,
+            slope_deg=slope_deg,
+            traversable_mask=traversable_mask,
+            dx_meters=dx_meters,
+            dy_meters=dy_meters,
+            habitat_node=(hab_row, hab_col),
+            meta=cropped_meta,
+            habitat_coord=hab_coord,
+            dest_coord=dest_coord,
+            rover_speed_m_s=rescue_speed_m_s,
+            rover_max_slope_deg=rescue_max_slope_deg,
+            rover_budget_hours=max_eva_h,
+            walk_speed_m_s=walk_speed,
+            walk_max_slope_deg=20.0,
+            walk_budget_hours=walk_emergency_budget_h,
+            as_of=dep_utc,
+            dem_src_name=dem_src_name,
+            eff_res_m=eff_res_m,
+        )
+
+        # 12. Compute Marswalk Survivability, Walk-Back Feasibility & Geofence Evaluation
         is_spe = bool(getattr(request, "is_spe_scenario", False))
         eva_budget = float(getattr(request, "max_eva_hours", 8.0) or 8.0)
 
@@ -1068,10 +1102,11 @@ class RouteService:
                 t_buf = float(r.turnaround.get("safe_turnaround_buffer_min", 120.0) or 120.0)
 
             mid_coords = None
+            route_pts = []
             if r.geometry and hasattr(r.geometry, "coordinates") and r.geometry.coordinates:
-                coords = r.geometry.coordinates
-                mid_idx = len(coords) // 2
-                mid_coords = (float(coords[mid_idx][0]), float(coords[mid_idx][1]))
+                route_pts = r.geometry.coordinates
+                mid_idx = len(route_pts) // 2
+                mid_coords = (float(route_pts[mid_idx][0]), float(route_pts[mid_idx][1]))
 
             r.marswalk_survivability = compute_marswalk_survivability(
                 distance_km=r_dist_km,
@@ -1085,6 +1120,59 @@ class RouteService:
                 corridor_midpoint=mid_coords,
                 eva_budget_hours=eva_budget,
             )
+
+            # Walk-back return time lookups
+            walk_time_s = None
+            rover_time_s = None
+            if (
+                0 <= d_row < walk_env_grid.time_seconds_grid.shape[0]
+                and 0 <= d_col < walk_env_grid.time_seconds_grid.shape[1]
+            ):
+                walk_val = float(walk_env_grid.time_seconds_grid[d_row, d_col])
+                if math.isfinite(walk_val):
+                    walk_time_s = walk_val
+                rov_val = float(rover_env_grid.time_seconds_grid[d_row, d_col])
+                if math.isfinite(rov_val):
+                    rover_time_s = rov_val
+
+            feasibility, rover_ret_h, ratio = evaluate_on_foot_feasibility(
+                route_coords=route_pts,
+                route_distance_km=r_dist_km,
+                route_max_slope_deg=r_max_slope,
+                route_avg_slope_deg=r_avg_slope,
+                route_roughness_tri=r_tri,
+                walk_speed_m_s=walk_speed,
+                walk_time_seconds_from_dest=walk_time_s,
+                rover_time_seconds_from_dest=rover_time_s,
+                max_permitted_walking_hours=walk_emergency_budget_h,
+                eva_budget_hours=eva_budget,
+            )
+
+            rf_status = evaluate_rf_line_of_sight(
+                habitat_coord=hab_coord,
+                route_coords=route_pts,
+                max_slope_deg=r_max_slope,
+            )
+
+            r.walk_back_assessment = WalkBackAssessment(
+                on_foot_feasibility=feasibility,
+                rover_assisted_return_hours=rover_ret_h,
+                rover_vs_foot_ratio=ratio,
+                dual_envelopes=dual_envelopes,
+                rf_communication=rf_status,
+            )
+
+            # Planetary Protection geofence evaluation
+            geofence_assessment = evaluate_route_geofence(route_pts)
+            r.planetary_protection_assessment = geofence_assessment
+
+            if not geofence_assessment.human_route_approved:
+                r.warnings.append(
+                    "PLANETARY PROTECTION RESTRICTION: Route intersects an official COSPAR Category IVc Special Region. Human crew routing is barred."
+                )
+            for w in geofence_assessment.warnings:
+                if w not in r.warnings:
+                    r.warnings.append(w)
 
         return RoutePlanResponse(
             mission_id=mission_id,
@@ -1105,4 +1193,8 @@ class RouteService:
             mission_brief_markdown=brief_md,
             return_zone=return_zone_payload,
             rescue_zone=rescue_zone_payload,
+            dual_envelopes=dual_envelopes,
+            walk_back_assessment=routes[0].walk_back_assessment if routes else None,
+            planetary_protection=routes[0].planetary_protection_assessment if routes else None,
+            special_regions=get_all_special_regions(),
         )

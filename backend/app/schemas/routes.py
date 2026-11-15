@@ -11,6 +11,14 @@ from backend.app.schemas.mission import (
     RouteConstraints,
     RoutingAlgorithm,
 )
+from backend.app.schemas.planetary_protection import (
+    PlanetaryProtectionRouteAssessment,
+    SpecialRegionFeature,
+)
+from backend.app.schemas.safety_envelopes import (
+    DualRadiusEnvelopes,
+    WalkBackAssessment,
+)
 
 
 class EvidenceQualityTier(str, Enum):
@@ -750,6 +758,14 @@ class RouteAlternative(BaseModel):
         default=None,
         description="Human astronaut EVA survivability score (0-100), factor breakdown, and shelter guidance",
     )
+    walk_back_assessment: WalkBackAssessment | None = Field(
+        default=None,
+        description="Astronaut walk-back feasibility and emergency on-foot return metrics for this route",
+    )
+    planetary_protection_assessment: PlanetaryProtectionRouteAssessment | None = Field(
+        default=None,
+        description="Geofence intersection and planetary protection compliance evaluation for this route",
+    )
 
 
 class ComputationStats(BaseModel):
@@ -1310,6 +1326,22 @@ class RoutePlanResponse(BaseModel):
     rescue_zone: dict[str, Any] | None = Field(
         default=None,
         description="Serialized backward-Dijkstra rescue-vehicle response-time grid from habitat with explicit provenance",
+    )
+    dual_envelopes: DualRadiusEnvelopes | None = Field(
+        default=None,
+        description="Dual-radius safety envelopes: Rover-Assisted (cyan) and On-Foot Walk-Back (green)",
+    )
+    walk_back_assessment: WalkBackAssessment | None = Field(
+        default=None,
+        description="Primary route astronaut on-foot return feasibility and walk-back assessment",
+    )
+    planetary_protection: PlanetaryProtectionRouteAssessment | None = Field(
+        default=None,
+        description="Planetary protection geofence compliance and scout reconnaissance options",
+    )
+    special_regions: list[SpecialRegionFeature] = Field(
+        default_factory=list,
+        description="Active planetary protection special regions within the Jezero mission area",
     )
 
 

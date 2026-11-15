@@ -4080,3 +4080,555 @@
   border-color: #38bdf8;
 }
 
+
+/* ==========================================================================
+   ASTRONAUT WALK-BACK SAFETY & PLANETARY PROTECTION GEOFENCE STYLES
+   ========================================================================== */
+
+.walkback-safety-panel,
+.planetary-protection-panel {
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 20, 27, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  backdrop-filter: blur(12px);
+}
+
+.section-header-compact {
+  margin-bottom: 8px;
+}
+
+.section-title-sm {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #e2e8f0;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+.pulse-dot.green {
+  background: #00e676;
+  box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
+}
+
+.pulse-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.badge-pill {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-safe {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.status-limited {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.status-exceeded {
+  background: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.status-unavailable {
+  background: rgba(100, 116, 139, 0.18);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.status-demo {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+/* On-Foot Feasibility Card */
+.on-foot-feasibility-card {
+  background: rgba(10, 15, 22, 0.85);
+  border: 1px solid rgba(0, 230, 118, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.2s ease;
+}
+
+.on-foot-feasibility-card.card-border-exceeded {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(26, 12, 14, 0.85);
+}
+
+.card-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.card-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 2px 0 0 0;
+  letter-spacing: 0.02em;
+}
+
+.card-status-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: #00e676;
+  background: rgba(0, 230, 118, 0.12);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 230, 118, 0.25);
+}
+
+.walkback-exceeded-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  color: #fee2e2;
+  font-size: 11px;
+}
+
+.walkback-limited-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+}
+
+.feasibility-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.metric-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-label {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.metric-val {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: #f8fafc;
+}
+
+/* High difficulty segments */
+.high-difficulty-container {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+
+.difficulty-segment-item {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-top: 4px;
+}
+
+/* Envelope Controls & Toggles */
+.envelope-controls-box {
+  background: rgba(10, 15, 22, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.mode-toggle-group {
+  display: flex;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.mode-btn {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  background: transparent;
+  color: #94a3b8;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mode-btn.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+}
+
+.envelope-toggles-grid,
+.geofence-toggles-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.envelope-toggle-label,
+.geofence-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.envelope-toggle-label:hover,
+.geofence-toggle-label:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.color-chip {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.color-chip.cyan {
+  background: #00d2ff;
+  box-shadow: 0 0 6px rgba(0, 210, 255, 0.5);
+}
+
+.color-chip.green {
+  background: #00e676;
+  box-shadow: 0 0 6px rgba(0, 230, 118, 0.5);
+}
+
+.color-chip.red {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+}
+
+.color-chip.amber {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+}
+
+.color-chip.purple-dashed {
+  background: transparent;
+  border: 2px dashed #a855f7;
+}
+
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.envelope-legend-box {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 6px;
+}
+
+/* RF Line-of-Sight card */
+.rf-comm-card {
+  background: rgba(10, 15, 22, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.rf-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.rf-status-dot.green { background: #00e676; }
+.rf-status-dot.amber { background: #f59e0b; }
+.rf-status-dot.red { background: #ef4444; }
+
+/* Planetary Protection Panels & Modals */
+.geofence-alert-box {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.geofence-alert-box.red {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.geofence-alert-box.amber {
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.special-region-info-panel {
+  background: rgba(10, 15, 22, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.zone-selector-dropdown {
+  background: rgba(15, 23, 42, 0.85);
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
+.selected-zone-card {
+  margin-top: 8px;
+}
+
+.zone-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-item.full-width {
+  grid-column: span 2;
+}
+
+.detail-item .label {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.detail-item .val {
+  font-size: 11px;
+  color: #e2e8f0;
+}
+
+/* Scout Rover Dispatch Button */
+.btn-scout-dispatch {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  border: 1px solid #f87171;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.btn-scout-dispatch:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-scout-dispatch.secondary {
+  background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+  border-color: #fbbf24;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+/* Modal styles */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-content {
+  background: #0b111a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 540px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.7);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.modal-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.disclaimer-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #fef3c7;
+}
+
+.scout-params-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.param-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.param-item.full {
+  grid-column: span 2;
+}
+
+.param-label {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.param-val {
+  font-size: 11px;
+  color: #e2e8f0;
+}
+
+.btn-confirm-dispatch {
+  background: linear-gradient(135deg, #00d2ff 0%, #0284c7 100%);
+  border: 1px solid #38bdf8;
+  color: #030712;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.success-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.telemetry-box {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #cbd5e1;
+}
+
+.btn-link-xs {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #38bdf8;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.btn-link-xs:hover {
+  color: #7dd3fc;
+}
+
+.orbiters-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orbiter-row {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
