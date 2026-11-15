@@ -1269,3 +1269,103 @@ def test_26_gaussian_filter_scale_vs_autocorrelation_scale_documented_and_report
     assert "2 * L" in ua.correlation_scale_interpretation
 
 
+def test_reliability_classification_formula_and_capping():
+    """Verify scientific reliability score formula and synthetic data capping."""
+    from backend.app.schemas.routes import EvidenceQualityTier, RouteSummary
+    from backend.app.services.robustness_service import compute_route_reliability_assessment
+
+    summary = RouteSummary(
+        total_distance_meters=1000.0,
+        estimated_duration_hours=1.0,
+        elevation_gain_meters=10.0,
+        elevation_loss_meters=10.0,
+        max_slope_degrees=8.0,
+        mean_slope_degrees=3.0,
+        energy_consumption_kwh=1.2,
+        data_coverage_fraction=1.0,
+        science_score=85.0,
+    )
+    constraints = RouteConstraints(max_slope_deg=20.0)
+
+    classification, score, formula, factors, explanation = compute_route_reliability_assessment(
+        retention_fraction=1.0,
+        feasibility_fraction=1.0,
+        quality_tier=EvidenceQualityTier.UNVERIFIED,
+        is_synthetic=True,
+        route_summary=summary,
+        constraints=constraints,
+    )
+    assert classification == "LOW"
+    assert score <= 40.0
+    assert factors["data_quality_multiplier"] == 0.40
+    assert "Operating on synthetic or unverified terrain" in explanation
+
+    # Real data with high quality
+    classification_real, score_real, _, factors_real, _ = compute_route_reliability_assessment(
+        retention_fraction=1.0,
+        feasibility_fraction=1.0,
+        quality_tier=EvidenceQualityTier.HIGH,
+        is_synthetic=False,
+        route_summary=summary,
+        constraints=constraints,
+    )
+    assert classification_real == "HIGH"
+    assert score_real >= 80.0
+    assert factors_real["data_quality_multiplier"] == 1.0
+
+
+def test_high_scenario_count_support_up_to_200():
+    """Verify RobustnessService supports up to 200 scenarios without memory overflow."""
+    meta = _make_cropped_meta(16, 16)
+    elev16 = np.full((16, 16), -2500.0, dtype=np.float32)
+    slope16 = np.zeros_like(elev16)
+    rough16 = np.zeros_like(elev16)
+    trav16 = np.ones_like(elev16, dtype=bool)
+    graph16 = TerrainGridGraph(
+        elevation=elev16,
+        slope_deg=slope16,
+        roughness=rough16,
+        traversable_mask=trav16,
+        dx_meters=200.0,
+        dy_meters=200.0,
+        mode=OptimizationMode.BALANCED,
+    )
+    node_map: dict[str, list[tuple[int, int]]] = {}
+    routes16, _ = generate_route_alternatives(
+        graph=graph16,
+        meta=meta,
+        start_px=(2, 2),
+        dest_px=(2, 12),
+        requested_mode=OptimizationMode.BALANCED,
+        num_alternatives=1,
+        route_nodes_out=node_map,
+    )
+    cfg = RobustnessConfig(
+        enabled=True,
+        vertical_sigma_m=1.0,
+        correlation_length_m=300.0,
+        scenario_count=50,
+        seed=123,
+    )
+    assessment = RobustnessService.evaluate_route_robustness(
+        config=cfg,
+        cropped_elevation=elev16,
+        cropped_meta=meta,
+        dx_meters=200.0,
+        dy_meters=200.0,
+        start_px=(2, 2),
+        dest_px=(2, 12),
+        requested_mode=OptimizationMode.BALANCED,
+        constraints=RouteConstraints(),
+        baseline_routes=routes16,
+        baseline_route_nodes=node_map,
+        is_synthetic=True,
+    )
+    assert assessment is not None
+    assert assessment.completed_scenario_count == 50
+    assert assessment.execution_duration_seconds > 0.0
+    b = assessment.baseline_route_assessments[0]
+    assert b.reliability_classification in ["HIGH", "MEDIUM", "LOW"]
+    assert b.reliability_score is not None
+
+

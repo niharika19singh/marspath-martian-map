@@ -802,3 +802,45 @@ def test_runtime_dem_provisioning_and_tamper_detection(tmp_path, monkeypatch):
     assert is_valid_tampered is False
     assert "sha256_mismatch" in reason_tampered
 
+
+def test_pdf_mission_dossier_export_endpoint():
+    """Verify POST /api/v1/routes/export/pdf produces a valid PDF file."""
+    # First plan a route
+    plan_resp = client.post(
+        "/api/v1/routes/plan",
+        json={
+            "start": {"lon": 77.40, "lat": 18.39},
+            "destination": {"lon": 77.44, "lat": 18.42},
+            "algorithm": "astar",
+            "mode": "balanced",
+            "robustness_config": {
+                "enabled": True,
+                "scenario_count": 5,
+                "vertical_sigma_m": 1.5,
+                "correlation_length_m": 400.0,
+            },
+        },
+    )
+    assert plan_resp.status_code == 200
+    plan_data = plan_resp.json()
+    assert "routes" in plan_data and len(plan_data["routes"]) > 0
+
+    route_id = plan_data["routes"][0]["route_id"]
+
+    # Now export PDF
+    pdf_resp = client.post(
+        "/api/v1/routes/export/pdf",
+        json={
+            "route_response": plan_data,
+            "selected_route_id": route_id,
+            "request": {
+                "start": {"lon": 77.40, "lat": 18.39},
+                "destination": {"lon": 77.44, "lat": 18.42},
+            },
+        },
+    )
+    assert pdf_resp.status_code == 200
+    assert pdf_resp.headers["content-type"] == "application/pdf"
+    assert pdf_resp.content.startswith(b"%PDF-")
+    assert len(pdf_resp.content) > 1000
+

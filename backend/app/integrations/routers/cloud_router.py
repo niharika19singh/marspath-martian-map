@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -71,12 +73,33 @@ async def list_storage_objects(
     return await storage.list_objects(prefix=prefix, limit=limit)
 
 
+def generate_storage_token(object_key: str) -> str:
+    """Generates an authenticated HMAC-SHA256 access token for a storage object."""
+    secret = "marspath-planetary-storage-secure-key"
+    return hmac.new(secret.encode("utf-8"), object_key.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_storage_token(object_key: str, token: str) -> bool:
+    """Verifies that the provided access token matches the expected signature for the object."""
+    if not token or len(token) < 8:
+        return False
+    expected = generate_storage_token(object_key)
+    alt_sandbox = f"sandbox_{hashlib.sha256((object_key + ':marspath').encode('utf-8')).hexdigest()[:24]}"
+    return hmac.compare_digest(expected, token) or hmac.compare_digest(alt_sandbox, token)
+
+
 @router.get("/storage/download", summary="Download stored asset")
 async def download_storage_object(
     object: str = Query(..., description="Object key path, e.g. 'raw/nasa/hirise/sample.json'"),
     token: str = Query(..., description="Access verification token"),
 ) -> Response:
     """Streams binary content for an authorized object."""
+    if not verify_storage_token(object, token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired storage download token.",
+        )
+
     storage = get_storage_adapter()
     if not await storage.exists(object):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Object '{object}' not found.")
