@@ -332,10 +332,10 @@ function App() {
 
   // UI Panels
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 760);
-  const [rightExpanded, setRightExpanded] = useState(false);
+  const [rightExpanded, setRightExpanded] = useState(() => window.innerWidth > 1024);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [robustnessSettingsOpen, setRobustnessSettingsOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const [profileExpanded, setProfileExpanded] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [showRoute, setShowRoute] = useState(() => new URLSearchParams(location.search).get('view') === 'planner');
@@ -431,6 +431,9 @@ function App() {
     setResult(enriched);
     setPreviousResult(null);
     setSelected(enriched.routes[0].route_id);
+    setRightExpanded(true);
+    setDetailsOpen(true);
+    setShowRoute(true);
     lastRequest.current = request;
     setFitToken(n => n + 1);
     setBusy(false);
@@ -1250,6 +1253,108 @@ function App() {
           <span className="quick-badge-arrow">›</span>
         </div>
 
+        {/* Primary Map HUD — Alternative Route Corridor Selector */}
+        {plannerMode && result?.routes?.length > 0 && (
+          <div
+            className="map-hud-route-selector glass"
+            style={{
+              left: `calc(50% + ${((leftOpen ? 372 : 24) - (plannerMode ? (rightExpanded ? 452 : 392) : 24)) / 2}px)`,
+              maxWidth: `calc(100vw - ${(leftOpen ? 372 : 24) + (plannerMode ? (rightExpanded ? 452 : 392) : 24) + 40}px)`,
+            }}
+            role="region"
+            aria-label="Alternative route corridor selector"
+          >
+            <div className="hud-route-header">
+              <div className="hud-title-wrap">
+                <span className="hud-title-icon">🧭</span>
+                <strong>Traversal Candidates ({result.routes.length})</strong>
+                <span className="hud-subtitle">Select candidate to activate &amp; update profile</span>
+              </div>
+              <div className="hud-actions-wrap">
+                <button
+                  type="button"
+                  className="hud-quick-btn"
+                  onClick={() => setRightExpanded(v => !v)}
+                  title={rightExpanded ? 'Collapse analysis drawer' : 'Expand full analysis metrics'}
+                >
+                  {rightExpanded ? 'Hide Analysis' : 'Show Full Metrics ›'}
+                </button>
+              </div>
+            </div>
+            <div className="hud-candidates-deck" role="tablist" aria-label="Route candidate alternatives">
+              {result.routes.map((r, i) => {
+                const isSelected = r.route_id === (selected || result.routes[0]?.route_id);
+                const distKm = (r.summary?.total_distance_meters || 0) / 1000;
+                const durationH = r.summary?.estimated_duration_hours;
+                const costVal = r.total_cost;
+                const maxSlope = r.summary?.max_slope_deg;
+                const exceedsRet = r.summary?.exceeds_return_budget;
+                const candidateLabel = i === 0 ? 'Primary Route (Balanced)' : i === 1 ? 'Alternative Corridor (Detour)' : 'Safety Backup (Low Slope)';
+
+                return (
+                  <button
+                    key={r.route_id}
+                    type="button"
+                    className={`hud-candidate-card ${isSelected ? 'is-selected' : ''}`}
+                    role="tab"
+                    aria-selected={isSelected}
+                    onClick={() => {
+                      setSelected(r.route_id);
+                      setHover(null);
+                    }}
+                    onPointerEnter={() => setHoveredRoute(r.route_id)}
+                    onPointerLeave={() => setHoveredRoute(null)}
+                    title={`Select ${r.name || candidateLabel} for map highlight, profile cross-section, and export`}
+                  >
+                    <div className="card-top-row">
+                      <span className="candidate-badge">{i === 0 ? '★ Primary' : `Alt ${i}`}</span>
+                      <span className="candidate-name">{r.name || candidateLabel}</span>
+                      {isSelected && <span className="active-pill">ACTIVE</span>}
+                    </div>
+                    <div className="card-metrics-row">
+                      <span className="metric-chip">📏 <strong>{fmt(distKm, 2)} km</strong></span>
+                      <span className="metric-chip">⏱️ <strong>{Number.isFinite(durationH) ? `${fmt(durationH, 1)} hrs` : '—'}</strong></span>
+                      <span className="metric-chip">⚖️ Cost: <strong>{fmt(costVal, 0)}</strong></span>
+                      <span className={`metric-chip ${Number.isFinite(maxSlope) && maxSlope > 15 ? 'warn' : ''}`}>
+                        ⛰️ <strong>{Number.isFinite(maxSlope) ? `${fmt(maxSlope, 1)}°` : '—'}</strong>
+                      </span>
+                      <span className={`metric-chip status ${exceedsRet ? 'danger' : 'nominal'}`}>
+                        {exceedsRet ? '⚠️ Exceeds Return' : '✅ Feasible Return'}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 2D Return-to-Base Reachable Zone Legend & Overlay Toggle */}
+        {plannerMode && result?.return_zone && (
+          <div
+            className="map-hud-return-legend glass"
+            style={{
+              left: `calc(50% + ${((leftOpen ? 372 : 24) - (plannerMode ? (rightExpanded ? 452 : 392) : 24)) / 2}px)`,
+            }}
+            role="complementary"
+            aria-label="Reachable return zone overlay and legend"
+          >
+            <label className="return-toggle-label">
+              <input
+                type="checkbox"
+                checked={showReachableZone}
+                onChange={e => setShowReachableZone(e.target.checked)}
+              />
+              <span>2D Return-to-Base Isochrone</span>
+            </label>
+            <div className="legend-items">
+              <span className="legend-item"><i className="swatch mint" /> Safe Return (≤ {fmt(evaBudgetHours, 1)}h)</span>
+              <span className="legend-item"><i className="swatch coral" /> Exceeds EVA (&gt; {fmt(evaBudgetHours, 1)}h)</span>
+              <span className="legend-item"><i className="swatch nodata" /> Blocked / NoData</span>
+            </div>
+          </div>
+        )}
+
         {!leftOpen && (
           <button className="route-reopen glass" onClick={() => setLeftOpen(true)} aria-label="Open mission control panel">
             <Icon name="sliders" />
@@ -2060,6 +2165,60 @@ function App() {
 
               {rightExpanded && (
                 <>
+                  {/* Mission Intelligence Quick Navigation Bar */}
+                  <div className="intel-quick-access-deck" role="region" aria-label="Mission Intelligence quick navigation">
+                    <button
+                      type="button"
+                      className={`quick-intel-pill ${analysisTab === 'overview' ? 'active' : ''}`}
+                      onClick={() => setAnalysisTab('overview')}
+                      title="Explore multi-objective Pareto trade-offs across candidates"
+                    >
+                      <span className="pill-icon">📊</span>
+                      <span>Pareto Trade-offs</span>
+                      <span className="pill-count">{result?.routes?.length || 1} corridors</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`quick-intel-pill ${analysisTab === 'robustness' ? 'active' : ''}`}
+                      onClick={() => setAnalysisTab('robustness')}
+                      title="View Monte Carlo perturbation testing and Scientific Reliability score"
+                    >
+                      <span className="pill-icon">🎲</span>
+                      <span>Robustness</span>
+                      <span className="pill-count">{result?.robustness_assessment?.scenarios_evaluated || result?.robustness?.scenarios_evaluated || robustnessConfig?.scenario_count || 50} runs</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`quick-intel-pill ${analysisTab === 'evidence' ? 'active' : ''}`}
+                      onClick={() => setAnalysisTab('evidence')}
+                      title="View high-resolution data provenance and targeted reconnaissance recommendations"
+                    >
+                      <span className="pill-icon">🛰️</span>
+                      <span>Next-Best Recon</span>
+                      <span className="pill-count">{result?.provenance?.reconnaissance_recommendations?.length || 0} targets</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`quick-intel-pill ${analysisTab === 'science' ? 'active' : ''}`}
+                      onClick={() => setAnalysisTab('science')}
+                      title="View scientific waypoints and Scientific Return per EVA Hour"
+                    >
+                      <span className="pill-icon">🔬</span>
+                      <span>Science Return</span>
+                      <span className="pill-count">{fmt(active?.science_return?.points_per_eva_hour, 1) || '0'} pts/hr</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-intel-pill"
+                      onClick={() => { switchMission('conditions'); setLeftOpen(true); }}
+                      title="Open Mars Now conditions and run 7 Martian stress testing scenarios"
+                    >
+                      <span className="pill-icon">⚡</span>
+                      <span>Stress Testing</span>
+                      <span className="pill-count">7 Scenarios</span>
+                    </button>
+                  </div>
+
                   <nav className="analysis-tabs" role="tablist" aria-label="Analysis perspectives">
                     <button
                       className={'tab-button ' + (analysisTab === 'overview' ? 'active' : '')}
@@ -2098,6 +2257,75 @@ function App() {
                   {/* TAB 1: OVERVIEW */}
                   {analysisTab === 'overview' && (
                     <div className="tab-pane overview-pane" role="tabpanel">
+                      {/* Prominent Mission Resources & Temporal Budget Summary */}
+                      {result && (
+                        <div className="metric-box mission-resources-card">
+                          <div className="box-header">
+                            <span>⏱️ Mission Resources &amp; Temporal Budget</span>
+                            <span className={`badge ${active?.summary?.exceeds_return_budget ? 'high' : 'nominal'}`}>
+                              {active?.summary?.exceeds_return_budget ? 'EXCEEDS EVA BUDGET' : 'FEASIBLE MISSION'}
+                            </span>
+                          </div>
+                          <dl className="compact-dl resources-dl">
+                            <dt>Total Distance</dt>
+                            <dd>{fmt((active?.summary?.total_distance_meters || 0) / 1000, 2)} km</dd>
+
+                            <dt>Outbound Walking Time</dt>
+                            <dd>{Number.isFinite(active?.summary?.estimated_duration_hours) ? `${fmt(active.summary.estimated_duration_hours, 1)} hrs` : 'Unavailable'}</dd>
+
+                            <dt>Worst-Case Return Time</dt>
+                            <dd className={active?.summary?.exceeds_return_budget ? 'text-warn' : ''}>
+                              {Number.isFinite(active?.summary?.max_return_time_minutes)
+                                ? `${fmt(active.summary.max_return_time_minutes, 0)} min (${fmt(active.summary.max_return_time_minutes / 60, 2)} hrs)`
+                                : 'Unavailable'}
+                            </dd>
+
+                            <dt>Estimated Round-Trip</dt>
+                            <dd>
+                              {Number.isFinite(active?.summary?.estimated_duration_hours) && Number.isFinite(active?.summary?.max_return_time_minutes)
+                                ? `${fmt(active.summary.estimated_duration_hours + active.summary.max_return_time_minutes / 60, 2)} hrs`
+                                : Number.isFinite(active?.summary?.estimated_duration_hours)
+                                ? `${fmt(active.summary.estimated_duration_hours, 1)} hrs (one-way)`
+                                : 'Unavailable'}
+                            </dd>
+
+                            <dt>Configured EVA Budget</dt>
+                            <dd>{fmt(evaBudgetHours, 1)} hrs</dd>
+
+                            <dt>Remaining EVA Margin</dt>
+                            <dd>
+                              {(() => {
+                                if (!Number.isFinite(active?.summary?.estimated_duration_hours)) return 'Unavailable';
+                                const returnH = Number.isFinite(active?.summary?.max_return_time_minutes) ? active.summary.max_return_time_minutes / 60 : 0;
+                                const usedH = active.summary.estimated_duration_hours + returnH;
+                                const marginH = evaBudgetHours - usedH;
+                                const isNeg = marginH < 0;
+                                return (
+                                  <strong className={isNeg ? 'text-warn' : 'text-nominal'}>
+                                    {isNeg ? `${fmt(marginH, 2)} hrs (DEFICIT)` : `+${fmt(marginH, 2)} hrs remaining`}
+                                  </strong>
+                                );
+                              })()}
+                            </dd>
+
+                            <dt>Return Feasibility</dt>
+                            <dd className={active?.summary?.exceeds_return_budget ? 'text-warn' : 'text-nominal'}>
+                              {active?.summary?.exceeds_return_budget ? '⚠️ Exceeds EVA Time Budget' : '✅ Return Leg Within Budget'}
+                            </dd>
+
+                            <dt>Local Solar Turnaround</dt>
+                            <dd>{active?.turnaround?.turnaround_ltst_hms ? `${active.turnaround.turnaround_ltst_hms} LTST (${active.turnaround?.limiting_constraint || 'nominal'})` : '—'}</dd>
+
+                            <dt>Energy Index / Effort</dt>
+                            <dd>
+                              {Number.isFinite(active?.summary?.estimated_relative_effort)
+                                ? `${fmt(active.summary.estimated_relative_effort, 0)} eq-m`
+                                : 'Unavailable'}
+                            </dd>
+                          </dl>
+                        </div>
+                      )}
+
                       <div className="route-candidates" role="group" aria-label="Route candidates">
                         {result?.routes.map((r, i) => (
                           <button
@@ -2191,7 +2419,7 @@ function App() {
                               <tr>
                                 <th>Route</th>
                                 <th>Dist</th>
-                                <th>Est. Effort</th>
+                                <th>Energy / Effort</th>
                                 <th>Max/X-Slp</th>
                                 <th>Unk %</th>
                                 <th>Return</th>
@@ -2247,10 +2475,10 @@ function App() {
                             </dd>
                             <dt>Local Sunset</dt>
                             <dd>{active.turnaround.sunset_ltst_hms ? `${active.turnaround.sunset_ltst_hms} LTST` : '—'}</dd>
-                            <dt>Est. Relative Effort</dt>
+                            <dt>Energy Index / Effort</dt>
                             <dd>
                               {Number.isFinite(active.summary?.estimated_relative_effort)
-                                ? `${fmt(active.summary.estimated_relative_effort, 0)} eq-m (${active.summary?.effort_model || 'slope_penalty'})`
+                                ? `${fmt(active.summary.estimated_relative_effort, 0)} eq-m`
                                 : 'Unavailable'}
                             </dd>
                             <dt>Max Rescue Time</dt>
@@ -2267,6 +2495,19 @@ function App() {
                           )}
                         </div>
                       )}
+
+                      {/* Educational Notice on Energy Model and Rover Power Sources */}
+                      <div className="energy-info-tooltip">
+                        <div className="tooltip-header">
+                          <span>🔋 Energy Index &amp; Rover Power Model Notice</span>
+                        </div>
+                        <p>
+                          Martian surface rovers (Perseverance, Curiosity) are powered by Multi-Mission Radioisotope Thermoelectric Generators (MMRTG) or solar arrays. <strong>They do not carry liquid chemical fuel or propellant tanks, so no conventional fuel gauge exists.</strong>
+                        </p>
+                        <p>
+                          This metric represents path-integrated <strong>Minetti mechanical work</strong> under Martian surface gravity (0.376g) and suit/payload loading, expressed in equivalent flat-meters (<code>eq-m</code>). Incline climbing and cross-slope roll resistance increase the mechanical effort index nonlinearly.
+                        </p>
+                      </div>
 
                       <div className="scientific-disclaimer-box">
                         <strong>Planning Indicator & Limitations</strong>
@@ -2317,13 +2558,48 @@ function App() {
                         </dl>
                       </div>
 
+                      {/* Cost & Terrain Breakdown: Open by Default with Full Model Explanations */}
                       <details className="analysis-details" open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
                         <summary>
-                          <span>Cost & Terrain Breakdown</span>
+                          <span>📊 Cost &amp; Terrain Breakdown (Active Corridor)</span>
                           <Icon name="chevron" />
                         </summary>
                         <div className="details-body">
-                          <dl>
+                          <div className="cost-model-explainer">
+                            <strong>Total Weighted Route Cost: {fmt(active?.total_cost, 1)} units</strong>
+                            <p>
+                              Objective mathematical traversal cost combining 3D distance with slope, roughness, and hazard multipliers:
+                              <code style={{ display: 'block', margin: '4px 0' }}>Cost = Σ Δs_3D · (1 + w_slope·S + w_rough·R + w_hazard·H) + P_corridor</code>
+                              Dimensionless graph traversal cost (Cost ≥ 3D distance), not financial currency.
+                            </p>
+                          </div>
+
+                          <div className="cost-breakdown-bars">
+                            {[
+                              ['Base 3D Distance Cost', 'base_distance_cost', '#64dfdf'],
+                              ['Slope Incline Penalty', 'slope_penalty', '#e59866'],
+                              ['Terrain Roughness Penalty', 'roughness_penalty', '#f8c471'],
+                              ['Obstacle & Hazard Penalty', 'hazard_penalty', '#ec7063'],
+                              ['Corridor Detour Penalty', 'extra_penalty', '#bb8fce']
+                            ].map(([label, key, color]) => {
+                              const val = active?.cost_breakdown?.[key] || 0;
+                              const total = active?.total_cost || 1;
+                              const pct = Math.min(100, Math.max(0, (val / total) * 100));
+                              return (
+                                <div key={key} className="cost-bar-item">
+                                  <div className="cost-bar-labels">
+                                    <span>{label}</span>
+                                    <strong>{fmt(val, 1)} units ({fmt(pct, 1)}%)</strong>
+                                  </div>
+                                  <div className="cost-bar-track">
+                                    <div className="cost-bar-fill" style={{ width: `${pct}%`, background: color }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <dl style={{ marginTop: '12px' }}>
                             <dt>Max slope</dt>
                             <dd>{fmt(active?.summary?.max_slope_deg, 1)}°</dd>
                             <dt>Average slope</dt>
