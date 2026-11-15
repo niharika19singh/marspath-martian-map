@@ -7,20 +7,16 @@ deterministic safety mandate, and PDF export integration.
 
 from __future__ import annotations
 
-import io
 from fastapi.testclient import TestClient
-import pytest
 
-from backend.app.main import app
 from backend.app.intelligence.landmark_registry import (
-    JEZERO_BOUNDS,
     check_out_of_bounds_landmarks,
     extract_explicit_coordinates,
     is_within_jezero,
-    resolve_all_landmarks_in_text,
     resolve_landmark_by_name,
 )
 from backend.app.intelligence.mission_intelligence import get_mission_intelligence_engine
+from backend.app.main import app
 from backend.app.services.pdf_export_service import generate_mission_pdf
 
 client = TestClient(app)

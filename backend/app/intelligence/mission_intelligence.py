@@ -15,15 +15,6 @@ import re
 import time
 from typing import Any
 
-from backend.app.intelligence.landmark_registry import (
-    JEZERO_BOUNDS,
-    JEZERO_LANDMARKS,
-    check_out_of_bounds_landmarks,
-    extract_explicit_coordinates,
-    is_within_jezero,
-    resolve_all_landmarks_in_text,
-    resolve_landmark_by_name,
-)
 from backend.app.integrations.ai.schemas.models import (
     CandidateEvaluation,
     CandidateRouteComparisonResponse,
@@ -31,6 +22,14 @@ from backend.app.integrations.ai.schemas.models import (
     NaturalLanguageMissionPlanResponse,
     ScientificEvidenceItem,
     ScientificTerrainInterpretationResponse,
+)
+from backend.app.intelligence.landmark_registry import (
+    JEZERO_BOUNDS,
+    JEZERO_LANDMARKS,
+    check_out_of_bounds_landmarks,
+    extract_explicit_coordinates,
+    is_within_jezero,
+    resolve_all_landmarks_in_text,
 )
 
 logger = logging.getLogger(__name__)
