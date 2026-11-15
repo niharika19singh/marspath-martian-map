@@ -6,17 +6,14 @@ Generates publication-grade, multi-page planetary mission dossiers using ReportL
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
 from reportlab.platypus import (
     HRFlowable,
-    KeepTogether,
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -132,8 +129,8 @@ def generate_mission_pdf(
     story.append(Paragraph("Operational Mission Dossier & Traverse Brief", title_style))
     story.append(Spacer(1, 4))
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    mission_id = plan_data.get("mission_id", f"mission_{int(datetime.now(timezone.utc).timestamp())}")
+    now_utc = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    mission_id = plan_data.get("mission_id", f"mission_{int(datetime.now(UTC).timestamp())}")
     meta_text = (
         f"<b>Mission ID:</b> {mission_id} &nbsp;|&nbsp; "
         f"<b>Target Region:</b> Jezero Crater, Mars &nbsp;|&nbsp; "
@@ -252,7 +249,6 @@ def generate_mission_pdf(
     prov_dataset = prov.get("dataset_name", source_sel.get("selected_dataset_name", "USGS MOLA-HRSC Blended DEM 200m"))
     prov_res = source_sel.get("native_resolution_meters", prov.get("nominal_resolution_meters", 200.0))
     prov_doi = prov.get("pds_doi", "10.5066/P907276M")
-    prov_url = prov.get("official_source_url", "https://astrogeology.usgs.gov")
     prov_mode = prov.get("data_mode", "real")
     cov_frac = (summary.get("data_coverage_fraction", 1.0) or 1.0) * 100.0
 
