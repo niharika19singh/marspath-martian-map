@@ -1,5 +1,9 @@
 import{readFile,writeFile}from'node:fs/promises';import{createHash}from'node:crypto';import assert from'node:assert/strict';import{plan}from'./src/engine.js';import{buildTerrain,toIndex}from'./src/terrain.js';import{exportGeoJSON}from'./src/export.js';
-const bytes=await readFile('../dist/mission-data/jezero-dem.json'),expected=(await readFile('../dist/mission-data/jezero-dem.sha256','utf8')).trim();assert.equal(createHash('sha256').update(bytes).digest('hex'),expected);const raw={...JSON.parse(bytes),local_integrity_verified:true,file_sha256:expected};
+const demUrl = new URL('../dist/mission-data/jezero-dem.json', import.meta.url);
+const shaUrl = new URL('../dist/mission-data/jezero-dem.sha256', import.meta.url);
+const bytes = await readFile(demUrl), expected = (await readFile(shaUrl, 'utf8')).trim();
+assert.equal(createHash('sha256').update(bytes).digest('hex'), expected);
+const raw = { ...JSON.parse(bytes), local_integrity_verified: true, file_sha256: expected };
 const base={start:{lon:77.40,lat:18.39},destination:{lon:77.44,lat:18.42},mode:'balanced',constraints:{max_slope_deg:20,max_roughness:.85,avoid_unobserved_terrain:true},science_waypoints:[],num_alternatives:3};
 const a=plan(raw,{...base,algorithm:'astar'}),d=plan(raw,{...base,algorithm:'dijkstra',num_alternatives:1});assert.ok(Math.abs(a.routes[0].total_cost-d.routes[0].total_cost)<1e-6);assert.equal(a.routes.length,3);const terrain=buildTerrain(raw);
 const cmp=plan(raw,{...base,algorithm:'compare'});assert.ok(cmp.algorithm_comparison);assert.ok(cmp.algorithm_comparison.optimality_verified);assert.equal(cmp.stats.algorithm_used,'A* vs Dijkstra Benchmark');

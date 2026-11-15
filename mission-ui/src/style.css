@@ -5357,3 +5357,423 @@
   border-color: #38bdf8;
   color: #38bdf8;
 }
+
+/* Phase 5.A: Primary Map Floating Route Candidate Selector HUD */
+.floating-candidate-hud {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: rgba(8, 13, 17, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(16px);
+  max-width: calc(100vw - 80px);
+  overflow-x: auto;
+}
+.candidate-hud-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8da397;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+}
+.hud-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5cffb0;
+  box-shadow: 0 0 6px #5cffb088;
+}
+.candidate-hud-pill {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #c4d4cc;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+}
+.candidate-hud-pill:hover {
+  background: rgba(92, 255, 176, 0.08);
+  border-color: rgba(92, 255, 176, 0.35);
+  color: #eafbf2;
+}
+.candidate-hud-pill.active {
+  background: rgba(92, 255, 176, 0.15);
+  border-color: #5cffb0;
+  color: #5cffb0;
+  box-shadow: 0 0 12px rgba(92, 255, 176, 0.28);
+}
+.candidate-hud-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.hud-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.hud-dot.dot-0 { background: #5cffb0; }
+.hud-dot.dot-1 { background: #ffb867; }
+.hud-dot.dot-2 { background: #8ab4f8; }
+.pareto-mini-tag {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 209, 102, 0.2);
+  color: #ffd166;
+  border: 1px solid rgba(255, 209, 102, 0.4);
+  font-weight: 600;
+}
+.candidate-hud-metrics {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: #9cb0a5;
+  margin-top: 2px;
+}
+.candidate-hud-pill.active .candidate-hud-metrics {
+  color: #d1f4e3;
+}
+
+/* Phase 5.D: Mission Resource Summary Card */
+.mission-resource-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 14px;
+  margin-top: 8px;
+}
+.resource-item {
+  display: flex;
+  flex-direction: column;
+}
+.resource-item span {
+  font-size: 10px;
+  color: #8da197;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.resource-item strong {
+  font-size: 12px;
+  color: #e4efe9;
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+.resource-item small {
+  font-size: 9.5px;
+  color: #798d83;
+  margin-top: 1px;
+}
+
+/* Phase 5.E: Advanced Mission Intelligence Navigation Entry Points */
+.advanced-intel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.intel-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #b7cbbf;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.intel-pill-btn:hover {
+  background: rgba(92, 255, 176, 0.14);
+  border-color: rgba(92, 255, 176, 0.4);
+  color: #e5fbee;
+}
+
+/* Phase 7: Return Zone Isochrone Legend */
+.return-zone-legend {
+  position: absolute;
+  bottom: 24px;
+  right: 430px;
+  z-index: 4;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #c5d7cd;
+  background: rgba(9, 14, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.legend-gradient-bar {
+  height: 8px;
+  width: 175px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #48ebb2, #ffd166, #e2705c);
+}
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  font-family: var(--mono);
+  color: #9cb0a5;
+}
+@media (max-width: 900px) {
+  .return-zone-legend {
+    right: 20px;
+    bottom: 90px;
+  }
+  .floating-candidate-hud {
+    top: 60px;
+    padding: 6px 8px;
+  }
+}
+
+/* Consolidated Recorded Traverse & Navigation HUD */
+.recorded-traverse-hud,
+.traverse-legend-hud {
+  position: absolute;
+  top: 54px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(9, 15, 18, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  font-size: 10.5px;
+  color: #c9d6cf;
+  white-space: nowrap;
+  pointer-events: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  transition: left 0.22s ease, max-width 0.22s ease;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Go to Location Dropdown Menu */
+.goto-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.goto-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #e2ede7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+.goto-btn:hover,
+.goto-btn.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(92, 255, 176, 0.35);
+  color: #ffffff;
+}
+.goto-btn strong {
+  color: #5cffb0;
+  font-weight: 600;
+}
+.dropdown-caret {
+  font-size: 9px;
+  opacity: 0.7;
+}
+.goto-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 210px;
+  background: rgba(8, 14, 18, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  padding: 6px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.goto-dropdown-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #7b9286;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 2px;
+}
+.goto-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+  width: 100%;
+}
+.goto-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.goto-dropdown-item.active {
+  background: rgba(92, 255, 176, 0.12);
+}
+.goto-item-labels {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.goto-item-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e6ebe9;
+}
+.goto-dropdown-item.active .goto-item-name {
+  color: #5cffb0;
+}
+.goto-item-sub {
+  font-size: 9.5px;
+  color: #8da197;
+}
+
+.hud-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.traverse-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.traverse-swatch.passive-road,
+.traverse-swatch.passive {
+  display: inline-block;
+  width: 16px;
+  height: 2.2px;
+  border-radius: 2px;
+  background: #9c9489;
+  box-shadow: 0 0 0 1px rgba(10, 14, 18, 0.7);
+}
+.traverse-swatch.amber-glow,
+.traverse-swatch.highlighted {
+  display: inline-block;
+  width: 16px;
+  height: 3.2px;
+  border-radius: 2px;
+  background: #ffb867;
+  box-shadow: 0 0 6px rgba(255, 184, 103, 0.65);
+}
+.traverse-swatch.planned-mint {
+  display: inline-block;
+  width: 16px;
+  height: 3.2px;
+  border-radius: 2px;
+  background: #5cffb0;
+  box-shadow: 0 0 6px rgba(92, 255, 176, 0.65);
+}
+.traverse-marker-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffb867;
+  border: 1.5px solid #0b1014;
+}
+.empty-window-pill {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #ffbb70;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.fit-traverse-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  color: #e2ede7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+.fit-traverse-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+.traverse-key .highlighted {
+  background: #ffb867;
+  width: 15px;
+  height: 3px;
+  display: block;
+  border-radius: 3px;
+}
+@media (max-width: 850px) {
+  .recorded-traverse-hud,
+  .traverse-legend-hud {
+    top: auto;
+    bottom: 110px;
+    font-size: 10px;
+    gap: 8px;
+    padding: 4px 10px;
+    max-width: 95vw;
+    overflow-x: auto;
+  }
+}

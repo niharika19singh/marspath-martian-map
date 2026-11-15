@@ -1,4 +1,13 @@
-import { validateTraverse, visibleDrives, visibleWaypoints, traverseStats, exportTraverse } from './traverse.js';
+import {
+  validateTraverse,
+  visibleDrives,
+  visibleWaypoints,
+  windowedDrives,
+  windowedWaypoints,
+  latestWaypointThroughSol,
+  traverseStats,
+  exportTraverse,
+} from './traverse.js';
 import { TraversePanel, TraverseTimeline } from './TraversePanel.jsx';
 import { ConditionsPanel } from './ConditionsPanel.jsx';
 import { computeClientMars24 } from './conditions.js';
@@ -25,6 +34,20 @@ import NasaDataPanel from './NasaDataPanel.jsx';
 import CloudAiPanel from './CloudAiPanel.jsx';
 import { AstronautVisorHud } from './AstronautVisorHud.jsx';
 import { SurfacePovViewer } from './SurfacePovViewer.jsx';
+import VisorHUD from './VisorHUD.jsx';
+import {
+  HABITAT_BASE_COORD,
+  SPE_SEVERITY_LEVELS,
+  JEZERO_RADIATION_SHELTERS,
+  PLANETARY_PROTECTION_ZONES,
+  AUTHENTIC_NASA_SURFACE_IMAGERY,
+  computeMarswalkSurvivabilityScore,
+  assessWalkBackSafety,
+  evaluateRoutePlanetaryProtection,
+  evaluateRFCommunications,
+  evaluateCompoundRisk,
+  findNearestShelter,
+} from './survivability.js';
 import { verifyCoordinateDatasetCoverage } from './wmts_capabilities.js';
 import {
   JEZERO_SCIENCE_TARGETS_CLIENT,
@@ -119,9 +142,9 @@ function App() {
   const [curiosityTraverse, setCuriosityTraverse] = useState(null);
   const [curiosityWaypoints, setCuriosityWaypoints] = useState(null);
   const [timelineEvents, setTimelineEvents] = useState([]);
-  const [showOrbiters, setShowOrbiters] = useState(true);
-  const [showGroundTracks, setShowGroundTracks] = useState(true);
-  const [showFootprints, setShowFootprints] = useState(true);
+  const [showOrbiters, setShowOrbiters] = useState(false);
+  const [showGroundTracks, setShowGroundTracks] = useState(false);
+  const [showFootprints, setShowFootprints] = useState(false);
   const [showCuriosity, setShowCuriosity] = useState(false);
   const [showThemisOverlay, setShowThemisOverlay] = useState(false);
   const [showScienceTargets, setShowScienceTargets] = useState(true);
@@ -139,6 +162,18 @@ function App() {
   const [molaOpacity, setMolaOpacity] = useState(0.78);
   const [terrainOpacity, setTerrainOpacity] = useState(0.75);
 
+  // Astronaut EVA & Survivability System State
+  const [visorActive, setVisorActive] = useState(false);
+  const [speActive, setSpeActive] = useState(false);
+  const [speSeverity, setSpeSeverity] = useState('S2');
+  const [selectedProtectionZone, setSelectedProtectionZone] = useState(null);
+  const [scoutRoverModalOpen, setScoutRoverModalOpen] = useState(false);
+  const [scoutRoverDispatched, setScoutRoverDispatched] = useState(false);
+  const [selectedNasaPhoto, setSelectedNasaPhoto] = useState(null);
+  const [showWalkBackEnvelopes, setShowWalkBackEnvelopes] = useState(true);
+  const [showPlanetaryProtection, setShowPlanetaryProtection] = useState(true);
+  const [showAuthenticPhotos, setShowAuthenticPhotos] = useState(true);
+
   function handleSelectWaypoint(w) {
     setWaypoint(w);
     if (w && w.geometry?.coordinates) {
@@ -150,13 +185,21 @@ function App() {
   }
 
   function inspectRoverPosition() {
-    const wp = waypoint || (waypoints && waypoints.length ? waypoints[waypoints.length - 1] : null);
+    const wp = waypoint || (waypointData && waypointData.length ? waypointData[waypointData.length - 1] : null);
     if (wp && wp.geometry?.coordinates) {
       const [lon, lat] = wp.geometry.coordinates;
       setInspectCoord({ lon: Number(lon.toFixed(5)), lat: Number(lat.toFixed(5)) });
       mapActions.current?.focus?.({ lon, lat, zoom: 14 });
     }
   }
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__openScoutRoverModal = () => setScoutRoverModalOpen(true);
+      window.__selectProtectionZone = (z) => setSelectedProtectionZone(z || PLANETARY_PROTECTION_ZONES[0]);
+      window.__selectNasaPhoto = (p) => setSelectedNasaPhoto(p || Object.values(AUTHENTIC_NASA_SURFACE_IMAGERY)[0]);
+    }
+  }, []);
 
   const clientMars24Quick = useMemo(() => {
     try {
@@ -172,30 +215,69 @@ function App() {
   const nasaDataMode = missionView === 'nasa-data';
   const cloudAiMode = missionView === 'cloud-ai';
   const plannerMode = missionView === 'planner';
-  const drives = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
-  const waypoints = useMemo(() => visibleWaypoints(waypointData, solCut), [waypointData, solCut]);
-  const historyStats = useMemo(() => traverseStats(drives, waypoints), [drives, waypoints]);
-  const maxSol = traverse ? Math.max(...traverse.features.map(f => f.properties.sol)) : 2022;
+  const maxSol = useMemo(() => (traverse?.features ? Math.max(...traverse.features.map(f => f.properties.sol)) : 2022), [traverse]);
+  const minSol = useMemo(() => (traverse?.features ? Math.min(...traverse.features.map(f => f.properties.sol)) : 14), [traverse]);
+
+  // Windowed 15-sol trailing window drives & waypoints: [solCut - 14, solCut]
+  const highlightedDrives = useMemo(() => windowedDrives(traverse, solCut, 15), [traverse, solCut]);
+  const highlightedWaypoints = useMemo(() => windowedWaypoints(waypointData, solCut, 15), [waypointData, solCut]);
+  const activeRoverWp = useMemo(() => latestWaypointThroughSol(waypointData, solCut), [waypointData, solCut]);
+  const windowStats = useMemo(() => traverseStats(highlightedDrives, highlightedWaypoints), [highlightedDrives, highlightedWaypoints]);
+  const totalArchiveStats = useMemo(() => traverseStats(traverse?.features || [], waypointData || []), [traverse, waypointData]);
+  const drivesThroughSol = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
+  const historyStats = useMemo(() => traverseStats(drivesThroughSol, visibleWaypoints(waypointData, solCut)), [drivesThroughSol, waypointData, solCut]);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      fetch(getAssetUrl('/mission-data/perseverance-traverse.geojson')),
-      fetch(getAssetUrl('/mission-data/perseverance-waypoints.geojson'))
-    ])
-      .then(async rs => {
-        if (rs.some(r => !r.ok)) throw Error('The recorded traverse could not load.');
-        const [t, w] = await Promise.all(rs.map(r => r.json()));
-        validateTraverse(t);
-        if (cancelled) return;
-        setTraverse(t);
-        setWaypointData(w);
-        setSolCut(Math.max(...t.features.map(f => f.properties.sol)));
-        setHistoryFit(n => n + 1);
-      })
-      .catch(e => {
-        if (!cancelled) setTraverseError(e.message);
-      });
+    async function loadTraverseData() {
+      let t = null;
+      let w = null;
+      // Gracefully attempt to refresh from official NASA/JPL MMGIS feed if accessible
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3500);
+        const [onlineT, onlineW] = await Promise.all([
+          fetch('https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_traverse.json', { signal: controller.signal }),
+          fetch('https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_waypoints.json', { signal: controller.signal }),
+        ]);
+        clearTimeout(timeout);
+        if (onlineT.ok && onlineW.ok) {
+          const [parsedT, parsedW] = await Promise.all([onlineT.json(), onlineW.json()]);
+          validateTraverse(parsedT);
+          t = parsedT;
+          w = parsedW;
+        }
+      } catch (err) {
+        // Upstream unavailable or blocked; fall back to verified bundled snapshot
+      }
+
+      // If upstream failed or returned empty, load validated local snapshot
+      if (!t || !w) {
+        try {
+          const rs = await Promise.all([
+            fetch(getAssetUrl('/mission-data/perseverance-traverse.geojson')),
+            fetch(getAssetUrl('/mission-data/perseverance-waypoints.geojson')),
+          ]);
+          if (rs.some(r => !r.ok)) throw Error('The recorded traverse could not load.');
+          const [parsedT, parsedW] = await Promise.all(rs.map(r => r.json()));
+          validateTraverse(parsedT);
+          t = parsedT;
+          w = parsedW;
+        } catch (err) {
+          if (!cancelled) setTraverseError(err.message);
+          return;
+        }
+      }
+
+      if (cancelled) return;
+      setTraverse(t);
+      setWaypointData(w);
+      const maxS = Math.max(...t.features.map(f => f.properties.sol));
+      setSolCut(maxS);
+      setHistoryFit(n => n + 1);
+    }
+
+    loadTraverseData();
     return () => {
       cancelled = true;
     };
@@ -291,8 +373,8 @@ function App() {
   const [base, setBase] = useState('auto');
   const [activeBookmark, setActiveBookmark] = useState('jezero');
   const [showViking, setShowViking] = useState(true);
-  const [showCtx, setShowCtx] = useState(true);
-  const [showHirise, setShowHirise] = useState(true);
+  const [showCtx, setShowCtx] = useState(false);
+  const [showHirise, setShowHirise] = useState(false);
   const [showMolaTerrain, setShowMolaTerrain] = useState(false);
   const [showHillshade, setShowHillshade] = useState(false);
   const [showSlope, setShowSlope] = useState(false);
@@ -307,7 +389,7 @@ function App() {
   const [departureUtc, setDepartureUtc] = useState('2026-06-15T08:00:00Z');
   const [daylightBufferMinutes, setDaylightBufferMinutes] = useState(0);
   const [rescueThresholdMinutes, setRescueThresholdMinutes] = useState(30);
-  const [showReachableZone, setShowReachableZone] = useState(true);
+  const [showReachableZone, setShowReachableZone] = useState(false);
   const [showRescueMap, setShowRescueMap] = useState(false);
   const [showRoverEnvelope, setShowRoverEnvelope] = useState(true);
   const [showWalkbackEnvelope, setShowWalkbackEnvelope] = useState(true);
@@ -386,6 +468,30 @@ function App() {
   }, [demSourcePreference, hiriseTerrain, terrain, coordCoverage.bothInLocalHiriseDtmCorridor]);
   const active = result?.routes.find(r => r.route_id === selected) || result?.routes[0];
   const live = sourceMode === 'api';
+
+  // Astronaut EVA & Survivability Engine Calculations
+  const survivabilityScore = useMemo(() => computeMarswalkSurvivabilityScore(active, {
+    speActive,
+    speSeverity,
+    evaBudgetHours,
+  }), [active, speActive, speSeverity, evaBudgetHours]);
+
+  const baselineSurvivabilityScore = useMemo(() => computeMarswalkSurvivabilityScore(active, {
+    speActive: false,
+    evaBudgetHours,
+  }), [active, evaBudgetHours]);
+
+  const walkBackSafety = useMemo(() => assessWalkBackSafety(destination, HABITAT_BASE_COORD, {
+    evaBudgetHours,
+  }), [destination, evaBudgetHours]);
+
+  const protectionCheck = useMemo(() => evaluateRoutePlanetaryProtection(active?.coordinates || []), [active]);
+
+  const rfComms = useMemo(() => evaluateRFCommunications(active?.summary || {}), [active]);
+
+  const compoundRisk = useMemo(() => evaluateCompoundRisk(active?.summary || {}, { speActive, speSeverity }), [active, speActive, speSeverity]);
+
+  const nearestShelter = useMemo(() => findNearestShelter(destination || HABITAT_BASE_COORD), [destination]);
 
   // Load Live Mars Intelligence datasets (orbiters, tracks, footprints, timeline)
   useEffect(() => {
@@ -1139,19 +1245,21 @@ function App() {
           </span>
           <button
             type="button"
+            className={'visor-hud-trigger ' + (visorActive ? 'is-active' : '')}
+            onClick={() => setVisorActive(v => !v)}
+            aria-label="Toggle Astronaut Visor Tactical HUD"
+            title="Switch to Astronaut Field Tactical Visor Mode [ESC to exit]"
+          >
+            <span className="visor-hud-badge">HUD</span>
+            <span>ASTRONAUT VISOR HUD</span>
+          </button>
+          <button
+            type="button"
             className={`btn-header-action btn-suit-hud-toggle ${suitHudMode ? 'is-active' : ''}`}
             onClick={() => setSuitHudMode(v => !v)}
             title="Toggle Astronaut Suit HUD Field Overlay & Audio Alerts"
           >
             🥽 <span>Suit HUD</span>
-          </button>
-          <button
-            type="button"
-            className={`btn-header-action btn-visor-hud-toggle ${visorMode ? 'is-active' : ''}`}
-            onClick={() => setVisorMode(v => !v)}
-            title="Toggle Astronaut Visor HUD Full-Screen View"
-          >
-            🕶️ <span>Visor View</span>
           </button>
           <button
             type="button"
@@ -1184,11 +1292,43 @@ function App() {
         </div>
       </header>
 
+      {visorActive && (
+        <VisorHUD
+          activeRoute={active}
+          destination={destination}
+          start={start}
+          speActive={speActive}
+          speSeverity={speSeverity}
+          evaBudgetHours={evaBudgetHours}
+          onClose={() => setVisorActive(false)}
+          onToggleSpe={() => setSpeActive(v => !v)}
+          onSelectSpeSeverity={setSpeSeverity}
+          onTargetShelter={(shelter) => {
+            setDestination({ lon: shelter.coordinates[0], lat: shelter.coordinates[1], name: shelter.name });
+            setNotice(`Navigating to radiation shelter: ${shelter.name}`);
+            setVisorActive(false);
+          }}
+        />
+      )}
+
       <main className="map-stage" aria-label="MarsPath mission planner">
         <MapView
+          showWalkBackEnvelopes={showWalkBackEnvelopes}
+          showPlanetaryProtection={showPlanetaryProtection}
+          showAuthenticPhotos={showAuthenticPhotos}
+          onSelectProtectionZone={(zone) => setSelectedProtectionZone(zone)}
+          onSelectNasaPhoto={(photo) => setSelectedNasaPhoto(photo)}
           historyMode={historyMode}
-          drives={drives}
-          waypoints={waypoints}
+          drives={highlightedDrives}
+          waypoints={highlightedWaypoints}
+          fullTraverse={traverse}
+          fullWaypoints={waypointData}
+          roverWaypoint={activeRoverWp}
+          windowStats={windowStats}
+          solCut={solCut}
+          maxSol={maxSol}
+          minSol={minSol}
+          onSolChange={setSolCut}
           showHistory={showHistory}
           showWaypoints={showWaypoints}
           historyFit={historyFit}
@@ -1617,6 +1757,12 @@ function App() {
                 });
                 run(req);
               }}
+              survivabilityScore={survivabilityScore}
+              speActive={speActive}
+              speSeverity={speSeverity}
+              walkBackSafety={walkBackSafety}
+              protectionCheck={protectionCheck}
+              evaBudgetHours={evaBudgetHours}
             />
           ) : nasaDataMode ? (
             <NasaDataPanel
@@ -1681,7 +1827,7 @@ function App() {
                 setSolCut(s);
               }}
               onInspectRover={inspectRoverPosition}
-              roverWaypoint={waypoint || (waypoints && waypoints.length ? waypoints[waypoints.length - 1] : null)}
+              roverWaypoint={waypoint || (waypointData && waypointData.length ? waypointData[waypointData.length - 1] : null)}
               maxSol={maxSol}
               apiUrl={apiUrl}
               terrain={terrain}
@@ -1689,13 +1835,16 @@ function App() {
           ) : historyMode ? (
             <TraversePanel
               data={traverse}
-              waypoints={waypoints}
-              stats={historyStats}
+              waypoints={highlightedWaypoints}
+              stats={totalArchiveStats}
+              windowStats={windowStats}
               selected={waypoint}
-              onFit={showAllHistory}
+              onFit={() => mapActions.current?.fitFullTraverse?.()}
               onExport={exportHistory}
               onPlan={planFromWaypoint}
               error={traverseError}
+              solCut={solCut}
+              windowSize={15}
             />
           ) : (
             <>
@@ -2356,8 +2505,14 @@ function App() {
                   unit={Number.isFinite(active?.summary?.estimated_duration_hours) ? 'hrs' : 'ETA unavail'}
                   primary
                 />
+                <Metric
+                  label="Energy Index / Effort"
+                  value={active?.summary?.energy_index ?? active?.summary?.observed_energy_index_partial ?? 1.0}
+                  digits={2}
+                  unit="× flat"
+                />
 
-              {rightExpanded && (
+                {rightExpanded && (
                   <>
                     <Metric label="Weighted cost" value={active?.total_cost} digits={0} unit="units" />
                     <Metric
@@ -2467,6 +2622,14 @@ function App() {
                     >
                       Robustness
                     </button>
+                    <button
+                      className={'tab-button ' + (analysisTab === 'eva' ? 'active' : '')}
+                      role="tab"
+                      aria-selected={analysisTab === 'eva'}
+                      onClick={() => setAnalysisTab('eva')}
+                    >
+                      EVA Safety &amp; Survival
+                    </button>
                   </nav>
 
                   {/* TAB 1: OVERVIEW */}
@@ -2541,37 +2704,186 @@ function App() {
                         </div>
                       )}
 
+                      {/* Advanced Mission Intelligence Deep-Link Entry Points */}
+                      <div className="advanced-intel-bar" data-testid="advanced-intel-navigation">
+                        <div style={{ width: '100%', fontSize: '10.5px', color: '#8ba295', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px', fontWeight: 600 }}>
+                          Advanced Mission Intelligence Entry Points:
+                        </div>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setRightExpanded(true);
+                            setAnalysisTab('robustness');
+                          }}
+                          title="Open Monte Carlo terrain uncertainty perturbation and reliability assessment"
+                        >
+                          🛡️ Uncertainty &amp; Robustness
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('science');
+                          }}
+                          title="Open Pareto multi-objective trade-off explorer"
+                        >
+                          ⚖️ Pareto Trade-off Explorer
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('uncertainty');
+                          }}
+                          title="Open Next-Best-Reconnaissance observation targets"
+                        >
+                          🛰️ Next-Best-Reconnaissance
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('science');
+                          }}
+                          title="Inspect Scientific Return per EVA Hour and Geological Targets"
+                        >
+                          🔬 Science Return per EVA Hour
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('stress');
+                          }}
+                          title="Run 7-Scenario Operational Mission Stress Testing"
+                        >
+                          ⚡ Mission Stress Testing
+                        </button>
+                      </div>
+
                       <div className="route-candidates" role="group" aria-label="Route candidates">
-                        {result?.routes.map((r, i) => (
-                          <button
-                            key={r.route_id}
-                            className={'candidate ' + (r.route_id === selected ? 'selected' : '')}
-                            onClick={() => {
-                              setSelected(r.route_id);
-                              setHover(null);
-                            }}
-                            onPointerEnter={() => setHoveredRoute(r.route_id)}
-                            onPointerLeave={() => setHoveredRoute(null)}
-                            onFocus={() => setHoveredRoute(r.route_id)}
-                            onBlur={() => setHoveredRoute(null)}
-                            aria-pressed={r.route_id === selected}
-                          >
-                            <span className="radio-dot" />
-                            <span>{i === 0 ? 'Primary' : 'Alternative ' + i}</span>
-                            <small>
-                              {fmt(r.summary?.total_distance_meters / 1000, 2)} km <b>·</b>{' '}
-                              {Number.isFinite(r.summary?.estimated_duration_hours)
-                                ? fmt(r.summary.estimated_duration_hours, 1) + ' h'
-                                : 'ETA unavail'}
-                            </small>
-                          </button>
-                        ))}
+                        {result?.routes.map((r, i) => {
+                          const rSurv = computeMarswalkSurvivabilityScore(r, { speActive, speSeverity, evaBudgetHours });
+                          return (
+                            <button
+                              key={r.route_id}
+                              className={'candidate ' + (r.route_id === selected ? 'selected' : '')}
+                              onClick={() => {
+                                setSelected(r.route_id);
+                                setHover(null);
+                              }}
+                              onPointerEnter={() => setHoveredRoute(r.route_id)}
+                              onPointerLeave={() => setHoveredRoute(null)}
+                              onFocus={() => setHoveredRoute(r.route_id)}
+                              onBlur={() => setHoveredRoute(null)}
+                              aria-pressed={r.route_id === selected}
+                            >
+                              <div className="candidate-main">
+                                <span className="radio-dot" />
+                                <span>{i === 0 ? 'Primary' : 'Alternative ' + i}</span>
+                                <span
+                                  className="survivability-score-pill"
+                                  style={{ borderColor: rSurv.color, color: rSurv.color }}
+                                  title={`Marswalk Survivability Score: ${rSurv.score}/100 (${rSurv.tier})`}
+                                >
+                                  🛡️ {rSurv.score}/100
+                                </span>
+                              </div>
+                              <small>
+                                {fmt(r.summary?.total_distance_meters / 1000, 2)} km <b>·</b>{' '}
+                                {Number.isFinite(r.summary?.estimated_duration_hours)
+                                  ? fmt(r.summary.estimated_duration_hours, 1) + ' h'
+                                  : 'ETA unavail'}
+                              </small>
+                            </button>
+                          );
+                        })}
                         {!result && (
                           <p className={'empty-routes ' + (busy ? 'shimmer' : '')}>
                             {busy ? 'Analyzing corridors…' : 'Generate a route to compare candidates.'}
                           </p>
                         )}
                       </div>
+
+                      {/* Phase 5.D: Dedicated Mission Resource Summary Card */}
+                      {active && (
+                        <section className="mission-resource-card" data-testid="mission-resource-summary">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <strong style={{ fontSize: '11.5px', color: '#5cffb0', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                              Mission Resource Summary
+                            </strong>
+                            <span className="badge-tag">Actual Backend Telemetry</span>
+                          </div>
+                          <div className="resource-grid">
+                            <div className="resource-item">
+                              <span>Total Distance</span>
+                              <strong>{fmt(active.summary?.total_distance_meters / 1000, 2)} km</strong>
+                              <small>{fmt(active.summary?.surface_3d_distance_meters || active.summary?.total_distance_meters, 0)} m (3D surface)</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Estimated Travel Time</span>
+                              <strong>{Number.isFinite(active.summary?.estimated_duration_hours) ? fmt(active.summary.estimated_duration_hours, 1) + ' hrs' : '—'}</strong>
+                              <small>{active.summary?.motion_profile || 'Nominal 0.15 m/s'}</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Outbound Leg</span>
+                              <strong>{fmt(active.mission_clock?.outbound_leg?.total_duration_hours ?? active.summary?.estimated_duration_hours, 1)} hrs</strong>
+                              <small>{fmt((active.mission_clock?.outbound_leg?.distance_m ?? active.summary?.total_distance_meters) / 1000, 2)} km</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Return Leg</span>
+                              <strong>{fmt(active.mission_clock?.return_leg?.walking_duration_hours ?? active.summary?.estimated_duration_hours, 1)} hrs</strong>
+                              <small>{fmt((active.mission_clock?.return_leg?.distance_m ?? active.summary?.total_distance_meters) / 1000, 2)} km</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Total Mission Duration</span>
+                              <strong>{fmt(active.mission_clock?.total_duration_hours ?? active.science_eva_plan?.total_eva_duration_hours ?? (active.summary?.estimated_duration_hours ? active.summary.estimated_duration_hours * 2 : null), 1)} hrs</strong>
+                              <small>Outbound + Science + Return</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>EVA Budget</span>
+                              <strong>{fmt(active.science_eva_plan?.max_eva_budget_hours ?? active.mission_clock?.max_eva_duration_hours ?? 8.0, 1)} hrs</strong>
+                              <small>Hard Physiological Limit</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Used EVA Time</span>
+                              <strong>{fmt(active.science_eva_plan?.total_eva_duration_hours ?? active.mission_clock?.total_duration_hours ?? active.summary?.estimated_duration_hours, 1)} hrs</strong>
+                              <small>Walking + Sample Stops</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Remaining EVA Margin</span>
+                              <strong style={{ color: ((active.science_eva_plan?.max_eva_budget_hours ?? 8.0) - (active.science_eva_plan?.total_eva_duration_hours ?? active.summary?.estimated_duration_hours ?? 0)) > 1 ? '#5cffb0' : '#e56858' }}>
+                                {fmt(Math.max(0, (active.science_eva_plan?.max_eva_budget_hours ?? 8.0) - (active.science_eva_plan?.total_eva_duration_hours ?? active.summary?.estimated_duration_hours ?? 0)), 1)} hrs
+                              </strong>
+                              <small>Contingency buffer</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Return Feasibility</span>
+                              <strong style={{ color: active.turnaround?.feasible_before_sunset && !active.summary?.exceeds_return_budget ? '#5cffb0' : '#e56858' }}>
+                                {active.turnaround?.feasible_before_sunset && !active.summary?.exceeds_return_budget ? 'FEASIBLE' : (active.turnaround?.limiting_constraint ? active.turnaround.limiting_constraint.replace(/_/g, ' ').toUpperCase() : 'EXCEEDS BUDGET')}
+                              </strong>
+                              <small>{active.turnaround?.feasible_before_sunset ? 'Returns before sunset' : 'Daylight / EVA restricted'}</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Solar Turnaround Time</span>
+                              <strong>{active.turnaround?.turnaround_ltst_hms ? `${active.turnaround.turnaround_ltst_hms} LTST` : (active.turnaround?.turnaround_utc || 'N/A')}</strong>
+                              <small>Sunset: {active.turnaround?.sunset_ltst_hms || '17:30 LTST'}</small>
+                            </div>
+                            <div className="resource-item" style={{ gridColumn: 'span 2' }}>
+                              <span>Energy Index / Mechanical Effort</span>
+                              <strong style={{ color: '#5cffb0' }}>
+                                {active.summary?.energy_index ? `${fmt(active.summary.energy_index, 2)}× flat baseline` : '1.00×'}
+                              </strong>
+                              <small>Minetti cost of transport model factoring uphill gradient and Mars gravity (dimensionless index, not kWh)</small>
+                            </div>
+                          </div>
+                        </section>
+                      )}
 
                       {result?.algorithm_comparison && (
                         <div className="algorithm-benchmark-card">
@@ -3214,6 +3526,296 @@ function App() {
                     </div>
                   )}
 
+                  {/* TAB 5: EVA SAFETY & SURVIVABILITY */}
+                  {analysisTab === 'eva' && (
+                    <div className="tab-pane eva-pane" role="tabpanel" aria-label="EVA Safety & Survivability">
+                      {/* 1. Marswalk Survivability Score */}
+                      <div className="eva-metric-card">
+                        <div className="eva-card-title-row">
+                          <h4>MARSWALK SURVIVABILITY SCORE</h4>
+                          <span
+                            className="status-pill"
+                            style={{ borderColor: survivabilityScore.color, color: survivabilityScore.color }}
+                          >
+                            {survivabilityScore.score}/100 · {survivabilityScore.tier}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '11px', color: '#94a3b8', margin: '4px 0 10px 0', lineHeight: 1.4 }}>
+                          {survivabilityScore.label}
+                        </p>
+
+                        <div className="survivability-factor-row">
+                          <span style={{ width: '110px' }}>Terrain Mobility:</span>
+                          <div className="factor-track">
+                            <div
+                              className="factor-fill"
+                              style={{ width: `${survivabilityScore.factors?.mobility?.score ?? survivabilityScore.factors?.mobility ?? 95}%`, background: '#5cffb0' }}
+                            />
+                          </div>
+                          <b style={{ width: '40px', textAlign: 'right' }}>{survivabilityScore.factors?.mobility?.score ?? survivabilityScore.factors?.mobility ?? 95}%</b>
+                        </div>
+
+                        <div className="survivability-factor-row">
+                          <span style={{ width: '110px' }}>O₂ &amp; Power Margin:</span>
+                          <div className="factor-track">
+                            <div
+                              className="factor-fill"
+                              style={{ width: `${survivabilityScore.factors?.resources?.score ?? survivabilityScore.factors?.resources ?? 90}%`, background: '#38bdf8' }}
+                            />
+                          </div>
+                          <b style={{ width: '40px', textAlign: 'right' }}>{survivabilityScore.factors?.resources?.score ?? survivabilityScore.factors?.resources ?? 90}%</b>
+                        </div>
+
+                        <div className="survivability-factor-row">
+                          <span style={{ width: '110px' }}>Return Feasibility:</span>
+                          <div className="factor-track">
+                            <div
+                              className="factor-fill"
+                              style={{ width: `${survivabilityScore.factors?.returnFeasibility?.score ?? survivabilityScore.factors?.return_feasibility?.score ?? 92}%`, background: '#a855f7' }}
+                            />
+                          </div>
+                          <b style={{ width: '40px', textAlign: 'right' }}>{survivabilityScore.factors?.returnFeasibility?.score ?? survivabilityScore.factors?.return_feasibility?.score ?? 92}%</b>
+                        </div>
+
+                        <div className="survivability-factor-row">
+                          <span style={{ width: '110px' }}>Radiation Safety:</span>
+                          <div className="factor-track">
+                            <div
+                              className="factor-fill"
+                              style={{
+                                width: `${survivabilityScore.factors?.radiation?.score ?? survivabilityScore.factors?.radiation ?? 95}%`,
+                                background: speActive ? '#ef4444' : '#5cffb0',
+                              }}
+                            />
+                          </div>
+                          <b style={{ width: '40px', textAlign: 'right', color: speActive ? '#ef4444' : 'inherit' }}>
+                            {survivabilityScore.factors?.radiation?.score ?? survivabilityScore.factors?.radiation ?? 95}%
+                          </b>
+                        </div>
+
+                        <div className="survivability-factor-row">
+                          <span style={{ width: '110px' }}>RF Communications:</span>
+                          <div className="factor-track">
+                            <div
+                              className="factor-fill"
+                              style={{ width: `${survivabilityScore.factors?.comms?.score ?? survivabilityScore.factors?.comms ?? 90}%`, background: '#ffb867' }}
+                            />
+                          </div>
+                          <b style={{ width: '40px', textAlign: 'right' }}>{survivabilityScore.factors?.comms?.score ?? survivabilityScore.factors?.comms ?? 90}%</b>
+                        </div>
+                      </div>
+
+                      {/* 2. Solar Particle Event (SPE) Simulator */}
+                      <div className="eva-metric-card" style={{ borderColor: speActive ? '#ef4444' : undefined }}>
+                        <div className="eva-card-title-row">
+                          <h4>☀️ SOLAR PARTICLE EVENT (SPE) SCENARIO</h4>
+                          <span className={`status-pill ${speActive ? 'crit' : 'ok'}`}>
+                            {speActive ? `ACTIVE (${speSeverity})` : 'BASELINE GCR'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', margin: '8px 0' }}>
+                          <button
+                            type="button"
+                            className={`plan-button ${speActive ? 'danger' : ''}`}
+                            style={{ height: '32px', fontSize: '11px', margin: 0 }}
+                            onClick={() => setSpeActive((v) => !v)}
+                          >
+                            {speActive ? '☀️ Cancel SPE Simulation' : '☀️ Simulate Solar Particle Event'}
+                          </button>
+                          {speActive && (
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              style={{ height: '32px', fontSize: '11px', padding: '0 10px' }}
+                              onClick={() => {
+                                setSpeActive(false);
+                                setSpeSeverity('S2');
+                                setNotice('Reset radiation simulation to baseline galactic cosmic ray (GCR) conditions.');
+                              }}
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+
+                        {speActive && (
+                          <div style={{ margin: '10px 0' }}>
+                            <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}>SEVERITY LEVEL:</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                              {['S1', 'S2', 'S3', 'S4'].map((s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  className={`secondary-button ${speSeverity === s ? 'active' : ''}`}
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    padding: '4px',
+                                    background: speSeverity === s ? '#ef4444' : 'rgba(255,255,255,0.06)',
+                                    color: speSeverity === s ? '#ffffff' : '#cbd5e1',
+                                  }}
+                                  onClick={() => setSpeSeverity(s)}
+                                >
+                                  {s}
+                                </button>
+                              ))}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#fca5a5', marginTop: '6px' }}>
+                              Dose rate: <strong>{SPE_SEVERITY_LEVELS[speSeverity]?.doseRateMsvH} mSv/h</strong> (Normal: 0.05 mSv/h)
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="shelter-callout" style={{ marginTop: '10px' }}>
+                          <div className="shelter-head">
+                            <span className="shelter-pin">🛡️</span>
+                            <strong>NEAREST TERRAIN SHELTER:</strong>
+                          </div>
+                          <div className="shelter-details">
+                            <span className="shelter-name">{nearestShelter.name}</span>
+                            <span className="shelter-meta">
+                              {nearestShelter.distanceM} m away · Bearing {nearestShelter.bearingDeg}° · {(nearestShelter.shieldingFactor * 100).toFixed(0)}% Shielding Factor
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ width: '100%', marginTop: '6px', fontSize: '10.5px', padding: '4px' }}
+                            onClick={() => {
+                              setDestination({ lon: nearestShelter.coordinates[0], lat: nearestShelter.coordinates[1], name: nearestShelter.name });
+                              setNotice(`Emergency destination set to: ${nearestShelter.name}`);
+                            }}
+                          >
+                            Set Shelter as Destination
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Dual-Radius Walk-Back Safety */}
+                      <div className="eva-metric-card">
+                        <div className="eva-card-title-row">
+                          <h4>🚶 DUAL-RADIUS WALK-BACK SAFETY</h4>
+                          <span className={`status-pill ${walkBackSafety.safe ? 'ok' : 'crit'}`}>
+                            {walkBackSafety.safe ? 'SAFE FOOT RETURN' : 'ROVER SUPPORT REQ'}
+                          </span>
+                        </div>
+                        <dl className="compact-dl" style={{ margin: '8px 0' }}>
+                          <dt>Distance to Habitat Base:</dt>
+                          <dd><b>{walkBackSafety.distKm} km</b></dd>
+                          <dt>Safe On-Foot Return Limit:</dt>
+                          <dd><b>1.80 km</b> (at 1.0 m/s)</dd>
+                          <dt>Rover-Assisted Envelope:</dt>
+                          <dd><b>5.20 km</b> (vehicle range)</dd>
+                          <dt>Estimated Walking Time:</dt>
+                          <dd><b>{walkBackSafety.walkDurationH} hrs</b></dd>
+                        </dl>
+                        <div className={`walkback-verdict-banner ${walkBackSafety.safe ? 'safe' : 'warn'}`}>
+                          {walkBackSafety.safe
+                            ? '✅ WITHIN SAFE ON-FOOT WALK-BACK RADIUS — Emergency walk-back to base feasible within PLSS oxygen reserves.'
+                            : '⚠️ ROUTE EXCEEDS ON-FOOT WALK-BACK RADIUS — ROVER SUPPORT REQUIRED FOR RETURN. Walking return exceeds safe single-suit endurance.'}
+                        </div>
+                      </div>
+
+                      {/* 4. Planetary Protection Special Regions */}
+                      <div className="eva-metric-card" style={{ borderColor: protectionCheck.conflict ? '#ef4444' : undefined }}>
+                        <div className="eva-card-title-row">
+                          <h4>🪐 PLANETARY PROTECTION REGIONS</h4>
+                          <span className={`status-pill ${protectionCheck.conflict ? 'crit' : 'ok'}`}>
+                            {protectionCheck.conflict ? 'CONFLICT DETECTED' : 'CLEAR'}
+                          </span>
+                        </div>
+                        {protectionCheck.conflict ? (
+                          <div style={{ marginTop: '8px' }}>
+                            <div className="rule-box warning-red">
+                              <strong>🚨 RESTRICTED SPECIAL REGION INTERSECTION:</strong>
+                              <p style={{ margin: '4px 0' }}>
+                                Planned route traverses <strong>{protectionCheck.conflictingZones.map((z) => z.name).join(', ')}</strong> ({protectionCheck.conflictingZones[0]?.category}). Human access strictly restricted under COSPAR Policy.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="plan-button"
+                              style={{ width: '100%', marginTop: '8px', fontSize: '11px', height: '34px' }}
+                              onClick={() => setScoutRoverModalOpen(true)}
+                            >
+                              DISPATCH SCOUT ROVER (SIMULATION)
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: '6px' }}>
+                            <p style={{ fontSize: '11px', color: '#94a3b8', margin: '6px 0' }}>
+                              ✅ Route remains clear of designated COSPAR Category IVc Special Regions (Neretva Vallis Delta Deposit, Hydrated Silica beds).
+                            </p>
+                            <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                style={{ flex: 1, fontSize: '11px', padding: '5px' }}
+                                onClick={() => setSelectedProtectionZone(PLANETARY_PROTECTION_ZONES[0])}
+                              >
+                                🪐 Inspect Cat IVc Zone
+                              </button>
+                              <button
+                                type="button"
+                                className="plan-button"
+                                style={{ flex: 1, fontSize: '11px', padding: '5px' }}
+                                onClick={() => setScoutRoverModalOpen(true)}
+                              >
+                                🤖 Dispatch Scout Rover
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 5. RF Communications & Orbiter Pass */}
+                      <div className="eva-metric-card">
+                        <div className="eva-card-title-row">
+                          <h4>📡 RF COMMS &amp; ORBITER PASSES</h4>
+                          <span className="status-pill" style={{ color: rfComms.labelColor, borderColor: rfComms.labelColor }}>
+                            {rfComms.status}
+                          </span>
+                        </div>
+                        <dl className="compact-dl" style={{ margin: '8px 0' }}>
+                          <dt>Direct LOS to Base Antenna:</dt>
+                          <dd><b>{rfComms.losBasePercentage}%</b></dd>
+                          <dt>Active UHF Relay Orbiters:</dt>
+                          <dd><b>MRO, TGO, Odyssey</b></dd>
+                          <dt>Next Orbiter Overhead Pass:</dt>
+                          <dd><b>T-42m (MRO Electra)</b></dd>
+                        </dl>
+                        <p style={{ fontSize: '10.5px', color: '#94a3b8', margin: '4px 0', lineHeight: 1.35 }}>
+                          {rfComms.advice}
+                        </p>
+                      </div>
+
+                      {/* 6. Authentic NASA Surface Vantage Points */}
+                      <div className="eva-metric-card">
+                        <div className="eva-card-title-row">
+                          <h4>📷 AUTHENTIC NASA SURFACE IMAGERY</h4>
+                          <span className="status-pill ok">3 VANTAGE POINTS</span>
+                        </div>
+                        <p style={{ fontSize: '10.5px', color: '#94a3b8', margin: '4px 0 8px 0' }}>
+                          Verified high-resolution Mastcam-Z &amp; SuperCam ground photography from NASA PDS Photojournal archives.
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          {Object.values(AUTHENTIC_NASA_SURFACE_IMAGERY).map(photo => (
+                            <button
+                              key={photo.pdsPhotojournalId}
+                              type="button"
+                              className="secondary-button"
+                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', padding: '6px 8px', textAlign: 'left' }}
+                              onClick={() => setSelectedNasaPhoto(photo)}
+                            >
+                              <span>📷 <b>{photo.pdsPhotojournalId}</b> · {photo.name}</span>
+                              <span style={{ fontSize: '10px', color: '#94a3b8' }}>Sol {photo.sol}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Export Controls */}
                   <div className="export-controls">
                     <select aria-label="Export format" value={exportFormat} onChange={e => setExportFormat(e.target.value)}>
@@ -3414,7 +4016,17 @@ function App() {
         )}
 
         {historyMode ? (
-          <TraverseTimeline cut={solCut} max={maxSol} stats={historyStats} onChange={v => { setSolCut(v); setWaypoint(null); }} onAll={showAllHistory} />
+          <TraverseTimeline
+            cut={solCut}
+            max={maxSol}
+            minSol={minSol}
+            stats={historyStats}
+            windowStats={windowStats}
+            onChange={v => { setSolCut(v); setWaypoint(null); }}
+            onAll={showAllHistory}
+            onFit={() => mapActions.current?.fitFullTraverse?.()}
+            windowSize={15}
+          />
         ) : plannerMode ? (
           <Profile
             route={active}
@@ -3428,7 +4040,8 @@ function App() {
         ) : null}
 
         <div className="traverse-key glass">
-          <span><i className="recorded" />Recorded drives</span>
+          <span><i className="recorded" style={{ background: '#bfa07a' }} />Full traverse</span>
+          <span><i className="highlighted" style={{ background: '#ffb867' }} />15-sol window</span>
           <span><i className="stops" />Waypoints</span>
           {showRoute && <span><i className="planned" />Planned route</span>}
         </div>
@@ -3519,6 +4132,182 @@ function App() {
           <p className="field-note">
             The bundled planner remains fully operational offline. Dijkstra remains available in the bundled planner if the Python API exposes only A*.
           </p>
+        </Dialog>
+      )}
+
+      {/* Planetary Protection Special Region Dialog */}
+      {selectedProtectionZone && (
+        <Dialog onClose={() => setSelectedProtectionZone(null)} label="Planetary Protection Details">
+          <p className="eyebrow">COSPAR Planetary Protection Directive</p>
+          <h2>{selectedProtectionZone.name}</h2>
+          <div className="protection-badge-row" style={{ margin: '8px 0 12px 0' }}>
+            <span
+              className={`category-badge ${
+                selectedProtectionZone.category === 'COSPAR Category IVc'
+                  ? 'cat-ivc'
+                  : selectedProtectionZone.category === 'Candidate Sensitive'
+                  ? 'candidate'
+                  : 'science'
+              }`}
+            >
+              {selectedProtectionZone.category}
+            </span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>ID: <strong>{selectedProtectionZone.id}</strong></span>
+          </div>
+
+          <div className="protection-modal-body">
+            <div className="rule-box warning-red">
+              <strong>RESTRICTION MANDATE:</strong>
+              <p style={{ margin: '4px 0 0 0' }}>
+                Human boots-on-the-ground exploration is strictly restricted in this region to prevent forward bio-contamination of potential Martian astrobiological niches.
+              </p>
+            </div>
+
+            <div className="rule-box">
+              <strong>COSPAR BIOBURDEN SPECIFICATION:</strong>
+              <p style={{ margin: '4px 0 0 0' }}>
+                {selectedProtectionZone.sterilizationRules || 'Bioburden limit < 0.03 bacterial spores / m². Certified dry heat microbial reduction or hydrogen peroxide vapor.'}
+              </p>
+            </div>
+
+            <p style={{ fontSize: '12px', lineHeight: 1.5, color: '#cbd5e1', margin: 0 }}>
+              {selectedProtectionZone.description}
+            </p>
+
+            <div className="dialog-button-row" style={{ marginTop: '12px' }}>
+              <button
+                type="button"
+                className="plan-button"
+                onClick={() => {
+                  setScoutRoverModalOpen(true);
+                  setSelectedProtectionZone(null);
+                }}
+              >
+                DISPATCH SCOUT ROVER (SIMULATION)
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setSelectedProtectionZone(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Scout Rover Conceptual Robotic Handoff Dialog */}
+      {scoutRoverModalOpen && (
+        <Dialog onClose={() => setScoutRoverModalOpen(false)} label="Scout Rover Dispatch">
+          <p className="eyebrow">Robotic Asset Coordination</p>
+          <h2>Dispatch Sterilized Scout Rover</h2>
+          <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 14px 0' }}>
+            Autonomous robotic sampling reconnaissance into COSPAR Category IVc Special Region.
+          </p>
+
+          <div className="scout-modal-body">
+            <div className="rule-box" style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}>
+              <strong style={{ color: '#38bdf8' }}>MISSION PROFILE:</strong>
+              <p style={{ margin: '4px 0 0 0' }}>
+                Sterilized robotic scout rover SC-01 will traverse restricted sediments, perform microscopic Raman/SHERLOC spectrometry, collect sealed core samples, and transmit data back to the astronaut habitat.
+              </p>
+            </div>
+
+            <div className="scout-specs-grid">
+              <div className="spec-cell">
+                <span className="cell-lbl">Asset Identifier</span>
+                <span className="cell-val">Perseverance Scout SC-01</span>
+              </div>
+              <div className="spec-cell">
+                <span className="cell-lbl">Sterilization Certification</span>
+                <span className="cell-val">Cat IVc (&lt;0.024 spores/m²)</span>
+              </div>
+              <div className="spec-cell">
+                <span className="cell-lbl">Science Payload</span>
+                <span className="cell-val">SHERLOC-Lite + Raman + Core Drill</span>
+              </div>
+              <div className="spec-cell">
+                <span className="cell-lbl">Telemetry Uplink</span>
+                <span className="cell-val">Direct UHF Crew Habitat</span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', margin: '6px 0 0 0' }}>
+              [SIMULATED SCOUT ROVER RECONNAISSANCE REQUEST — CONCEPTUAL HANDOFF ONLY]
+            </p>
+
+            <div className="dialog-button-row" style={{ marginTop: '12px' }}>
+              <button
+                type="button"
+                className="plan-button"
+                onClick={() => {
+                  setScoutRoverDispatched(true);
+                  setScoutRoverModalOpen(false);
+                  setNotice('Scout Rover SC-01 dispatched to restricted Special Region for autonomous sampling.');
+                }}
+              >
+                CONFIRM SCOUT DISPATCH
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setScoutRoverModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Authentic NASA Surface Imagery Lightbox Modal */}
+      {selectedNasaPhoto && (
+        <Dialog onClose={() => setSelectedNasaPhoto(null)} label="Authentic NASA Surface Photograph">
+          <p className="eyebrow">NASA Planetary Data System (PDS) Ground Truth</p>
+          <h2 style={{ fontSize: '16px' }}>{selectedNasaPhoto.title}</h2>
+
+          <div className="nasa-photo-modal-body">
+            <div className="nasa-photo-container">
+              <img
+                src={selectedNasaPhoto.imageUrl}
+                alt={selectedNasaPhoto.title}
+                className="nasa-photo-img"
+                loading="lazy"
+              />
+            </div>
+
+            <div className="photo-meta-grid">
+              <div><strong>Photojournal ID:</strong> {selectedNasaPhoto.pdsPhotojournalId}</div>
+              <div><strong>Instrument:</strong> {selectedNasaPhoto.instrument}</div>
+              <div><strong>Mission Sol:</strong> Sol {selectedNasaPhoto.sol}</div>
+              <div><strong>UTC Time:</strong> {new Date(selectedNasaPhoto.acquisitionDateUtc).toLocaleDateString()}</div>
+              <div><strong>Location:</strong> {selectedNasaPhoto.name}</div>
+              <div><strong>Credit:</strong> {selectedNasaPhoto.credit}</div>
+            </div>
+
+            <p className="photo-context-desc">
+              {selectedNasaPhoto.description}
+            </p>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+              <a
+                href={selectedNasaPhoto.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pds-external-link"
+              >
+                Open Official NASA/JPL PDS Photojournal Entry ↗
+              </a>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setSelectedNasaPhoto(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </Dialog>
       )}
 

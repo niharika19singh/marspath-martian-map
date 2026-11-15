@@ -19,6 +19,12 @@ export default function CloudAiPanel({
   allRoutes = [],
   onSelectCandidate,
   onExecutePlan,
+  survivabilityScore,
+  speActive,
+  speSeverity,
+  walkBackSafety,
+  protectionCheck,
+  evaBudgetHours,
 }) {
   const [activeTab, setActiveTab] = useState('mission_intel'); // 'mission_intel', 'copilot', 'comparison', 'infrastructure'
 
@@ -190,14 +196,28 @@ export default function CloudAiPanel({
   };
 
   // Send Copilot Message
-  const handleSendMessage = async (e) => {
-    e?.preventDefault();
-    if (!inputPrompt.trim() || isSubmittingChat) return;
+  const handleSendMessage = async (e, customPrompt = null) => {
+    e?.preventDefault?.();
+    const rawText = (customPrompt || inputPrompt).trim();
+    if (!rawText || isSubmittingChat) return;
+
+    // Build smart astronaut EVA context payload
+    let textForAi = rawText;
+    if (activeRoute && !rawText.includes('[EVA CONTEXT]')) {
+      const distKm = ((activeRoute.summary?.total_distance_meters || 1200) / 1000).toFixed(2);
+      const maxSlope = Number(activeRoute.summary?.max_slope_deg || activeRoute.summary?.max_slope_degrees || 6.2).toFixed(1);
+      const surv = survivabilityScore?.score || 94;
+      const radState = speActive ? `ACTIVE SPE ${speSeverity} (${(speSeverity === 'S4' ? 100 : speSeverity === 'S3' ? 45 : speSeverity === 'S2' ? 12.5 : 2.5)} mSv/h)` : 'NOMINAL GCR (0.05 mSv/h)';
+      const wbState = walkBackSafety?.safe ? `Safe (within 1.8 km)` : `Exceeds 1.8 km safe foot limit (${walkBackSafety?.distKm} km, Rover required)`;
+      const protState = protectionCheck?.conflict ? `CONFLICT (${protectionCheck.conflictingZones?.map(z => z.name).join(', ')})` : 'Clear';
+
+      textForAi = `${rawText}\n\n[EVA CONTEXT: Route ${activeRoute.route_id || 'primary'}, Distance: ${distKm} km, Max Slope: ${maxSlope}°, Survivability Score: ${surv}/100, Space Radiation: ${radState}, Walk-Back Return: ${wbState}, Planetary Protection: ${protState}]`;
+    }
 
     const userMsg = {
       id: `u-${Date.now()}`,
       role: 'user',
-      text: inputPrompt.trim(),
+      text: rawText,
       timestamp: new Date().toLocaleTimeString(),
     };
 
@@ -206,7 +226,7 @@ export default function CloudAiPanel({
     setIsSubmittingChat(true);
 
     try {
-      const res = await sendMarsScienceChat(userMsg.text, selectedProvider, null, activeRoute?.route_id);
+      const res = await sendMarsScienceChat(textForAi, selectedProvider, null, activeRoute?.route_id);
       const assistantMsg = {
         id: `a-${Date.now()}`,
         role: 'assistant',
@@ -1136,6 +1156,82 @@ export default function CloudAiPanel({
             </div>
           </div>
 
+          {/* Quick Action Suggestion Buttons */}
+          <div className="quick-actions-bar">
+            <span className="quick-label">Mission Queries:</span>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Explain active route survivability score, Minetti biomechanical metabolic exertion, and terrain slope safety margin.')
+              }
+              disabled={isSubmittingChat}
+            >
+              🧑‍🚀 Survivability &amp; Minetti
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Evaluate Solar Particle Event (SPE) acute radiation exposure, surface dose rates, and nearest terrain shelters.')
+              }
+              disabled={isSubmittingChat}
+            >
+              ☀️ SPE Radiation &amp; Shelters
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Check dual-radius walk-back safety envelope (1.8 km safe on-foot ceiling vs 5.2 km rover envelope) and emergency return viability.')
+              }
+              disabled={isSubmittingChat}
+            >
+              🚶 Walk-Back Safety
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Verify planetary protection compliance for COSPAR Category IVc Special Regions in Jezero and Scout Rover handoff eligibility.')
+              }
+              disabled={isSubmittingChat}
+            >
+              🪐 Planetary Protection
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Explain active route terrain, slope hazards, and scientific targets.')
+              }
+              disabled={isSubmittingChat}
+            >
+              Explain Active Route
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'What are the key spectral signatures of carbonate and smectite clay in Jezero delta front?')
+              }
+              disabled={isSubmittingChat}
+            >
+              Analyze Jezero Minerals (CRISM)
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Evaluate wheel sinkage hazard in low thermal inertia areas using THEMIS measurements.')
+              }
+              disabled={isSubmittingChat}
+            >
+              Assess Wheel Sinkage (THEMIS)
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() =>
+                handleSendMessage(null, 'Summarize latest in-situ environmental conditions from Perseverance MEDA weather sensors.')
+              }
+              disabled={isSubmittingChat}
+            >
+              Surface Weather (MEDA)
+            </button>
+          </div>
           {/* Chat Messages Log */}
           <div className="chat-messages-scroll">
             {chatMessages.map((msg) => (
