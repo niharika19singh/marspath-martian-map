@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 class GraphNodeType(str, Enum):
     """The 12 standard entity types of the Mars Mission Knowledge Graph."""
+
     OBSERVATION = "OBSERVATION"
     DATASET = "DATASET"
     TERRAIN_REGION = "TERRAIN_REGION"
@@ -30,6 +31,7 @@ class GraphNodeType(str, Enum):
 
 class GraphRelationType(str, Enum):
     """The 12 directed relationship types connecting mission knowledge entities."""
+
     OBSERVED_BY = "OBSERVED_BY"
     DERIVED_FROM = "DERIVED_FROM"
     COVERS = "COVERS"
@@ -46,6 +48,7 @@ class GraphRelationType(str, Enum):
 
 class GraphNode(BaseModel):
     """A node in the Mars Mission Knowledge Graph representing a scientific or operational entity."""
+
     node_id: str = Field(..., description="Unique node identifier (e.g. obs:hirise_001, seg:rt1_004)")
     node_type: GraphNodeType = Field(..., description="Entity classification")
     label: str = Field(..., description="Human-readable title or callout")
@@ -60,18 +63,22 @@ class GraphNode(BaseModel):
 
 class GraphEdge(BaseModel):
     """A directed edge in the Mars Mission Knowledge Graph representing a causal, spatial, or operational relation."""
+
     edge_id: str = Field(..., description="Unique edge identifier")
     source_node_id: str = Field(..., description="Tail node ID")
     target_node_id: str = Field(..., description="Head node ID")
     relation_type: GraphRelationType = Field(..., description="Semantic relationship type")
     confidence: float = Field(1.0, ge=0.0, le=1.0, description="Calculation confidence or evidence strength [0.0, 1.0]")
     provenance_basis: str = Field(..., description="Mathematical or observational derivation rationale")
-    calculated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="When this relationship was established")
+    calculated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), description="When this relationship was established"
+    )
     properties: dict[str, Any] = Field(default_factory=dict, description="Extended relationship attributes")
 
 
 class SubgraphResponse(BaseModel):
     """A bounded view or query result of the Mission Knowledge Graph."""
+
     nodes_count: int
     edges_count: int
     nodes: list[GraphNode]
@@ -83,6 +90,7 @@ class SubgraphResponse(BaseModel):
 
 class EvidenceTrace(BaseModel):
     """Upstream provenance trace demonstrating why a mission consequence exists."""
+
     target_node: GraphNode
     causal_chain: list[str] = Field(..., description="Ordered list of node IDs from root observation to target")
     evidence_nodes: list[GraphNode] = Field(..., description="All supporting observation and dataset nodes")
@@ -93,6 +101,7 @@ class EvidenceTrace(BaseModel):
 
 class ImpactTrace(BaseModel):
     """Downstream impact trace demonstrating how a hazard or condition affects the mission."""
+
     root_node: GraphNode
     source_node: GraphNode | None = Field(None, description="Alias for root_node")
     affected_nodes: list[GraphNode] = Field(..., description="Impacted route segments, assets, or constraints")

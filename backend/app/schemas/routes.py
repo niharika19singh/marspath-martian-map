@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from backend.app.routing.survivability import MarswalkSurvivabilityScore
 from backend.app.schemas.coordinates import BoundingBox, CRSInfo, MarsCoordinate
 from backend.app.schemas.mission import (
     OptimizationMode,
@@ -52,9 +53,7 @@ class SourceEvidence(BaseModel):
         ...,
         description="Specific cryptographic or procedural provenance verification method executed",
     )
-    is_synthetic: bool = Field(
-        ..., description="True if terrain is procedurally synthesized rather than observational"
-    )
+    is_synthetic: bool = Field(..., description="True if terrain is procedurally synthesized rather than observational")
     local_integrity_verified: bool | None = Field(
         default=None,
         description="True if local file SHA-256 matches its recorded provenance sidecar",
@@ -69,9 +68,7 @@ class SourceEvidence(BaseModel):
     pixel_resolution_x_meters: float = Field(
         ..., description="Actual physical zonal pixel width (dx) in meters at route latitude"
     )
-    pixel_resolution_y_meters: float = Field(
-        ..., description="Actual physical meridional pixel height (dy) in meters"
-    )
+    pixel_resolution_y_meters: float = Field(..., description="Actual physical meridional pixel height (dy) in meters")
     native_resolution_x_meters: float | None = Field(
         default=None,
         description="Native physical zonal pixel width in meters prior to any corridor block aggregation",
@@ -100,9 +97,7 @@ class SourceEvidence(BaseModel):
     raster_height: int = Field(..., description="Height of the loaded master DEM raster in pixels")
     crs_identifier: str = Field(..., description="Horizontal Coordinate Reference System identifier")
     vertical_datum: str = Field(..., description="Vertical elevation reference datum")
-    spatial_coverage: BoundingBox = Field(
-        ..., description="Actual geographic bounding box of the loaded DEM raster"
-    )
+    spatial_coverage: BoundingBox = Field(..., description="Actual geographic bounding box of the loaded DEM raster")
     source_limitations: list[str] = Field(
         default_factory=list,
         description="Source-specific provenance and scientific caveats",
@@ -112,9 +107,7 @@ class SourceEvidence(BaseModel):
 class CoverageEvidence(BaseModel):
     """Independent observation completeness measurements along the route and across the cropped corridor."""
 
-    route_sample_count: int = Field(
-        ..., description="Total number of discrete raster cell samples along the route"
-    )
+    route_sample_count: int = Field(..., description="Total number of discrete raster cell samples along the route")
     valid_route_sample_count: int = Field(
         ..., description="Number of route cell samples with valid numerical terrain observations"
     )
@@ -131,9 +124,7 @@ class CoverageEvidence(BaseModel):
     corridor_valid_cells: int = Field(
         ..., description="Valid numerical raster cells within the cropped mission corridor"
     )
-    corridor_invalid_cells: int = Field(
-        ..., description="Nodata or invalid cells within the cropped mission corridor"
-    )
+    corridor_invalid_cells: int = Field(..., description="Nodata or invalid cells within the cropped mission corridor")
     corridor_data_coverage_fraction: float = Field(
         ...,
         description="Valid corridor cells divided by total corridor cells [0.0 - 1.0]",
@@ -150,9 +141,7 @@ class ResolutionAssessment(BaseModel):
     actual_x_meters_per_pixel: float = Field(
         ..., description="Actual zonal cell size (dx) in meters per pixel at the corridor latitude"
     )
-    actual_y_meters_per_pixel: float = Field(
-        ..., description="Actual meridional cell size (dy) in meters per pixel"
-    )
+    actual_y_meters_per_pixel: float = Field(..., description="Actual meridional cell size (dy) in meters per pixel")
     effective_resolution_meters: float = Field(
         ..., description="Conservative effective grid resolution max(dx, dy) in meters"
     )
@@ -287,17 +276,13 @@ class RobustnessConfig(BaseModel):
                 or not math.isfinite(self.correlation_length_m)
                 or self.correlation_length_m <= 0.0
             ):
-                raise ValueError(
-                    "correlation_length_m must be a positive finite float when provided."
-                )
+                raise ValueError("correlation_length_m must be a positive finite float when provided.")
         if (
             isinstance(self.cost_regret_threshold_fraction, bool)
             or not math.isfinite(self.cost_regret_threshold_fraction)
             or self.cost_regret_threshold_fraction < 0.0
         ):
-            raise ValueError(
-                "cost_regret_threshold_fraction must be a non-negative finite float."
-            )
+            raise ValueError("cost_regret_threshold_fraction must be a non-negative finite float.")
         return self
 
 
@@ -305,9 +290,7 @@ class RoutePlanRequest(BaseModel):
     """Payload for requesting an optimized Martian route."""
 
     start: MarsCoordinate = Field(..., description="Starting waypoint (lon, lat in East degrees)")
-    destination: MarsCoordinate = Field(
-        ..., description="Target destination waypoint (lon, lat in East degrees)"
-    )
+    destination: MarsCoordinate = Field(..., description="Target destination waypoint (lon, lat in East degrees)")
     crs_identifier: str = Field(
         default="IAU2000:49900",
         description="Planetary Coordinate Reference System identifier (default IAU2000:49900 Mars Sphere)",
@@ -360,6 +343,10 @@ class RoutePlanRequest(BaseModel):
         gt=0.5,
         le=72.0,
         description="Maximum EVA duration budget in Earth hours for science-per-EVA-hour and stress evaluation",
+    )
+    is_spe_scenario: bool = Field(
+        default=False,
+        description="Simulate Solar Particle Event (SPE) Class X2.5 acute proton flux conditions and evaluate topographic shelter proximity",
     )
     preferred_dem_source: str | None = Field(
         default=None,
@@ -437,9 +424,7 @@ class RoutePlanRequest(BaseModel):
 class RouteSegment(BaseModel):
     """Detailed terrain attributes and data-quality flags for a single discrete step along the path."""
 
-    segment_index: int = Field(
-        default=0, description="Zero-based index of this segment along the route"
-    )
+    segment_index: int = Field(default=0, description="Zero-based index of this segment along the route")
     from_coord: MarsCoordinate
     to_coord: MarsCoordinate
     step_distance_meters: float
@@ -501,9 +486,7 @@ class RouteEvidencePassport(BaseModel):
     evidence flags. Does NOT represent a probability of rover survival or mission success.
     """
 
-    schema_version: str = Field(
-        default="1.0.0", description="Evidence passport schema version"
-    )
+    schema_version: str = Field(default="1.0.0", description="Evidence passport schema version")
     assessment_scope: str = Field(
         default="regional_terrain_evidence_assessment_not_mission_survival_probability",
         description="Explicit scope declaration distinguishing terrain data quality from mission safety",
@@ -629,9 +612,7 @@ class RouteSummary(BaseModel):
         default=None,
         description="Partial energy consumption score computed strictly over valid elevation transitions, or None if no valid elevation transitions exist",
     )
-    science_score: float = Field(
-        ..., description="Science acquisition score based on visited targets and proximity"
-    )
+    science_score: float = Field(..., description="Science acquisition score based on visited targets and proximity")
     hazard_exposure_meters: float | None = Field(
         default=0.0,
         description="Complete physical meters traversed through high-risk terrain (slope > 12° or roughness > 0.5) when all route steps are fully observed, or None when slope/roughness/elevation observations are incomplete",
@@ -765,18 +746,18 @@ class RouteAlternative(BaseModel):
         default=None,
         description="Multi-objective Pareto archetype label and trade-off classification",
     )
+    marswalk_survivability: MarswalkSurvivabilityScore | None = Field(
+        default=None,
+        description="Human astronaut EVA survivability score (0-100), factor breakdown, and shelter guidance",
+    )
 
 
 class ComputationStats(BaseModel):
     """Performance telemetry from graph-search execution."""
 
     algorithm_used: str = Field(..., description="A* or Dijkstra")
-    search_duration_seconds: float = Field(
-        ..., description="Actual wall-clock time spent in route computation"
-    )
-    nodes_expanded: int = Field(
-        ..., description="Real count of grid states popped from priority queue during search"
-    )
+    search_duration_seconds: float = Field(..., description="Actual wall-clock time spent in route computation")
+    nodes_expanded: int = Field(..., description="Real count of grid states popped from priority queue during search")
     grid_rows: int = Field(..., description="Row count of cropped local terrain window")
     grid_cols: int = Field(..., description="Column count of cropped local terrain window")
     cell_size_meters: float = Field(..., description="Physical cell width/height in meters")
@@ -913,9 +894,7 @@ class ScenarioBaselineRouteResult(BaseModel):
         default=None,
         description="Diagnostic explanation if the baseline route failed scenario traversability or corner-cutting checks",
     )
-    baseline_node_count: int = Field(
-        ..., description="Number of distinct grid nodes in the baseline route"
-    )
+    baseline_node_count: int = Field(..., description="Number of distinct grid nodes in the baseline route")
     scenario_optimal_node_count: int = Field(
         default=0,
         description="Number of distinct grid nodes in the route-specific scenario-optimal path (0 if route scenario search failed)",
@@ -1124,9 +1103,7 @@ class RouteRobustnessAssessment(BaseModel):
         description="Explicit user-supplied perturbation assumptions and derived pixel filter scales",
     )
     seed: int = Field(..., description="Master deterministic random seed used for scenario generation")
-    requested_scenario_count: int = Field(
-        ..., description="Total number of perturbation scenarios requested"
-    )
+    requested_scenario_count: int = Field(..., description="Total number of perturbation scenarios requested")
     completed_scenario_count: int = Field(
         ..., description="Number of perturbation scenarios that completed route optimization"
     )
@@ -1186,9 +1163,7 @@ class TerrainSourceSelectionReport(BaseModel):
         ...,
         description="Resolution tier of the selected source: localized_high_resolution_dtm, regional_blended_dem, or synthetic_simulation",
     )
-    selected_dataset_name: str = Field(
-        ..., description="Human-readable dataset name of the selected elevation source"
-    )
+    selected_dataset_name: str = Field(..., description="Human-readable dataset name of the selected elevation source")
     selection_reason: str = Field(
         ...,
         description="Explicit engineering explanation of why this source was selected for the route corridor",
@@ -1197,12 +1172,8 @@ class TerrainSourceSelectionReport(BaseModel):
         default=True,
         description="Always True: guarantees that HiRISE and MOLA-HRSC rasters were never mixed, stitched, or blended within a single route grid",
     )
-    hirise_evaluated: bool = Field(
-        ..., description="True if optional HiRISE DTM source eligibility was evaluated"
-    )
-    hirise_enabled: bool = Field(
-        ..., description="True if MARSPATH_USE_HIRISE_DEM was enabled for this evaluation"
-    )
+    hirise_evaluated: bool = Field(..., description="True if optional HiRISE DTM source eligibility was evaluated")
+    hirise_enabled: bool = Field(..., description="True if MARSPATH_USE_HIRISE_DEM was enabled for this evaluation")
     hirise_selected: bool = Field(
         ..., description="True if the localized HiRISE DTM was selected as the sole corridor source"
     )
@@ -1222,9 +1193,7 @@ class TerrainSourceSelectionReport(BaseModel):
         default=None,
         description="Detailed reason why HiRISE was not selected when hirise_selected is False",
     )
-    corridor_bounds: BoundingBox = Field(
-        ..., description="Geographic bounding box of the selected analysis corridor"
-    )
+    corridor_bounds: BoundingBox = Field(..., description="Geographic bounding box of the selected analysis corridor")
     corridor_padding_meters: float = Field(
         ..., description="Physical corridor margin applied around mission endpoints and waypoints in meters"
     )
@@ -1272,9 +1241,7 @@ class AlgorithmComparisonReport(BaseModel):
 
     astar: AlgorithmRunMetrics = Field(..., description="Metrics for A* with admissible heuristic")
     dijkstra: AlgorithmRunMetrics = Field(..., description="Metrics for Dijkstra uniform-cost search")
-    cost_difference: float = Field(
-        ..., description="Absolute cost difference: |cost_astar - cost_dijkstra|"
-    )
+    cost_difference: float = Field(..., description="Absolute cost difference: |cost_astar - cost_dijkstra|")
     costs_equal: bool = Field(
         ...,
         description="True if both algorithms found paths of equal minimum cost (within 0.05 units tolerance)",
@@ -1284,9 +1251,7 @@ class AlgorithmComparisonReport(BaseModel):
         ...,
         description="Ratio of Dijkstra states expanded to A* states expanded (>= 1.0 expected)",
     )
-    optimality_verified: bool = Field(
-        ..., description="True if cost equality is confirmed, proving A* optimality"
-    )
+    optimality_verified: bool = Field(..., description="True if cost equality is confirmed, proving A* optimality")
     comparison_statement: str = Field(..., description="Authoritative analytical comparison statement")
 
 
@@ -1297,9 +1262,7 @@ class RoutePlanResponse(BaseModel):
     status: str = Field("success", description="Status string: success or partial")
     crs: CRSInfo
     pilot_region: str
-    data_mode: str = Field(
-        ..., description="'real' if loaded from NASA DEM, or 'synthetic_test_fixture'"
-    )
+    data_mode: str = Field(..., description="'real' if loaded from NASA DEM, or 'synthetic_test_fixture'")
     provenance: dict[str, Any] = Field(
         ..., description="Data source citations, acquisition IDs, and processing metadata"
     )
@@ -1362,15 +1325,9 @@ class DataStatusResponse(BaseModel):
         default="synthetic_test_fixture",
         description="synthetic_test_fixture, valid_numeric_raster_unverified_source, official_endpoint_retrieved_checksum_unverified, verified_source, or incomplete_missing_genuine_dem",
     )
-    dem_loaded: bool = Field(
-        default=False, description="True only when a non-synthetic numeric DEM raster is loaded"
-    )
-    real_dem_requested: bool = Field(
-        default=False, description="True when MARSPATH_USE_REAL_DEM is enabled"
-    )
-    real_dem_loaded: bool = Field(
-        default=False, description="True when a real numeric DEM raster is loaded and active"
-    )
+    dem_loaded: bool = Field(default=False, description="True only when a non-synthetic numeric DEM raster is loaded")
+    real_dem_requested: bool = Field(default=False, description="True when MARSPATH_USE_REAL_DEM is enabled")
+    real_dem_loaded: bool = Field(default=False, description="True when a real numeric DEM raster is loaded and active")
     local_integrity_verified: bool | None = Field(
         default=None, description="True when local file SHA-256 matches its provenance sidecar"
     )
@@ -1391,9 +1348,7 @@ class DataStatusResponse(BaseModel):
     grid_shape: list[int]
     valid_data_fraction: float
     active_dem_provenance: dict[str, Any] = Field(default_factory=dict)
-    hirise_enabled: bool = Field(
-        default=False, description="True when MARSPATH_USE_HIRISE_DEM is enabled"
-    )
+    hirise_enabled: bool = Field(default=False, description="True when MARSPATH_USE_HIRISE_DEM is enabled")
     hirise_loaded: bool = Field(
         default=False,
         description="True only when the optional localized HiRISE DTM is enabled, present, and passes all geospatial/numeric validation checks",

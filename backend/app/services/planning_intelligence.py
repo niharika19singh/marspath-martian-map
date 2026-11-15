@@ -385,9 +385,7 @@ def classify_route_uncertainty(
         "uncertainty_exposure_score": round(exposure_score, 2),
         "uncertainty_penalty_cost": round(penalty_cost, 2),
         "segments_classified_count": len(classified_segments),
-        "high_uncertainty_segments": [
-            s for s in classified_segments if s["support_tier"] in ("WEAK", "UNKNOWN")
-        ][:15],
+        "high_uncertainty_segments": [s for s in classified_segments if s["support_tier"] in ("WEAK", "UNKNOWN")][:15],
     }
 
 

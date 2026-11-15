@@ -92,7 +92,9 @@ class LiveMarsIntelligenceService:
         step_seconds: int = 60,
     ) -> GroundTrack:
         """Returns orbital ground track polyline."""
-        return self.orbital.get_ground_track(spacecraft_id, duration_minutes=duration_minutes, step_seconds=step_seconds)
+        return self.orbital.get_ground_track(
+            spacecraft_id, duration_minutes=duration_minutes, step_seconds=step_seconds
+        )
 
     def list_rovers(self) -> list[RoverPosition]:
         """Lists active and historical Mars rovers."""
@@ -130,7 +132,7 @@ class LiveMarsIntelligenceService:
                     event_id=f"ROVER_EVENT_{r.rover_id.upper()}_SOL_{r.sol}",
                     event_type="rover_drive",
                     title=f"{r.name} Reaches Sol {r.sol}",
-                    description=f"Accumulated odometry: {(r.total_odometry_meters/1000):.2f} km. Latest drive: {r.last_drive_distance_meters:.1f} m.",
+                    description=f"Accumulated odometry: {(r.total_odometry_meters / 1000):.2f} km. Latest drive: {r.last_drive_distance_meters:.1f} m.",
                     earth_date_utc=r.earth_date_utc,
                     martian_sol=r.sol,
                     related_entity_id=r.rover_id,

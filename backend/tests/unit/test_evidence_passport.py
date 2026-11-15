@@ -165,9 +165,7 @@ def test_official_endpoint_extraction_receives_moderate_never_high():
         data = np.full((120, 160), -2480.0, dtype=np.float32)
         file_sha, arr_sha = _write_test_geotiff(tmp_path, data)
 
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_arr_sha = usgs_entry.get("jezero_window_array_sha256")
         usgs_entry["jezero_window_array_sha256"] = arr_sha
 
@@ -227,13 +225,9 @@ def test_verified_full_source_receives_high_and_downgrades_on_conflicting_condit
 
     try:
         data = np.full((120, 160), -2480.0, dtype=np.float32)
-        file_sha, _ = _write_test_geotiff(
-            tmp_path, data, vertical_datum="Mars_2000_Areoid_MOLA_0m"
-        )
+        file_sha, _ = _write_test_geotiff(tmp_path, data, vertical_datum="Mars_2000_Areoid_MOLA_0m")
 
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_sha = usgs_entry.get("sha256")
         usgs_entry["sha256"] = file_sha
 
@@ -300,13 +294,9 @@ def test_corridor_nodata_hole_reduces_corridor_coverage_independently_of_route_c
         # Place a nodata hole across the direct line between (77.35, 18.40) and (77.43, 18.40)
         # Row index for lat=18.40 when top=18.65 and step=0.003374 is ~74; col index for lon=77.39 is ~56
         data[72:77, 54:59] = -32768.0
-        file_sha, _ = _write_test_geotiff(
-            tmp_path, data, vertical_datum="Mars_2000_Areoid_MOLA_0m"
-        )
+        file_sha, _ = _write_test_geotiff(tmp_path, data, vertical_datum="Mars_2000_Areoid_MOLA_0m")
 
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_sha = usgs_entry.get("sha256")
         usgs_entry["sha256"] = file_sha
 
@@ -719,9 +709,7 @@ def test_incomplete_route_summary_metrics_duration_energy_hazard_distance_and_ri
     nodata_missing_one = np.zeros((rows, cols), dtype=bool)
     nodata_missing_one[5, 4] = True
     slopes_elev_bad = compute_slope_degrees(elev_missing_one, dx, dy, nodata_mask=nodata_missing_one)
-    rough_elev_bad = compute_roughness_index(
-        elev_missing_one, kernel_size=3, nodata_mask=nodata_missing_one
-    )
+    rough_elev_bad = compute_roughness_index(elev_missing_one, kernel_size=3, nodata_mask=nodata_missing_one)
     graph_missing_elev = TerrainGridGraph(
         elevation=elev_missing_one,
         slope_deg=slopes_elev_bad,
@@ -855,9 +843,7 @@ def test_strict_mars_crs_and_vertical_datum_validation_gates():
     }
     path_nodes = [(4, 2), (4, 3), (4, 4), (4, 5)]
 
-    meta_bogus_mars_crs = RasterMetadata(
-        **{**base_meta.__dict__, "crs_str": "Mars_Arbitrary_Unvalidated_CRS"}
-    )
+    meta_bogus_mars_crs = RasterMetadata(**{**base_meta.__dict__, "crs_str": "Mars_Arbitrary_Unvalidated_CRS"})
     p_bogus_crs = EvidenceService.build_route_evidence_passport(
         path_nodes=path_nodes,
         graph=graph,
@@ -869,9 +855,7 @@ def test_strict_mars_crs_and_vertical_datum_validation_gates():
     assert p_bogus_crs.quality_tier == EvidenceQualityTier.LOW
     assert "unknown_crs" in p_bogus_crs.quality_flags
 
-    meta_bogus_datum = RasterMetadata(
-        **{**base_meta.__dict__, "vertical_datum": "Arbitrary_NonEmpty_Vertical_Datum"}
-    )
+    meta_bogus_datum = RasterMetadata(**{**base_meta.__dict__, "vertical_datum": "Arbitrary_NonEmpty_Vertical_Datum"})
     p_bogus_datum = EvidenceService.build_route_evidence_passport(
         path_nodes=path_nodes,
         graph=graph,
@@ -979,10 +963,7 @@ def test_explicit_high_tier_verification_gates_and_regional_200m_semantics():
     assert passport_high.quality_tier == EvidenceQualityTier.HIGH
     assert passport_high.resolution_assessment.effective_resolution_meters == 200.0
     assert passport_high.resolution_assessment.obstacle_detection_capable is False
-    assert (
-        passport_high.resolution_assessment.suitability_classification
-        == "regional_corridor_assessment_only"
-    )
+    assert passport_high.resolution_assessment.suitability_classification == "regional_corridor_assessment_only"
 
     # Gate 1: Verified source with missing local_integrity_verified (omitted or None) cannot receive HIGH
     prov_missing_local_int = dict(base_prov)
@@ -1001,9 +982,7 @@ def test_explicit_high_tier_verification_gates_and_regional_200m_semantics():
     assert "local_integrity_unverified" in passport_no_local_int.quality_flags
 
     # Gate 2: Verified source with missing CRS cannot receive HIGH and does not silently default to IAU2000:49900
-    meta_missing_crs = RasterMetadata(
-        **{**base_meta.__dict__, "crs_str": ""}
-    )
+    meta_missing_crs = RasterMetadata(**{**base_meta.__dict__, "crs_str": ""})
     passport_no_crs = EvidenceService.build_route_evidence_passport(
         path_nodes=path_nodes,
         graph=graph,
@@ -1040,9 +1019,7 @@ def test_explicit_high_tier_verification_gates_and_regional_200m_semantics():
             dst.write(geotiff_data, 1)
         with open(nocrs_path, "rb") as f:
             nocrs_sha = hashlib.sha256(f.read()).hexdigest()
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_sha = usgs_entry.get("sha256")
         usgs_entry["sha256"] = nocrs_sha
         try:
@@ -1067,9 +1044,7 @@ def test_explicit_high_tier_verification_gates_and_regional_200m_semantics():
             os.remove(nocrs_path)
 
     # Gate 3: Verified source with unknown vertical datum cannot receive HIGH
-    meta_missing_datum = RasterMetadata(
-        **{**base_meta.__dict__, "vertical_datum": "Unknown / Unspecified"}
-    )
+    meta_missing_datum = RasterMetadata(**{**base_meta.__dict__, "vertical_datum": "Unknown / Unspecified"})
     passport_no_datum = EvidenceService.build_route_evidence_passport(
         path_nodes=path_nodes,
         graph=graph,

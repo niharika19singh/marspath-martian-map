@@ -23,6 +23,8 @@ import IntelligencePanel from './IntelligencePanel.jsx';
 import MissionIntelligencePanel from './MissionIntelligencePanel.jsx';
 import NasaDataPanel from './NasaDataPanel.jsx';
 import CloudAiPanel from './CloudAiPanel.jsx';
+import { AstronautVisorHud } from './AstronautVisorHud.jsx';
+import { SurfacePovViewer } from './SurfacePovViewer.jsx';
 import { verifyCoordinateDatasetCoverage } from './wmts_capabilities.js';
 import {
   JEZERO_SCIENCE_TARGETS_CLIENT,
@@ -347,6 +349,11 @@ function App() {
   const [commandQuery, setCommandQuery] = useState('');
   const [commandIndex, setCommandIndex] = useState(0);
 
+  // Astronaut Visor HUD & SPE Radiation Scenario State
+  const [visorMode, setVisorMode] = useState(false);
+  const [showSurfacePov, setShowSurfacePov] = useState(false);
+  const [speScenarioActive, setSpeScenarioActive] = useState(false);
+
   const mapActions = useRef(null);
   const routeForm = useRef(null);
   const worker = useRef(null);
@@ -628,6 +635,7 @@ function App() {
       daylight_buffer_minutes: Number(daylightBufferMinutes),
       rescue_enabled: true,
       rescue_threshold_minutes: Number(rescueThresholdMinutes),
+      is_spe_scenario: Boolean(overrides.is_spe_scenario ?? speScenarioActive),
       preferred_dem_source: overrides.demSourceOverride || overrides.preferred_dem_source || demSourcePreference
     };
 
@@ -791,6 +799,16 @@ function App() {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  function handleToggleSpe() {
+    setSpeScenarioActive(prev => {
+      const next = !prev;
+      if (result && !busy) {
+        setTimeout(() => planRoute({ is_spe_scenario: next }), 50);
+      }
+      return next;
+    });
   }
 
   async function connect(opts = {}) {
@@ -1006,6 +1024,9 @@ function App() {
       disabled: !canSubmit
     },
     { name: 'Add science waypoint', hint: 'Intermediate Mars coordinate', icon: 'plus', run: addWaypoint },
+    { name: 'Astronaut Visor HUD', hint: 'Toggle high-contrast field tablet mode', icon: 'eye', run: () => setVisorMode(v => !v) },
+    { name: 'Simulate Solar Particle Event (SPE)', hint: 'Acute space radiation stress testing', icon: 'zap', run: handleToggleSpe },
+    { name: 'Authentic NASA Surface POV', hint: 'Mastcam-Z & Navcam ground imagery', icon: 'camera', run: () => setShowSurfacePov(true) },
     { name: 'Toggle hazards', hint: hazards ? 'Hide overlay' : 'Show terrain heatmap', icon: 'layers', run: () => setHazards(v => !v) },
     { name: 'Routing settings', hint: 'Algorithm, constraints & robustness', icon: 'sliders', run: () => { setLeftOpen(true); setSettingsOpen(true); } },
     { name: 'Toggle terrain profile', hint: profileExpanded ? 'Collapse drawer' : 'Expand drawer', icon: 'chevron', run: () => { if (historyMode) { switchMission('planner'); setProfileExpanded(true); } else setProfileExpanded(v => !v); } },
@@ -1101,6 +1122,22 @@ function App() {
             {provenance.headerStatusText}
             <b>{provenance.headerEngineLabel}</b>
           </span>
+          <button
+            type="button"
+            className={`btn-header-action btn-visor-hud-toggle ${visorMode ? 'is-active' : ''}`}
+            onClick={() => setVisorMode(v => !v)}
+            title="Toggle Astronaut Visor HUD Field Tablet View"
+          >
+            🥽 <span>VISOR HUD</span>
+          </button>
+          <button
+            type="button"
+            className={`btn-header-action btn-surface-pov-header ${showSurfacePov ? 'is-active' : ''}`}
+            onClick={() => setShowSurfacePov(v => !v)}
+            title="View Authentic NASA Perseverance Surface POV Imagery"
+          >
+            📷 <span>SURFACE POV</span>
+          </button>
           <button
             className="command-trigger"
             onClick={() => {
@@ -1214,6 +1251,10 @@ function App() {
           showThemisOverlay={showThemisOverlay}
           showScienceTargets={showScienceTargets}
           scienceTargets={JEZERO_SCIENCE_TARGETS_CLIENT}
+          onOpenSurfacePov={coord => {
+            setInspectCoord(coord);
+            setShowSurfacePov(true);
+          }}
         />
 
         {loadError && !live && (
@@ -1273,6 +1314,22 @@ function App() {
               <div className="hud-actions-wrap">
                 <button
                   type="button"
+                  className={`hud-quick-btn spe-hud-btn ${speScenarioActive ? 'is-spe-active' : ''}`}
+                  onClick={handleToggleSpe}
+                  title="Toggle Solar Particle Event (SPE) acute space radiation scenario"
+                >
+                  {speScenarioActive ? '⚡ SPE Active (48.5 mSv/h)' : '⚡ Simulate SPE'}
+                </button>
+                <button
+                  type="button"
+                  className="hud-quick-btn visor-hud-btn"
+                  onClick={() => setVisorMode(true)}
+                  title="Open Astronaut Visor HUD Field Tablet View"
+                >
+                  🥽 Visor HUD
+                </button>
+                <button
+                  type="button"
                   className="hud-quick-btn"
                   onClick={() => setRightExpanded(v => !v)}
                   title={rightExpanded ? 'Collapse analysis drawer' : 'Expand full analysis metrics'}
@@ -1322,6 +1379,19 @@ function App() {
                         {exceedsRet ? '⚠️ Exceeds Return' : '✅ Feasible Return'}
                       </span>
                     </div>
+                    {r.marswalk_survivability && (
+                      <div className="card-survivability-row">
+                        <span className={`survivability-chip score-${r.marswalk_survivability.category?.toLowerCase() || 'good'}`}>
+                          🥽 Walkability: <strong>{r.marswalk_survivability.score}/100</strong> ({r.marswalk_survivability.category})
+                        </span>
+                        {r.marswalk_survivability.is_spe_active && (
+                          <span className="spe-badge-chip">⚡ SPE Active</span>
+                        )}
+                        {r.marswalk_survivability.topographic_shelter_bonus > 0 && (
+                          <span className="shelter-badge-chip">⛰️ Sheltered (+{r.marswalk_survivability.topographic_shelter_bonus})</span>
+                        )}
+                      </div>
+                    )}
                   </button>
                 );
               })}
@@ -3388,6 +3458,30 @@ function App() {
             <span>Esc Close</span>
           </div>
         </Dialog>
+      )}
+
+      {/* Astronaut Visor HUD Overlay */}
+      {visorMode && (
+        <AstronautVisorHud
+          activeRoute={active}
+          destination={destination}
+          start={start}
+          isSpeActive={speScenarioActive}
+          onToggleSpe={handleToggleSpe}
+          onClose={() => setVisorMode(false)}
+          onOpenSurfacePov={() => setShowSurfacePov(true)}
+          roverWaypoint={waypoint}
+          sunData={null}
+          medaData={null}
+        />
+      )}
+
+      {/* Authentic NASA Surface POV Imagery Modal */}
+      {showSurfacePov && (
+        <SurfacePovViewer
+          inspectCoord={inspectCoord || start}
+          onClose={() => setShowSurfacePov(false)}
+        />
       )}
     </div>
   );

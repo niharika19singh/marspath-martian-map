@@ -37,9 +37,7 @@ class AzureFoundryProvider(BaseAIProvider):
         self.endpoint = self.settings.AZURE_AI_FOUNDRY_ENDPOINT
         self.api_key = self.settings.AZURE_AI_FOUNDRY_API_KEY
         self.model_name = self.settings.AZURE_AI_FOUNDRY_MODEL or "gpt-4o"
-        self.is_enabled = bool(
-            self.settings.AZURE_AI_ENABLED and self.endpoint and self.api_key
-        )
+        self.is_enabled = bool(self.settings.AZURE_AI_ENABLED and self.endpoint and self.api_key)
 
     def get_info(self) -> AIProviderInfo:
         return AIProviderInfo(
@@ -114,13 +112,15 @@ class AzureFoundryProvider(BaseAIProvider):
 
         if obs_id:
             referenced_products.append(obs_id)
-            citations.append({
-                "product_id": obs_id,
-                "instrument": context.get("instrument", "HiRISE"),
-                "source": "NASA Planetary Data System (Azure Model Inference Context)",
-                "doi": context.get("doi", "10.17189/1518932"),
-                "archive_url": context.get("archive_url", "https://ode.rsl.wustl.edu/mars/"),
-            })
+            citations.append(
+                {
+                    "product_id": obs_id,
+                    "instrument": context.get("instrument", "HiRISE"),
+                    "source": "NASA Planetary Data System (Azure Model Inference Context)",
+                    "doi": context.get("doi", "10.17189/1518932"),
+                    "archive_url": context.get("archive_url", "https://ode.rsl.wustl.edu/mars/"),
+                }
+            )
 
         system_instruction = (
             "You are a planetary science evaluator running on Azure AI Foundry. "

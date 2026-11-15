@@ -378,9 +378,7 @@ def test_official_endpoint_range_extract_reports_honest_intermediate_status():
 
         arr_sha = hashlib.sha256(np.ascontiguousarray(data, dtype=np.float32).tobytes()).hexdigest()
 
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_arr_sha = usgs_entry.get("jezero_window_array_sha256")
         usgs_entry["jezero_window_array_sha256"] = arr_sha
 
@@ -402,10 +400,7 @@ def test_official_endpoint_range_extract_reports_honest_intermediate_status():
 
             prov = provider.get_provenance()
 
-            assert (
-                prov["real_data_validation_status"]
-                == "official_endpoint_retrieved_checksum_unverified"
-            )
+            assert prov["real_data_validation_status"] == "official_endpoint_retrieved_checksum_unverified"
             assert prov["real_data_validation_status"] != "verified_source"
             assert prov["local_integrity_verified"] is True
             assert prov["source_checksum_verified"] is False

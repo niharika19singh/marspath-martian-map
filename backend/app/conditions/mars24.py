@@ -257,10 +257,7 @@ def compute_mars24(
 
     # Step C-1: Equation of Time (EOT)
     eot_deg = (
-        2.861 * math.sin(2.0 * ls_rad)
-        - 0.071 * math.sin(4.0 * ls_rad)
-        + 0.002 * math.sin(6.0 * ls_rad)
-        - v_minus_m_deg
+        2.861 * math.sin(2.0 * ls_rad) - 0.071 * math.sin(4.0 * ls_rad) + 0.002 * math.sin(6.0 * ls_rad) - v_minus_m_deg
     )
     eot_hours = eot_deg / 15.0
 
@@ -298,9 +295,8 @@ def compute_mars24(
 
     # Step D-4: Local Solar Zenith (Z) and Solar Elevation (E)
     lat_rad = math.radians(latitude_deg)
-    cos_z = (
-        math.sin(lat_rad) * math.sin(delta_s_rad)
-        + math.cos(lat_rad) * math.cos(delta_s_rad) * math.cos(hour_angle_rad)
+    cos_z = math.sin(lat_rad) * math.sin(delta_s_rad) + math.cos(lat_rad) * math.cos(delta_s_rad) * math.cos(
+        hour_angle_rad
     )
     cos_z = max(-1.0, min(1.0, cos_z))
     zenith_deg = math.degrees(math.acos(cos_z))
@@ -308,9 +304,8 @@ def compute_mars24(
 
     # Step D-5: Local Solar Azimuth (A, clockwise from North [0, 360))
     y_az = -math.cos(delta_s_rad) * math.sin(hour_angle_rad)
-    x_az = (
-        math.cos(lat_rad) * math.sin(delta_s_rad)
-        - math.sin(lat_rad) * math.cos(delta_s_rad) * math.cos(hour_angle_rad)
+    x_az = math.cos(lat_rad) * math.sin(delta_s_rad) - math.sin(lat_rad) * math.cos(delta_s_rad) * math.cos(
+        hour_angle_rad
     )
     if abs(x_az) < 1e-12 and abs(y_az) < 1e-12:
         azimuth_deg = 0.0

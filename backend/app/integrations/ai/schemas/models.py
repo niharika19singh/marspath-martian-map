@@ -21,7 +21,9 @@ class MarsScienceChatRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=2000, description="Natural language scientific question")
     provider: str = Field(default="gemini", description="AI provider to query ('gemini' or 'azure_foundry')")
-    observation_id: str | None = Field(default=None, description="Optional catalog observation context (e.g. 'ESP_069176_1985')")
+    observation_id: str | None = Field(
+        default=None, description="Optional catalog observation context (e.g. 'ESP_069176_1985')"
+    )
     route_id: str | None = Field(default=None, description="Optional active route context")
     conversation_history: list[dict[str, str]] = Field(default_factory=list, description="Previous message turns")
 
@@ -287,4 +289,3 @@ class MissionRiskBriefingResponse(BaseModel):
     provider_used: str
     model_used: str
     latency_ms: float = 0.0
-

@@ -273,9 +273,8 @@ class DemShadowAnalyzer:
         zenith_rad = math.radians(90.0 - solar_elevation_deg)
         slope_rad = math.radians(slope_deg)
         az_diff_rad = math.radians(solar_azimuth_deg - aspect_deg)
-        cos_inc = (
-            math.cos(zenith_rad) * math.cos(slope_rad)
-            + math.sin(zenith_rad) * math.sin(slope_rad) * math.cos(az_diff_rad)
+        cos_inc = math.cos(zenith_rad) * math.cos(slope_rad) + math.sin(zenith_rad) * math.sin(slope_rad) * math.cos(
+            az_diff_rad
         )
         cos_inc = max(-1.0, min(1.0, cos_inc))
         incidence_deg = math.degrees(math.acos(cos_inc))

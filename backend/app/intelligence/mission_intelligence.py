@@ -186,7 +186,9 @@ class MissionIntelligenceEngine:
         profile = "balanced"
         if any(w in lower_prompt for w in ["safe", "low slope", "gentle", "conservative", "hazard", "flat"]):
             profile = "safety_first"
-        elif any(w in lower_prompt for w in ["science", "crism", "sample", "carbonate", "clay", "outcrop", "spectroscopy"]):
+        elif any(
+            w in lower_prompt for w in ["science", "crism", "sample", "carbonate", "clay", "outcrop", "spectroscopy"]
+        ):
             profile = "science_first"
 
         # 6. Extract operational constraints
@@ -295,7 +297,9 @@ class MissionIntelligenceEngine:
             buf_min = round(float(turnaround.get("buffer_margin_minutes", 120.0)), 1)
 
             # Robustness metrics
-            mc_pct = round(float(robustness.get("reliability_score_pct", robustness.get("empirical_reachability_pct", 94.0))), 1)
+            mc_pct = round(
+                float(robustness.get("reliability_score_pct", robustness.get("empirical_reachability_pct", 94.0))), 1
+            )
             cost_sd = round(float(robustness.get("cost_std_dev", 28.5)), 1)
 
             # Profile classification
@@ -303,7 +307,11 @@ class MissionIntelligenceEngine:
 
             # Mission fit verdict
             if prioritize_safety:
-                fit = "HIGH_FIT" if max_slope <= 12.0 and ret_feas == "FEASIBLE" else ("MODERATE_FIT" if max_slope <= 14.0 else "LOW_FIT")
+                fit = (
+                    "HIGH_FIT"
+                    if max_slope <= 12.0 and ret_feas == "FEASIBLE"
+                    else ("MODERATE_FIT" if max_slope <= 14.0 else "LOW_FIT")
+                )
             elif prioritize_speed:
                 fit = "HIGH_FIT" if dist_km < 3.5 else "MODERATE_FIT"
             else:
@@ -358,14 +366,11 @@ class MissionIntelligenceEngine:
             f"and {selected_eval.turnaround_buffer_min} minutes of return EVA buffer margin."
         )
 
-        tradeoff = (
-            "Multi-Criteria Trade-off Breakdown:\n"
-            + "\n".join(
-                f"• {e.name} [{e.route_id}]: {e.distance_km} km | Cost: {e.total_cost} | Max Slope: {e.max_slope_deg}° | "
-                f"Roughness TRI: {e.roughness_tri} | Return EVA: {e.return_feasibility} (+{e.turnaround_buffer_min} min buffer) | "
-                f"Monte Carlo Reachability: {e.monte_carlo_reliability_pct}%"
-                for e in evaluations
-            )
+        tradeoff = "Multi-Criteria Trade-off Breakdown:\n" + "\n".join(
+            f"• {e.name} [{e.route_id}]: {e.distance_km} km | Cost: {e.total_cost} | Max Slope: {e.max_slope_deg}° | "
+            f"Roughness TRI: {e.roughness_tri} | Return EVA: {e.return_feasibility} (+{e.turnaround_buffer_min} min buffer) | "
+            f"Monte Carlo Reachability: {e.monte_carlo_reliability_pct}%"
+            for e in evaluations
         )
 
         rationale = (
@@ -544,7 +549,9 @@ class MissionIntelligenceEngine:
 
         # Monte Carlo & Stress Test stats
         scenarios_run = int(robust.get("total_scenarios_evaluated", 50))
-        reachability_pct = round(float(robust.get("reliability_score_pct", robust.get("empirical_reachability_pct", 94.0))), 1)
+        reachability_pct = round(
+            float(robust.get("reliability_score_pct", robust.get("empirical_reachability_pct", 94.0))), 1
+        )
         stress_scenarios = stress.get("scenarios") or []
         stress_count = len(stress_scenarios) if stress_scenarios else 7
 

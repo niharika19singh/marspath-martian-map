@@ -128,9 +128,7 @@ def compute_nodata_and_boundary_masks(
         nodata_mask = nodata_mask | np.isclose(elevation, nodata_value, atol=1e-3)
 
     if np.any(nodata_mask):
-        near_nodata_mask = ndimage.binary_dilation(
-            nodata_mask, structure=np.ones((5, 5), dtype=bool)
-        ) & (~nodata_mask)
+        near_nodata_mask = ndimage.binary_dilation(nodata_mask, structure=np.ones((5, 5), dtype=bool)) & (~nodata_mask)
     else:
         near_nodata_mask = np.zeros_like(nodata_mask, dtype=bool)
 
@@ -159,25 +157,17 @@ class EvidenceService:
         if "WGS84" in norm or "6378137" in norm or "EPSG:4326" in norm or "EPSG:3857" in norm:
             return False
 
-        catalog_crs = {
-            str(entry.get("crs", "")).strip().upper()
-            for entry in DATA_CATALOG_MANIFEST
-            if entry.get("crs")
-        }
+        catalog_crs = {str(entry.get("crs", "")).strip().upper() for entry in DATA_CATALOG_MANIFEST if entry.get("crs")}
         if norm in ESTABLISHED_MARS_CRS_IDENTIFIERS or norm in catalog_crs:
             return True
 
         # Check validated PROJ string
         if norm.startswith("+PROJ="):
-            return bool(
-                _PROJ_VALID_PROJECTION_RE.search(raw) and _PROJ_MARS_RADIUS_RE.search(raw)
-            )
+            return bool(_PROJ_VALID_PROJECTION_RE.search(raw) and _PROJ_MARS_RADIUS_RE.search(raw))
 
         # Check validated OGC WKT string
         if norm.startswith(("GEOGCS[", "PROJCS[", "GEOGCRS[", "PROJCRS[", "COMPD_CS[")):
-            return bool(
-                _WKT_MARS_SPHEROID_RE.search(raw) or _WKT_MARS_AUTHORITY_RE.search(raw)
-            )
+            return bool(_WKT_MARS_SPHEROID_RE.search(raw) or _WKT_MARS_AUTHORITY_RE.search(raw))
 
         return False
 
@@ -191,12 +181,7 @@ class EvidenceService:
         if not vertical_datum or not vertical_datum.strip():
             return False
         norm = vertical_datum.strip().upper()
-        if (
-            "UNKNOWN" in norm
-            or "UNSPECIFIED" in norm
-            or "SYNTHETIC" in norm
-            or norm == "NONE"
-        ):
+        if "UNKNOWN" in norm or "UNSPECIFIED" in norm or "SYNTHETIC" in norm or norm == "NONE":
             return False
 
         catalog_datums = {
@@ -214,9 +199,7 @@ class EvidenceService:
         dy_meters: float,
     ) -> SourceEvidence:
         is_syn = bool(master_meta.is_synthetic or provenance.get("is_synthetic", False))
-        data_mode = str(
-            provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real")
-        )
+        data_mode = str(provenance.get("data_mode", "synthetic_test_fixture" if is_syn else "real"))
         val_status = str(
             provenance.get(
                 "real_data_validation_status",
@@ -243,17 +226,12 @@ class EvidenceService:
             source_checksum_verified = False
             nominal_res = float(provenance.get("nominal_resolution_meters", round(dy_meters, 1)))
         elif val_status in ("verified_source", "official_endpoint_retrieved_checksum_unverified"):
-            dataset_name = str(
-                provenance.get("dataset_name")
-                or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2"
-            )
+            dataset_name = str(provenance.get("dataset_name") or "Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2")
             product_id = provenance.get("official_product_id")
             publisher = provenance.get("data_publisher") or "USGS Astrogeology Science Center"
             official_source_url = provenance.get("official_source_url")
             raw_local_integrity = provenance.get("local_integrity_verified")
-            local_integrity_verified = (
-                raw_local_integrity if isinstance(raw_local_integrity, bool) else None
-            )
+            local_integrity_verified = raw_local_integrity if isinstance(raw_local_integrity, bool) else None
             source_checksum_verified = provenance.get("source_checksum_verified") is True
             if product_id == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2":
                 nominal_res = 200.0
@@ -262,17 +240,12 @@ class EvidenceService:
             else:
                 nominal_res = round(dy_meters, 1)
         else:
-            dataset_name = str(
-                provenance.get("dataset_name")
-                or "Local Numerical Elevation Model (Unverified Source)"
-            )
+            dataset_name = str(provenance.get("dataset_name") or "Local Numerical Elevation Model (Unverified Source)")
             product_id = None
             publisher = provenance.get("data_publisher") or "Unknown / Local Origin"
             official_source_url = None
             raw_local_integrity = provenance.get("local_integrity_verified")
-            local_integrity_verified = (
-                raw_local_integrity if isinstance(raw_local_integrity, bool) else None
-            )
+            local_integrity_verified = raw_local_integrity if isinstance(raw_local_integrity, bool) else None
             source_checksum_verified = False
             nominal_res = None
 
@@ -430,17 +403,13 @@ class EvidenceService:
         2. Independent route sample coverage and cropped corridor cell coverage (`CoverageEvidence`).
         3. Aggregated route-level `quality_flags`.
         """
-        nodata_mask, near_nodata_mask = compute_nodata_and_boundary_masks(
-            graph.elevation, cropped_meta.nodata_value
-        )
+        nodata_mask, near_nodata_mask = compute_nodata_and_boundary_masks(graph.elevation, cropped_meta.nodata_value)
 
         # 1. Corridor-level coverage
         corridor_total_cells = int(graph.elevation.size)
         corridor_invalid_cells = int(nodata_mask.sum())
         corridor_valid_cells = corridor_total_cells - corridor_invalid_cells
-        corridor_cov_fraction = round(
-            corridor_valid_cells / max(corridor_total_cells, 1), 4
-        )
+        corridor_cov_fraction = round(corridor_valid_cells / max(corridor_total_cells, 1), 4)
 
         # 2. Route node sample coverage
         route_sample_count = len(path_nodes)
@@ -454,9 +423,7 @@ class EvidenceService:
             if cell_is_valid:
                 valid_route_sample_count += 1
         invalid_route_sample_count = route_sample_count - valid_route_sample_count
-        route_cov_fraction = round(
-            valid_route_sample_count / max(route_sample_count, 1), 4
-        )
+        route_cov_fraction = round(valid_route_sample_count / max(route_sample_count, 1), 4)
 
         # Baseline flags applicable to all segments on this dataset
         base_segment_flags: list[str] = []
@@ -527,19 +494,13 @@ class EvidenceService:
 
             dr = r_v - r_u
             dc = c_v - c_u
-            d2d = (
-                graph.dist_diag
-                if (dr != 0 and dc != 0)
-                else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
-            )
+            d2d = graph.dist_diag if (dr != 0 and dc != 0) else (graph.dist_orth_y if dr != 0 else graph.dist_orth_x)
 
             # Never silently convert missing/nodata values to 0.0
             elev_start_m = round(z_u_raw, 2) if u_valid_elev else None
             elev_end_m = round(z_v_raw, 2) if v_valid_elev else None
             if u_valid_elev and v_valid_elev:
-                d2d_edge, dz_raw, d3d, along_deg, cross_deg = graph.compute_edge_geometry(
-                    r_u, c_u, r_v, c_v
-                )
+                d2d_edge, dz_raw, d3d, along_deg, cross_deg = graph.compute_edge_geometry(r_u, c_u, r_v, c_v)
                 delta_elev_m: float | None = round(dz_raw, 2)
                 along_slope_val: float | None = round(along_deg, 2)
                 cross_slope_val: float | None = round(cross_deg, 2)
@@ -597,9 +558,7 @@ class EvidenceService:
                 if "invalid_or_nodata_segment" not in seg_flags:
                     seg_flags.append("invalid_or_nodata_segment")
 
-            is_near_nodata = bool(
-                near_nodata_mask[r_u, c_u] or near_nodata_mask[r_v, c_v]
-            )
+            is_near_nodata = bool(near_nodata_mask[r_u, c_u] or near_nodata_mask[r_v, c_v])
             if is_near_nodata:
                 near_nodata_segment_count += 1
                 if "near_nodata_boundary" not in seg_flags:
@@ -689,10 +648,7 @@ class EvidenceService:
 
         # 2. LOW rules (established planetary source, but material coverage/nodata/metadata issues)
         low_reasons: list[str] = []
-        if (
-            coverage.route_data_coverage_fraction < 1.0
-            or coverage.invalid_route_sample_count > 0
-        ):
+        if coverage.route_data_coverage_fraction < 1.0 or coverage.invalid_route_sample_count > 0:
             low_reasons.append(
                 f"incomplete route observation coverage ({coverage.valid_route_sample_count}/"
                 f"{coverage.route_sample_count} valid route samples, "
@@ -711,10 +667,9 @@ class EvidenceService:
                 "nodata boundary in the cropped corridor"
             )
 
-        if (
-            not EvidenceService._is_established_mars_crs(source.crs_identifier)
-            or not EvidenceService._is_known_vertical_datum(source.vertical_datum)
-        ):
+        if not EvidenceService._is_established_mars_crs(
+            source.crs_identifier
+        ) or not EvidenceService._is_known_vertical_datum(source.vertical_datum):
             low_reasons.append(
                 f"missing or unconfirmed geodetic metadata (CRS='{source.crs_identifier}', "
                 f"vertical_datum='{source.vertical_datum}')"
@@ -735,10 +690,7 @@ class EvidenceService:
 
         # 3. MODERATE rules (official source & complete route coverage, but upstream checksum/local integrity unverified or minor corridor gap)
         moderate_reasons: list[str] = []
-        if (
-            source.validation_status != "verified_source"
-            or source.source_checksum_verified is not True
-        ):
+        if source.validation_status != "verified_source" or source.source_checksum_verified is not True:
             moderate_reasons.append(
                 "the Jezero Crater sub-window was extracted from the official USGS HTTPS endpoint "
                 "with verified local SHA-256 integrity, but the full 11.38 GB upstream archive MD5 "

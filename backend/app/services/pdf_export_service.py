@@ -21,6 +21,7 @@ try:
         Table,
         TableStyle,
     )
+
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -126,11 +127,9 @@ def generate_mission_pdf(
     prov = plan_data.get("provenance", {})
     source_sel = plan_data.get("source_selection", {})
     rob = plan_data.get("robustness_assessment", {})
-    route_rob = (
-        next(
-            (b for b in rob.get("baseline_route_assessments", []) if b.get("route_id") == active_route.get("route_id")),
-            rob.get("baseline_route_assessments", [{}])[0] if rob.get("baseline_route_assessments") else {},
-        )
+    route_rob = next(
+        (b for b in rob.get("baseline_route_assessments", []) if b.get("route_id") == active_route.get("route_id")),
+        rob.get("baseline_route_assessments", [{}])[0] if rob.get("baseline_route_assessments") else {},
     )
 
     # 1. Header & Title Block
@@ -164,7 +163,9 @@ def generate_mission_pdf(
     summary_table_data = [
         [
             Paragraph("<b>Selected Plan:</b>", bold_style),
-            Paragraph(f"{active_route.get('name', 'Primary Route')} ({active_route.get('mode', 'balanced')})", body_style),
+            Paragraph(
+                f"{active_route.get('name', 'Primary Route')} ({active_route.get('mode', 'balanced')})", body_style
+            ),
             Paragraph("<b>Direct Leg Distance:</b>", bold_style),
             Paragraph(f"{dist_km:.2f} km", body_style),
         ],
@@ -189,13 +190,15 @@ def generate_mission_pdf(
     ]
     t_summary = Table(summary_table_data, colWidths=[110, 160, 110, 160])
     t_summary.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F7FAFC")),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ])
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F7FAFC")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
     )
     story.append(t_summary)
     story.append(Spacer(1, 10))
@@ -205,7 +208,9 @@ def generate_mission_pdf(
 
     rel_class = route_rob.get("reliability_classification", "MEDIUM")
     rel_score = route_rob.get("reliability_score", 50.0)
-    rel_formula = route_rob.get("reliability_formula", "Score = M_data * M_slope * (0.50*S_ret + 0.30*S_feas + 0.20*S_cov)")
+    rel_formula = route_rob.get(
+        "reliability_formula", "Score = M_data * M_slope * (0.50*S_ret + 0.30*S_feas + 0.20*S_cov)"
+    )
     rel_factors = route_rob.get("reliability_factors", {})
     rel_exp = route_rob.get("reliability_explanation", "Multi-factor reliability assessment.")
 
@@ -216,19 +221,28 @@ def generate_mission_pdf(
             Paragraph("<b>Reliability Tier:</b>", bold_style),
             Paragraph(f"<b>{rel_class}</b> (Score: {rel_score:.1f} / 100)", badge_p),
             Paragraph("<b>Perturbation Runs:</b>", bold_style),
-            Paragraph(f"{rob.get('completed_scenario_count', 0)} / {rob.get('requested_scenario_count', 0)} scenarios", body_style),
+            Paragraph(
+                f"{rob.get('completed_scenario_count', 0)} / {rob.get('requested_scenario_count', 0)} scenarios",
+                body_style,
+            ),
         ],
         [
             Paragraph("<b>Retention Fraction:</b>", bold_style),
-            Paragraph(f"{(route_rob.get('baseline_route_retention_fraction', 0.0) or 0.0)*100:.1f}%", body_style),
+            Paragraph(f"{(route_rob.get('baseline_route_retention_fraction', 0.0) or 0.0) * 100:.1f}%", body_style),
             Paragraph("<b>Feasibility Fraction:</b>", bold_style),
-            Paragraph(f"{(route_rob.get('baseline_route_feasibility_fraction', 0.0) or 0.0)*100:.1f}%", body_style),
+            Paragraph(f"{(route_rob.get('baseline_route_feasibility_fraction', 0.0) or 0.0) * 100:.1f}%", body_style),
         ],
         [
             Paragraph("<b>Data Multiplier (M_data):</b>", bold_style),
-            Paragraph(f"{rel_factors.get('data_quality_multiplier', 0.85):.2f} ({rel_factors.get('data_quality_label', 'Regional DEM')})", body_style),
+            Paragraph(
+                f"{rel_factors.get('data_quality_multiplier', 0.85):.2f} ({rel_factors.get('data_quality_label', 'Regional DEM')})",
+                body_style,
+            ),
             Paragraph("<b>Slope Multiplier (M_slope):</b>", bold_style),
-            Paragraph(f"{rel_factors.get('slope_margin_multiplier', 1.0):.2f} ({rel_factors.get('slope_margin_degrees', 5.0)}° margin)", body_style),
+            Paragraph(
+                f"{rel_factors.get('slope_margin_multiplier', 1.0):.2f} ({rel_factors.get('slope_margin_degrees', 5.0)}° margin)",
+                body_style,
+            ),
         ],
         [
             Paragraph("<b>Documented Formula:</b>", bold_style),
@@ -239,13 +253,15 @@ def generate_mission_pdf(
     ]
     t_rel = Table(rel_table_data, colWidths=[120, 150, 110, 160])
     t_rel.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFFFF")),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ])
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFFFF")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
     )
     story.append(t_rel)
     story.append(Spacer(1, 4))
@@ -278,24 +294,31 @@ def generate_mission_pdf(
             Paragraph("<b>PDS DOI / Link:</b>", bold_style),
             Paragraph(f"DOI: {prov_doi}", body_style),
             Paragraph("<b>HiRISE Tier Status:</b>", bold_style),
-            Paragraph(f"{source_sel.get('hirise_status', 'evaluated')} ({source_sel.get('hirise_rejection_reason', 'Regional source active')})", body_style),
+            Paragraph(
+                f"{source_sel.get('hirise_status', 'evaluated')} ({source_sel.get('hirise_rejection_reason', 'Regional source active')})",
+                body_style,
+            ),
         ],
         [
             Paragraph("<b>Data Mode:</b>", bold_style),
             Paragraph(f"<code>{prov_mode}</code>", body_style),
             Paragraph("<b>Local Checksum:</b>", bold_style),
-            Paragraph(f"SHA-256 Verified ({'PASS' if prov.get('local_integrity_verified') else 'NOMINAL'})", body_style),
+            Paragraph(
+                f"SHA-256 Verified ({'PASS' if prov.get('local_integrity_verified') else 'NOMINAL'})", body_style
+            ),
         ],
     ]
     t_prov = Table(prov_table_data, colWidths=[110, 160, 110, 160])
     t_prov.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F7FAFC")),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ])
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F7FAFC")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
     )
     story.append(t_prov)
     story.append(Spacer(1, 10))
@@ -316,27 +339,33 @@ def generate_mission_pdf(
         ]
         for r in routes:
             s_alt = r.get("summary", {})
-            alt_table_data.append([
-                Paragraph(r.get("name", "Alternative"), body_style),
-                Paragraph(r.get("mode", "balanced"), body_style),
-                Paragraph(f"{((s_alt.get('total_distance_meters', 0) or 0)/1000):.2f} km", body_style),
-                Paragraph(f"{(s_alt.get('estimated_duration_hours', 0) or 0):.2f} hrs", body_style),
-                Paragraph(f"{(s_alt.get('max_slope_deg', s_alt.get('max_slope_degrees', 0)) or 0):.1f}°", body_style),
-                Paragraph(f"{(r.get('total_cost', 0) or 0):.1f}", body_style),
-                Paragraph(f"#{r.get('score_rank', 1)}", bold_style),
-            ])
+            alt_table_data.append(
+                [
+                    Paragraph(r.get("name", "Alternative"), body_style),
+                    Paragraph(r.get("mode", "balanced"), body_style),
+                    Paragraph(f"{((s_alt.get('total_distance_meters', 0) or 0) / 1000):.2f} km", body_style),
+                    Paragraph(f"{(s_alt.get('estimated_duration_hours', 0) or 0):.2f} hrs", body_style),
+                    Paragraph(
+                        f"{(s_alt.get('max_slope_deg', s_alt.get('max_slope_degrees', 0)) or 0):.1f}°", body_style
+                    ),
+                    Paragraph(f"{(r.get('total_cost', 0) or 0):.1f}", body_style),
+                    Paragraph(f"#{r.get('score_rank', 1)}", bold_style),
+                ]
+            )
 
         t_alt = Table(alt_table_data, colWidths=[120, 70, 70, 70, 70, 70, 40])
         t_alt.setStyle(
-            TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A365D")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7FAFC")]),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ])
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A365D")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7FAFC")]),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
         )
         story.append(t_alt)
         story.append(Spacer(1, 10))
@@ -352,13 +381,18 @@ def generate_mission_pdf(
             Paragraph("<b>Departure UTC:</b>", bold_style),
             Paragraph(f"{m_clock.get('departure_utc', '2026-06-15T08:00:00Z')}", body_style),
             Paragraph("<b>Local True Solar Time:</b>", bold_style),
-            Paragraph(f"{m_clock.get('departure_ltst_hms', '14:28:10')} (Ls = {m_clock.get('departure_ls_deg', 112.4):.1f}°)", body_style),
+            Paragraph(
+                f"{m_clock.get('departure_ltst_hms', '14:28:10')} (Ls = {m_clock.get('departure_ls_deg', 112.4):.1f}°)",
+                body_style,
+            ),
         ],
         [
             Paragraph("<b>Solar Elevation:</b>", bold_style),
             Paragraph(f"{m_clock.get('solar_elevation_deg', 48.5):.1f}° (Daylight)", body_style),
             Paragraph("<b>Terrain Shadow Exposure:</b>", bold_style),
-            Paragraph(f"{((m_clock.get('terrain_shadowed_fraction', 0.0) or 0.0)*100):.1f}% shadowed distance", body_style),
+            Paragraph(
+                f"{((m_clock.get('terrain_shadowed_fraction', 0.0) or 0.0) * 100):.1f}% shadowed distance", body_style
+            ),
         ],
         [
             Paragraph("<b>Return Feasibility:</b>", bold_style),
@@ -369,13 +403,15 @@ def generate_mission_pdf(
     ]
     t_env = Table(env_table_data, colWidths=[120, 150, 120, 150])
     t_env.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F7FAFC")),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ])
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F7FAFC")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
     )
     story.append(t_env)
     story.append(Spacer(1, 10))
@@ -397,7 +433,7 @@ def generate_mission_pdf(
     selected_route = active_route or (candidate_list[0] if candidate_list else {})
     p_summary = summary or selected_route.get("summary", {})
 
-    ai_comparison = (ai_mission_intel.get("comparison") if ai_mission_intel else None)
+    ai_comparison = ai_mission_intel.get("comparison") if ai_mission_intel else None
     if not ai_comparison and candidate_list:
         try:
             ai_comparison = engine.compare_route_candidates(
@@ -407,14 +443,14 @@ def generate_mission_pdf(
         except Exception:
             ai_comparison = None
 
-    ai_terrain = (ai_mission_intel.get("terrain") if ai_mission_intel else None)
+    ai_terrain = ai_mission_intel.get("terrain") if ai_mission_intel else None
     if not ai_terrain:
         try:
             ai_terrain = engine.interpret_scientific_terrain(route_summary=p_summary)
         except Exception:
             ai_terrain = None
 
-    ai_risk = (ai_mission_intel.get("risk_briefing") if ai_mission_intel else None)
+    ai_risk = ai_mission_intel.get("risk_briefing") if ai_mission_intel else None
     if not ai_risk and selected_route:
         try:
             ai_risk = engine.generate_mission_risk_briefing(selected_route=selected_route)
@@ -430,14 +466,16 @@ def generate_mission_pdf(
     )
     t_ai_banner = Table([[Paragraph(ai_banner_text, body_style)]], colWidths=[540])
     t_ai_banner.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EBF8FF")),
-            ("BOX", (0, 0), (-1, -1), 1.0, colors.HexColor("#3182CE")),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ])
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EBF8FF")),
+                ("BOX", (0, 0), (-1, -1), 1.0, colors.HexColor("#3182CE")),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
     )
     story.append(t_ai_banner)
     story.append(Spacer(1, 6))
@@ -456,24 +494,28 @@ def generate_mission_pdf(
             ]
         ]
         for ev in ai_comparison.candidate_evaluations[:4]:
-            comp_rows.append([
-                Paragraph(f"{ev.name} ({ev.route_id})", body_style),
-                Paragraph(f"{ev.routing_profile}", body_style),
-                Paragraph(f"{ev.distance_km:.2f} km", body_style),
-                Paragraph(f"{ev.total_cost:.1f}", body_style),
-                Paragraph(f"{ev.max_slope_deg:.1f}°", body_style),
-                Paragraph(f"{ev.return_feasibility} (+{ev.turnaround_buffer_min:.0f}m)", body_style),
-                Paragraph(f"{ev.monte_carlo_reliability_pct:.1f}%", body_style),
-            ])
+            comp_rows.append(
+                [
+                    Paragraph(f"{ev.name} ({ev.route_id})", body_style),
+                    Paragraph(f"{ev.routing_profile}", body_style),
+                    Paragraph(f"{ev.distance_km:.2f} km", body_style),
+                    Paragraph(f"{ev.total_cost:.1f}", body_style),
+                    Paragraph(f"{ev.max_slope_deg:.1f}°", body_style),
+                    Paragraph(f"{ev.return_feasibility} (+{ev.turnaround_buffer_min:.0f}m)", body_style),
+                    Paragraph(f"{ev.monte_carlo_reliability_pct:.1f}%", body_style),
+                ]
+            )
         t_ai_comp = Table(comp_rows, colWidths=[130, 65, 65, 55, 60, 105, 60])
         t_ai_comp.setStyle(
-            TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ])
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
         )
         story.append(t_ai_comp)
         story.append(Spacer(1, 6))
@@ -490,24 +532,34 @@ def generate_mission_pdf(
                 Paragraph("<b>Confidence</b>", bold_style),
             ]
         ]
-        for it in (ai_terrain.measured_data_evidence[:2] + ai_terrain.derived_metrics_evidence[:1] + ai_terrain.proxy_indicators_evidence[:1]):
-            badge_color = "#276749" if it.data_type == "measured" else ("#2B6CB0" if it.data_type == "derived" else "#C05621")
+        for it in (
+            ai_terrain.measured_data_evidence[:2]
+            + ai_terrain.derived_metrics_evidence[:1]
+            + ai_terrain.proxy_indicators_evidence[:1]
+        ):
+            badge_color = (
+                "#276749" if it.data_type == "measured" else ("#2B6CB0" if it.data_type == "derived" else "#C05621")
+            )
             p_type = Paragraph(f"<font color='{badge_color}'><b>[{it.data_type.upper()}]</b></font>", body_style)
-            prov_rows.append([
-                p_type,
-                Paragraph(it.instrument_or_source, body_style),
-                Paragraph(f"<b>{it.parameter}:</b> {it.value_or_finding}", body_style),
-                Paragraph(it.confidence_level, body_style),
-            ])
+            prov_rows.append(
+                [
+                    p_type,
+                    Paragraph(it.instrument_or_source, body_style),
+                    Paragraph(f"<b>{it.parameter}:</b> {it.value_or_finding}", body_style),
+                    Paragraph(it.confidence_level, body_style),
+                ]
+            )
         t_prov = Table(prov_rows, colWidths=[80, 140, 260, 60])
         t_prov.setStyle(
-            TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ])
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E0")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
         )
         story.append(t_prov)
         story.append(Spacer(1, 6))
@@ -519,7 +571,9 @@ def generate_mission_pdf(
         for hz in ai_risk.critical_hazards[:2]:
             story.append(Paragraph(f"• <b>Hazard:</b> {hz}", body_style))
             story.append(Spacer(1, 1))
-        story.append(Paragraph(f"• <b>Contingency Corridor:</b> {ai_risk.recommended_contingency_corridor}", body_style))
+        story.append(
+            Paragraph(f"• <b>Contingency Corridor:</b> {ai_risk.recommended_contingency_corridor}", body_style)
+        )
         story.append(Spacer(1, 8))
 
     # 7. Engineering Limitations & Mandatory Disclaimer Box
@@ -546,14 +600,16 @@ def generate_mission_pdf(
     )
     t_disclaimer = Table([[Paragraph(disclaimer_text, body_style)]], colWidths=[540])
     t_disclaimer.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF5F5")),
-            ("BOX", (0, 0), (-1, -1), 1.0, colors.HexColor("#E53E3E")),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ])
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF5F5")),
+                ("BOX", (0, 0), (-1, -1), 1.0, colors.HexColor("#E53E3E")),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
     )
     story.append(t_disclaimer)
 

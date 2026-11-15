@@ -68,11 +68,7 @@ def _write_hirise_pds3_img(
     null_clause = (
         f"  CORE_NULL        = {core_null}\r\n"
         if core_null is not None
-        else (
-            f"  MISSING_CONSTANT = {missing_constant_hex}\r\n"
-            if missing_constant_hex
-            else ""
-        )
+        else (f"  MISSING_CONSTANT = {missing_constant_hex}\r\n" if missing_constant_hex else "")
     )
 
     rad_lat = math.radians(center_lat)
@@ -208,11 +204,7 @@ def _write_hirise_pds3_detached_lbl_and_img(
     null_clause = (
         f"  CORE_NULL        = {core_null}\r\n"
         if core_null is not None
-        else (
-            f"  MISSING_CONSTANT = {missing_constant_hex}\r\n"
-            if missing_constant_hex
-            else ""
-        )
+        else (f"  MISSING_CONSTANT = {missing_constant_hex}\r\n" if missing_constant_hex else "")
     )
 
     rad_lat = math.radians(center_lat)
@@ -313,11 +305,7 @@ def _write_hirise_geotiff(
     center_lat = max_lat - 0.01
     deg_lon = res_meters / meters_per_degree_lon(center_lat)
     deg_lat = res_meters / METERS_PER_DEGREE_LATITUDE
-    transform = (
-        custom_transform
-        if custom_transform is not None
-        else from_origin(min_lon, max_lat, deg_lon, deg_lat)
-    )
+    transform = custom_transform if custom_transform is not None else from_origin(min_lon, max_lat, deg_lon, deg_lat)
     h, w = elev.shape
     with rasterio.open(
         path,
@@ -791,14 +779,8 @@ def test_11_small_hirise_corridor_within_budget_runs_at_native_resolution():
         assert resp.source_selection.aggregation_applied is False
         assert resp.source_selection.aggregation_factor == 1
         assert resp.source_selection.aggregation_method == "none"
-        assert (
-            resp.source_selection.corridor_native_grid_shape
-            == resp.source_selection.corridor_analysis_grid_shape
-        )
-        assert (
-            resp.source_selection.native_resolution_meters
-            == resp.source_selection.effective_resolution_meters
-        )
+        assert resp.source_selection.corridor_native_grid_shape == resp.source_selection.corridor_analysis_grid_shape
+        assert resp.source_selection.native_resolution_meters == resp.source_selection.effective_resolution_meters
     finally:
         for p in (mola_path, hi_path):
             if os.path.exists(p):
@@ -848,18 +830,13 @@ def test_12_large_hirise_corridor_aggregates_or_falls_back_to_mola():
         assert resp_agg.source_selection.aggregation_applied is True
         assert resp_agg.source_selection.aggregation_factor >= 2
         assert (
-            resp_agg.source_selection.aggregation_method
-            == "mean_elevation_strict_nodata_max_subgrid_slope_roughness"
+            resp_agg.source_selection.aggregation_method == "mean_elevation_strict_nodata_max_subgrid_slope_roughness"
         )
         rows, cols = resp_agg.source_selection.corridor_analysis_grid_shape
         assert rows * cols <= 4000
-        assert (
-            resp_agg.source_selection.effective_resolution_meters
-            == pytest.approx(
-                resp_agg.source_selection.native_resolution_meters
-                * resp_agg.source_selection.aggregation_factor,
-                rel=0.05,
-            )
+        assert resp_agg.source_selection.effective_resolution_meters == pytest.approx(
+            resp_agg.source_selection.native_resolution_meters * resp_agg.source_selection.aggregation_factor,
+            rel=0.05,
         )
 
         # Case (b): If HiRISE native resolution is 20 m/px and max_cells=25 forces k=10 (200 m/px >= MOLA),
@@ -868,9 +845,7 @@ def test_12_large_hirise_corridor_aggregates_or_falls_back_to_mola():
             hi20_path = tmp_hi20.name
         try:
             hi20_elev = np.full((120, 120), -2490.0, dtype=np.float32)
-            _write_hirise_geotiff(
-                hi20_path, hi20_elev, min_lon=77.395, max_lat=18.425, res_meters=20.0
-            )
+            _write_hirise_geotiff(hi20_path, hi20_elev, min_lon=77.395, max_lat=18.425, res_meters=20.0)
             hi20_prov = HiRISERasterProvider(dem_path=hi20_path, enabled=True)
             service_fb = RouteService(
                 provider=mola_prov,
@@ -881,10 +856,7 @@ def test_12_large_hirise_corridor_aggregates_or_falls_back_to_mola():
             resp_fb = service_fb.plan_route(req)
             assert resp_fb.source_selection is not None
             assert resp_fb.source_selection.hirise_selected is False
-            assert (
-                resp_fb.source_selection.hirise_status
-                == "rejected_aggregated_resolution_no_better_than_regional"
-            )
+            assert resp_fb.source_selection.hirise_status == "rejected_aggregated_resolution_no_better_than_regional"
             assert resp_fb.source_selection.selected_source_tier == "regional_blended_dem"
         finally:
             if os.path.exists(hi20_path):
@@ -936,8 +908,8 @@ def test_13_aggregation_preserves_subgrid_hazards_and_never_turns_nodata_into_ze
         vertical_datum="Unknown / Unspecified",
     )
 
-    agg_elev, agg_meta, subgrid_max_slope, subgrid_max_rough = (
-        aggregate_corridor_hazard_preserving(native_elev, meta, factor=2)
+    agg_elev, agg_meta, subgrid_max_slope, subgrid_max_rough = aggregate_corridor_hazard_preserving(
+        native_elev, meta, factor=2
     )
 
     assert agg_elev.shape == (10, 10)
@@ -1057,10 +1029,7 @@ def test_15_robustness_stress_testing_works_on_selected_hirise_corridor():
         assert resp.robustness_assessment.enabled is True
         assert resp.robustness_assessment.requested_scenario_count == 3
         assert resp.robustness_assessment.completed_scenario_count == 3
-        assert (
-            resp.robustness_assessment.uncertainty_assumptions.actual_dx_meters
-            == pytest.approx(1.0, abs=0.1)
-        )
+        assert resp.robustness_assessment.uncertainty_assumptions.actual_dx_meters == pytest.approx(1.0, abs=0.1)
     finally:
         for p in (mola_path, hi_path):
             if os.path.exists(p):
@@ -1073,16 +1042,12 @@ def test_16_data_status_and_layers_report_hirise_honestly():
         status honestly across disabled, missing, and loaded-unverified states.
     """
     # Case A: Disabled
-    cat_disabled = DataCatalogService(
-        hirise_provider=HiRISERasterProvider(dem_path="missing.tif", enabled=False)
-    )
+    cat_disabled = DataCatalogService(hirise_provider=HiRISERasterProvider(dem_path="missing.tif", enabled=False))
     status_dis = cat_disabled.get_data_status()
     assert status_dis.hirise_enabled is False
     assert status_dis.hirise_loaded is False
     assert status_dis.hirise_status == "disabled"
-    hi_entry_dis = next(
-        p for p in status_dis.configured_products if p["id"] == "dem_hirise_jezero_delta_1m"
-    )
+    hi_entry_dis = next(p for p in status_dis.configured_products if p["id"] == "dem_hirise_jezero_delta_1m")
     assert hi_entry_dis["is_loaded"] is False
     assert hi_entry_dis["runtime_status"] == "disabled"
 
@@ -1101,17 +1066,14 @@ def test_16_data_status_and_layers_report_hirise_honestly():
     try:
         hi_elev = np.full((100, 100), -2490.0, dtype=np.float32)
         _write_hirise_geotiff(hi_path, hi_elev, min_lon=77.410, max_lat=18.410, res_meters=1.0)
-        cat_loaded = DataCatalogService(
-            hirise_provider=HiRISERasterProvider(dem_path=hi_path, enabled=True)
-        )
+        cat_loaded = DataCatalogService(hirise_provider=HiRISERasterProvider(dem_path=hi_path, enabled=True))
         status_ld = cat_loaded.get_data_status()
         assert status_ld.hirise_enabled is True
         assert status_ld.hirise_loaded is True
         assert status_ld.hirise_status == "ready"
         assert status_ld.hirise_dem_provenance is not None
         assert (
-            status_ld.hirise_dem_provenance["real_data_validation_status"]
-            == "valid_numeric_raster_unverified_source"
+            status_ld.hirise_dem_provenance["real_data_validation_status"] == "valid_numeric_raster_unverified_source"
         )
 
         layers_ld = cat_loaded.get_layer_list()
@@ -1166,9 +1128,7 @@ def test_17_single_source_invariant_never_merges_mola_and_hirise_grids():
         # HiRISE at -1800.0m with an interior NoData patch (-9999.0)
         hi_elev = np.full((200, 200), -1800.0, dtype=np.float32)
         hi_elev[90:100, 90:100] = -9999.0
-        _write_hirise_geotiff(
-            hi_path, hi_elev, min_lon=77.410, max_lat=18.410, res_meters=1.0, nodata=-9999.0
-        )
+        _write_hirise_geotiff(hi_path, hi_elev, min_lon=77.410, max_lat=18.410, res_meters=1.0, nodata=-9999.0)
 
         mola_prov = MOLAHRSCRasterProvider(dem_path=mola_path)
         mola_prov.use_real_dem = True
@@ -1221,10 +1181,7 @@ def test_18_projected_mars_crs_hirise_corridor_reprojection_and_pixel_alignment(
     try:
         _write_mola_geotiff(mola_path)
         # Projected Mars Equirectangular centered at (77.415E, 18.405N), 200m x 200m at 1.0 m/px
-        crs_proj = (
-            "+proj=eqc +lat_ts=18.405 +lat_0=18.405 +lon_0=77.415 "
-            "+x_0=0 +y_0=0 +R=3396190 +units=m +no_defs"
-        )
+        crs_proj = "+proj=eqc +lat_ts=18.405 +lat_0=18.405 +lon_0=77.415 +x_0=0 +y_0=0 +R=3396190 +units=m +no_defs"
         transform = from_origin(-100.0, 100.0, 1.0, 1.0)
         hi_elev = np.full((200, 200), -2475.0, dtype=np.float32)
 
@@ -1433,10 +1390,7 @@ def test_20_projected_raster_nodata_hole_conservative_propagation():
         hi_proj_path = tmp_hi_proj.name
 
     try:
-        crs_proj = (
-            "+proj=eqc +lat_ts=18.405 +lat_0=18.405 +lon_0=77.415 "
-            "+x_0=0 +y_0=0 +R=3396190 +units=m +no_defs"
-        )
+        crs_proj = "+proj=eqc +lat_ts=18.405 +lat_0=18.405 +lon_0=77.415 +x_0=0 +y_0=0 +R=3396190 +units=m +no_defs"
         transform = from_origin(-50.0, 50.0, 1.0, 1.0)
         hi_elev = np.full((100, 100), -2475.0, dtype=np.float32)
         # Localized 2x2 NoData hole at rows 49..50, cols 49..50 surrounded by valid -2475.0m pixels
@@ -1530,9 +1484,7 @@ def test_21_provider_cache_reuse_single_load_single_hash_and_invalidation(monkey
     try:
         _write_mola_geotiff(mola_path)
         hi_elev_v1 = np.full((150, 150), -2490.0, dtype=np.float32)
-        _write_hirise_geotiff(
-            hi_path, hi_elev_v1, min_lon=77.410, max_lat=18.410, res_meters=1.0, band_unit="m"
-        )
+        _write_hirise_geotiff(hi_path, hi_elev_v1, min_lon=77.410, max_lat=18.410, res_meters=1.0, band_unit="m")
 
         # Verify default RouteService() and DataCatalogService() share the same provider instance
         rs_default_1 = RouteService()
@@ -1574,9 +1526,7 @@ def test_21_provider_cache_reuse_single_load_single_hash_and_invalidation(monkey
 
         # Now overwrite hi_path with new elevation (-2420.0m) -> cache must invalidate automatically
         hi_elev_v2 = np.full((150, 150), -2420.0, dtype=np.float32)
-        _write_hirise_geotiff(
-            hi_path, hi_elev_v2, min_lon=77.410, max_lat=18.410, res_meters=1.0, band_unit="m"
-        )
+        _write_hirise_geotiff(hi_path, hi_elev_v2, min_lon=77.410, max_lat=18.410, res_meters=1.0, band_unit="m")
 
         hi_p_v2 = HiRISERasterProvider(dem_path=hi_path, enabled=True)
         svc_v2 = RouteService(provider=mola_prov, hirise_provider=hi_p_v2)
@@ -1703,10 +1653,7 @@ def test_23_pds3_dtm_official_note_convention_and_mars2000_vertical_reference():
 
         raster = load_raster_file(hi_path)
         assert raster.metadata.vertical_units == "meters"
-        assert (
-            raster.metadata.vertical_datum
-            == "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"
-        )
+        assert raster.metadata.vertical_datum == "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"
         assert raster.metadata.metadata_tags["_HAS_PDS3_LABEL"] == "true"
         assert raster.metadata.metadata_tags["PRODUCT_ID"] == "DTEEC_045994_1985_046060_1985_U01"
 
@@ -1727,7 +1674,9 @@ def test_23_pds3_dtm_official_note_convention_and_mars2000_vertical_reference():
         assert res_v2.is_valid_dtm is True
         assert res_v2.vertical_datum == "Mars 2000 Datum (Martian Equipotential Surface)"
 
-        var_note_3 = "Pixel values in this file represent elevations in metres above Mars Areoid (MOLA 0m reference datum)."
+        var_note_3 = (
+            "Pixel values in this file represent elevations in metres above Mars Areoid (MOLA 0m reference datum)."
+        )
         res_v3 = parse_pds3_hirise_dtm_label({"IMAGE": {"NOTE": var_note_3}})
         assert res_v3.is_valid_dtm is True
         assert res_v3.vertical_datum == "Mars Areoid (MOLA 0m reference datum)"
@@ -1898,9 +1847,7 @@ def test_25_pds3_dtm_missing_unknown_and_unsupported_label_rejections():
 
         # 6. 8-bit sample bits
         elev_u8 = np.full((20, 20), 128, dtype=np.uint8)
-        _write_hirise_pds3_img(
-            bit8_path, elev_u8, sample_bits=8, sample_type="MSB_UNSIGNED_INTEGER"
-        )
+        _write_hirise_pds3_img(bit8_path, elev_u8, sample_bits=8, sample_type="MSB_UNSIGNED_INTEGER")
         val6 = HiRISERasterProvider(dem_path=bit8_path, enabled=True).validate_hirise_raster()
         assert val6.is_valid is False
         assert val6.status_code == "rejected_non_elevation_raster"
@@ -1994,9 +1941,8 @@ def test_26_pds3_img_and_geotiff_validation_parity_and_route_equivalence():
 
         assert resp_pds3.source_selection.hirise_selected is True
         assert resp_gtiff.source_selection.hirise_selected is True
-        assert (
-            resp_pds3.routes[0].summary.total_distance_meters
-            == pytest.approx(resp_gtiff.routes[0].summary.total_distance_meters, abs=1.0)
+        assert resp_pds3.routes[0].summary.total_distance_meters == pytest.approx(
+            resp_gtiff.routes[0].summary.total_distance_meters, abs=1.0
         )
         assert resp_pds3.routes[0].total_cost == pytest.approx(resp_gtiff.routes[0].total_cost, abs=1.0)
         assert (
@@ -2032,7 +1978,9 @@ def test_27_pds3_provenance_attribution_no_redundant_hashing_and_unverified_stat
         HiRISERasterProvider.clear_process_cache()
         prov = HiRISERasterProvider(dem_path=hi_path, enabled=True)
 
-        with mock.patch("backend.app.data.manifest._compute_file_digest", wraps=manifest._compute_file_digest) as mock_digest:
+        with mock.patch(
+            "backend.app.data.manifest._compute_file_digest", wraps=manifest._compute_file_digest
+        ) as mock_digest:
             p1 = prov.get_provenance()
             assert mock_digest.call_count == 0  # Zero MD5 full-file passes!
 

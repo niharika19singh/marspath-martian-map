@@ -56,9 +56,7 @@ def point_in_bbox(lon: float, lat: float, bbox: list[float]) -> bool:
     return bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]
 
 
-def distance_point_to_segment_m(
-    px: float, py: float, x1: float, y1: float, x2: float, y2: float
-) -> float:
+def distance_point_to_segment_m(px: float, py: float, x1: float, y1: float, x2: float, y2: float) -> float:
     """
     Approximates minimum distance in meters from point (px, py) to line segment (x1, y1)-(x2, y2)
     using local equirectangular projection centered at py.
@@ -354,7 +352,9 @@ class SpatialTemporalIntelligenceIndex:
                 center_lat=18.435,
                 footprint_geojson={
                     "type": "Polygon",
-                    "coordinates": [[[77.268, 18.355], [77.498, 18.355], [77.498, 18.542], [77.268, 18.542], [77.268, 18.355]]],
+                    "coordinates": [
+                        [[77.268, 18.355], [77.498, 18.355], [77.498, 18.542], [77.268, 18.542], [77.268, 18.355]]
+                    ],
                 },
                 resolution_m=0.25,
                 timestamp_utc=datetime(2021, 4, 18, 10, 14, tzinfo=UTC),
@@ -375,4 +375,3 @@ class SpatialTemporalIntelligenceIndex:
         )
 
         return idx
-

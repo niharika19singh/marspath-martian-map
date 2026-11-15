@@ -209,9 +209,7 @@ def normalize_vertical_unit_token(
     return None, None, "rejected_unknown_vertical_units"
 
 
-_PDS3_MARS2000_CANONICAL_DATUM = (
-    "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"
-)
+_PDS3_MARS2000_CANONICAL_DATUM = "Mars 2000 Datum (Martian Equipotential Surface, Smith et al. 2001)"
 
 _PDS3_ELEVATION_NOTE_RE = re.compile(
     r"pixel\s+values\s+(?:in\s+this\s+file\s+)?represent\s+elevations?\s+in\s+"
@@ -405,11 +403,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
         src_ids = [_strip_pds_quotes(x) for x in raw_src_ids if _strip_pds_quotes(x)]
     elif isinstance(raw_src_ids, str):
         cleaned_src = raw_src_ids.strip().strip("()")
-        src_ids = [
-            _strip_pds_quotes(tok)
-            for tok in cleaned_src.split(",")
-            if _strip_pds_quotes(tok)
-        ]
+        src_ids = [_strip_pds_quotes(tok) for tok in cleaned_src.split(",") if _strip_pds_quotes(tok)]
 
     # Locate the IMAGE object (either direct `IMAGE` or `UNCOMPRESSED_FILE.IMAGE`)
     img_obj = pds_dict.get("IMAGE")
@@ -491,8 +485,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             is_valid_dtm=False,
             status_code="rejected_corrupt_raster",
             reason=(
-                f"PDS3 label declares non-finite or non-positive SCALING_FACTOR={scaling_factor} "
-                f"or OFFSET={offset}."
+                f"PDS3 label declares non-finite or non-positive SCALING_FACTOR={scaling_factor} or OFFSET={offset}."
             ),
             product_id=product_id,
             data_set_id=data_set_id,
@@ -525,9 +518,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
 
     # 4. Inspect and parse the PDS3 NOTE declaration
     raw_note = img_obj.get("NOTE", pds_dict.get("NOTE", ""))
-    note_clean = " ".join(
-        _strip_pds_quotes(raw_note).replace("\\r", " ").replace("\\n", " ").split()
-    )
+    note_clean = " ".join(_strip_pds_quotes(raw_note).replace("\\r", " ").replace("\\n", " ").split())
     if not note_clean:
         return PDS3DTMParseResult(
             has_pds3_label=True,
@@ -554,8 +545,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             is_valid_dtm=False,
             status_code="rejected_non_elevation_raster",
             reason=(
-                f"PDS3 IMAGE.NOTE declares radiometric/orthoimage values rather than elevation: "
-                f"'{note_clean[:140]}'."
+                f"PDS3 IMAGE.NOTE declares radiometric/orthoimage values rather than elevation: '{note_clean[:140]}'."
             ),
             note_text=note_clean,
             product_id=product_id,
@@ -563,10 +553,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             source_product_ids=src_ids,
         )
 
-    if any(
-        earth_tok in note_clean.lower()
-        for earth_tok in ("wgs84", "wgs 84", "egm96", "egm2008", "navd88", "earth")
-    ):
+    if any(earth_tok in note_clean.lower() for earth_tok in ("wgs84", "wgs 84", "egm96", "egm2008", "navd88", "earth")):
         return PDS3DTMParseResult(
             has_pds3_label=True,
             is_valid_dtm=False,
@@ -604,8 +591,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             is_valid_dtm=False,
             status_code=unit_code,
             reason=(
-                f"PDS3 IMAGE.NOTE declares unsupported or unrecognized vertical unit '{unit_token}' "
-                f"({unit_code})."
+                f"PDS3 IMAGE.NOTE declares unsupported or unrecognized vertical unit '{unit_token}' ({unit_code})."
             ),
             note_text=note_clean,
             product_id=product_id,
@@ -615,7 +601,10 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
 
     # Validate the declared vertical reference datum in the NOTE clause
     datum_lower = datum_clause.lower()
-    if any(earth_tok in datum_lower for earth_tok in ("wgs84", "wgs 84", "egm96", "egm2008", "navd88", "earth", "sea level")):
+    if any(
+        earth_tok in datum_lower
+        for earth_tok in ("wgs84", "wgs 84", "egm96", "egm2008", "navd88", "earth", "sea level")
+    ):
         return PDS3DTMParseResult(
             has_pds3_label=True,
             is_valid_dtm=False,
@@ -627,10 +616,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             source_product_ids=src_ids,
         )
 
-    if (
-        "martian equipotential surface" in datum_lower
-        and "mars 2000 datum" in datum_lower
-    ):
+    if "martian equipotential surface" in datum_lower and "mars 2000 datum" in datum_lower:
         resolved_datum = _PDS3_MARS2000_CANONICAL_DATUM
     elif "mars 2000 datum" in datum_lower:
         resolved_datum = "Mars 2000 Datum"
@@ -644,8 +630,7 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             is_valid_dtm=False,
             status_code="rejected_unknown_vertical_units",
             reason=(
-                f"PDS3 IMAGE.NOTE does not establish a recognized Mars vertical datum "
-                f"(found 'above {datum_clause}')."
+                f"PDS3 IMAGE.NOTE does not establish a recognized Mars vertical datum (found 'above {datum_clause}')."
             ),
             note_text=note_clean,
             product_id=product_id,
@@ -653,7 +638,11 @@ def parse_pds3_hirise_dtm_label(pds_dict: dict[str, Any] | None) -> PDS3DTMParse
             source_product_ids=src_ids,
         )
 
-    status_out = "converted" if (abs(unit_scale - 1.0) > 1e-12 or abs(scaling_factor - 1.0) > 1e-12 or abs(offset) > 1e-12) else "valid"
+    status_out = (
+        "converted"
+        if (abs(unit_scale - 1.0) > 1e-12 or abs(scaling_factor - 1.0) > 1e-12 or abs(offset) > 1e-12)
+        else "valid"
+    )
     reason_out = (
         f"Verified PDS3 HiRISE DTM label NOTE declaring elevations in '{unit_token}' above "
         f"'{resolved_datum}' (SCALING_FACTOR={scaling_factor:g}, OFFSET={offset:g})."
@@ -934,13 +923,7 @@ def _validate_not_earth_crs(crs_obj, file_path: str) -> None:
     if crs_obj is None:
         return
     crs_str = str(crs_obj).upper()
-    if (
-        "WGS" in crs_str
-        or "EPSG:4326" in crs_str
-        or "EPSG:3857" in crs_str
-        or "EARTH" in crs_str
-        or "NAD83" in crs_str
-    ):
+    if "WGS" in crs_str or "EPSG:4326" in crs_str or "EPSG:3857" in crs_str or "EARTH" in crs_str or "NAD83" in crs_str:
         raise UnsupportedCRSError(
             crs_str,
             supported=["IAU2000:49900", "MARS2000_SPHERE", "MARS_EQUIRECTANGULAR"],
@@ -1008,8 +991,8 @@ def load_raster_file(file_path: str) -> RasterData:
         m_x = d_lon * meters_per_degree_lon(center_lat)
         m_y = d_lat * METERS_PER_DEGREE_LATITUDE
 
-        unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = (
-            inspect_vertical_unit_declarations(None, None, tags)
+        unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = inspect_vertical_unit_declarations(
+            None, None, tags
         )
         tags["_VERTICAL_UNIT_VALID"] = "true" if unit_ok else "false"
         tags["_VERTICAL_UNIT_STATUS"] = unit_status
@@ -1081,13 +1064,10 @@ def load_raster_file(file_path: str) -> RasterData:
                 pds3_dict = extract_pds3_label_dict(src)
                 pds3_res = parse_pds3_hirise_dtm_label(pds3_dict) if pds3_dict else None
 
-                unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = (
-                    inspect_vertical_unit_declarations(band_unit, band_tags, tags, pds3_dict=pds3_dict)
+                unit_ok, unit_status, unit_reason, unit_scale, resolved_v_unit = inspect_vertical_unit_declarations(
+                    band_unit, band_tags, tags, pds3_dict=pds3_dict
                 )
-                merged_tags = {
-                    str(k): _strip_pds_quotes(v) if isinstance(v, str) else str(v)
-                    for k, v in tags.items()
-                }
+                merged_tags = {str(k): _strip_pds_quotes(v) if isinstance(v, str) else str(v) for k, v in tags.items()}
                 for bk, bv in band_tags.items():
                     if bk not in merged_tags:
                         merged_tags[bk] = _strip_pds_quotes(bv) if isinstance(bv, str) else str(bv)
@@ -1100,9 +1080,7 @@ def load_raster_file(file_path: str) -> RasterData:
                 merged_tags["_RASTER_DRIVER"] = str(src.driver or "")
 
                 # Capture PDS3 label metadata and check for vertical datum conflicts
-                explicit_tag_datum = (
-                    merged_tags.get("VERTICAL_DATUM") or merged_tags.get("DATUM") or ""
-                ).strip()
+                explicit_tag_datum = (merged_tags.get("VERTICAL_DATUM") or merged_tags.get("DATUM") or "").strip()
                 if pds3_res is not None and pds3_res.has_pds3_label:
                     merged_tags["_HAS_PDS3_LABEL"] = "true"
                     if pds3_res.product_id:
@@ -1149,9 +1127,13 @@ def load_raster_file(file_path: str) -> RasterData:
                             vert_datum = pds3_res.vertical_datum
                             merged_tags["VERTICAL_DATUM"] = vert_datum
                     else:
-                        vert_datum = explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
+                        vert_datum = (
+                            explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
+                        )
                 else:
-                    vert_datum = explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
+                    vert_datum = (
+                        explicit_tag_datum or "Unknown / Unspecified (datum tag not declared in raster metadata)"
+                    )
 
                 nodata_val: float | None = float(src.nodata) if src.nodata is not None else None
                 pds_core_null: float | None = None
@@ -1210,9 +1192,7 @@ def load_raster_file(file_path: str) -> RasterData:
                 # Step 3: Physical elevation plausibility threshold operates on DECODED elevations in meters,
                 # NOT unscaled storage values. On Mars, lowest elevation is Hellas (~-8.2 km) and highest
                 # is Olympus Mons (~21.3 km). Any decoded elevation < -9000m or > 30000m is unphysical/sentinel.
-                decoded_sentinel_nd = valid_idx & (
-                    (data_f32 < -9000.0) | (data_f32 > 30000.0) | ~np.isfinite(data_f32)
-                )
+                decoded_sentinel_nd = valid_idx & ((data_f32 < -9000.0) | (data_f32 > 30000.0) | ~np.isfinite(data_f32))
                 final_nd = raw_nd | decoded_sentinel_nd
 
                 # Step 4: Preserve all original NoData mask semantics through conversion.
@@ -1288,9 +1268,7 @@ def load_raster_file(file_path: str) -> RasterData:
                 else:
                     # Geographic in degrees
                     if not (-180.0 <= bounds.left <= 360.0 and -90.0 <= bounds.bottom <= 90.0):
-                        raise MarsPathError(
-                            f"GeoTIFF '{file_path}' has invalid geographic bounds: {bounds}"
-                        )
+                        raise MarsPathError(f"GeoTIFF '{file_path}' has invalid geographic bounds: {bounds}")
 
                     min_lon = bounds.left % 360.0
                     max_lon = bounds.right % 360.0

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class DataFreshnessState(str, Enum):
     """Explicit scientific data freshness states."""
+
     LATEST_AVAILABLE = "LATEST AVAILABLE"
     LIVE_TELEMETRY = "LIVE TELEMETRY"
     HISTORICAL = "HISTORICAL"
@@ -22,6 +23,7 @@ class DataFreshnessState(str, Enum):
 
 class ProvenanceMetadata(BaseModel):
     """Scientific source attribution and data lineage."""
+
     source_name: str = Field(..., description="Authoritative publisher or archive")
     dataset_id: str = Field(..., description="Unique dataset or PDS product ID")
     acquisition_utc: str = Field(..., description="Observation or measurement UTC timestamp")
@@ -36,6 +38,7 @@ class ProvenanceMetadata(BaseModel):
 
 class CoordinatesLonLat(BaseModel):
     """Areocentric longitude and latitude in IAU2000 Mars sphere."""
+
     lon: float = Field(..., ge=-180.0, le=360.0, description="Longitude in degrees East")
     lat: float = Field(..., ge=-90.0, le=90.0, description="Latitude in degrees North")
     elevation_m: float | None = Field(None, description="Elevation relative to MOLA areoid")
@@ -43,6 +46,7 @@ class CoordinatesLonLat(BaseModel):
 
 class SpacecraftPosition(BaseModel):
     """Current calculated or received position of a Mars orbiter."""
+
     spacecraft_id: str = Field(..., description="Machine identifier (e.g. mro, ody, maven, mex, tgo)")
     name: str = Field(..., description="Human-readable spacecraft name")
     epoch_utc: str = Field(..., description="UTC epoch of calculated position")
@@ -60,6 +64,7 @@ class SpacecraftPosition(BaseModel):
 
 class GroundTrackPoint(BaseModel):
     """Single point along a calculated orbital ground track."""
+
     epoch_utc: str
     lon: float
     lat: float
@@ -68,6 +73,7 @@ class GroundTrackPoint(BaseModel):
 
 class GroundTrack(BaseModel):
     """Orbital ground track polyline covering past and predicted intervals."""
+
     spacecraft_id: str
     name: str
     start_utc: str
@@ -82,6 +88,7 @@ class GroundTrack(BaseModel):
 
 class SpacecraftInfo(BaseModel):
     """Comprehensive spacecraft profile and mission metadata."""
+
     spacecraft_id: str
     name: str
     agency: str
@@ -104,6 +111,7 @@ class SpacecraftInfo(BaseModel):
 
 class RoverPosition(BaseModel):
     """Telemetry and position for an active or historical Mars surface rover."""
+
     rover_id: str = Field(..., description="perseverance or curiosity")
     name: str
     mission: str
@@ -129,6 +137,7 @@ class RoverPosition(BaseModel):
 
 class RoverDrive(BaseModel):
     """Single recorded drive segment."""
+
     drive_id: str
     sol: int
     start_lon: float
@@ -142,6 +151,7 @@ class RoverDrive(BaseModel):
 
 class RoverTraverse(BaseModel):
     """Complete cumulative historical traverse dataset."""
+
     rover_id: str
     name: str
     landing_site: str
@@ -155,6 +165,7 @@ class RoverTraverse(BaseModel):
 
 class RoverObservation(BaseModel):
     """Surface image or scientific measurement acquired by a rover."""
+
     observation_id: str
     rover_id: str
     instrument: str
@@ -171,6 +182,7 @@ class RoverObservation(BaseModel):
 
 class OrbitalObservation(BaseModel):
     """High-resolution orbital image or remote sensing observation."""
+
     observation_id: str
     spacecraft_id: str
     spacecraft_name: str
@@ -193,6 +205,7 @@ class OrbitalObservation(BaseModel):
 
 class TimelineEvent(BaseModel):
     """Chronological event across orbital and surface missions."""
+
     event_id: str
     event_type: str = Field(..., description="rover_drive, orbital_observation, spacecraft_event, waypoint")
     title: str
@@ -208,6 +221,7 @@ class TimelineEvent(BaseModel):
 
 class IntelligenceStatus(BaseModel):
     """Overall health, synchronizer status, and freshness summary."""
+
     status: str = "operational"
     service_version: str = "1.0.0"
     last_sync_utc: str
@@ -222,12 +236,14 @@ class IntelligenceStatus(BaseModel):
 
 class SyncRequest(BaseModel):
     """Parameters for on-demand synchronization request."""
+
     force_refresh: bool = False
     source_filter: list[str] | None = None
 
 
 class SyncResponse(BaseModel):
     """Result of synchronization execution."""
+
     success: bool
     sync_timestamp_utc: str
     updated_sources: list[str]

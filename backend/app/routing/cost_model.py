@@ -14,12 +14,12 @@ MARS_EARTH_GRAVITY_RATIO: float = MARS_GRAVITY_M_S2 / EARTH_GRAVITY_M_S2  # ~0.3
 # Evaluated strictly over gradient i = clip(dz / d2d, -0.45, +0.45) and normalized to relative effort.
 # NOTE: Used only as a gradient-based relative effort curve ("estimated relative effort"); NEVER calories/physiology.
 MINETTI_COEFFS: tuple[float, float, float, float, float, float] = (
-    155.4,   # i^5
-    -30.4,   # i^4
-    -43.3,   # i^3
-    46.3,    # i^2
-    19.5,    # i^1
-    3.6,     # level baseline C(0) [J / kg / m]
+    155.4,  # i^5
+    -30.4,  # i^4
+    -43.3,  # i^3
+    46.3,  # i^2
+    19.5,  # i^1
+    3.6,  # level baseline C(0) [J / kg / m]
 )
 MINETTI_LEVEL_BASE: float = 3.6
 MINETTI_GRADE_CLIP: float = 0.45
@@ -128,7 +128,9 @@ def calculate_edge_cost(
     """
     weights = MODE_WEIGHTS[mode]
     ceiling = max(weights.slope_ceiling_deg, 1.0)
-    horiz_dist = d2d if (d2d is not None and d2d > 0.0) else max(math.sqrt(max(distance_3d**2 - delta_z**2, 1e-6)), 1e-3)
+    horiz_dist = (
+        d2d if (d2d is not None and d2d > 0.0) else max(math.sqrt(max(distance_3d**2 - delta_z**2, 1e-6)), 1e-3)
+    )
 
     if along_slope_deg is None:
         along_grade = delta_z / horiz_dist
@@ -178,14 +180,7 @@ def calculate_edge_cost(
     rough_penalty = distance_3d * (weights.weight_roughness * rough_factor)
     hazard_penalty = distance_3d * (weights.weight_hazard * hazard_factor)
 
-    total_cost = (
-        base_dist_cost
-        + slope_penalty
-        + cross_slope_penalty
-        + rough_penalty
-        + hazard_penalty
-        + extra_penalty
-    )
+    total_cost = base_dist_cost + slope_penalty + cross_slope_penalty + rough_penalty + hazard_penalty + extra_penalty
 
     breakdown = {
         "base_distance_cost": round(base_dist_cost, 2),

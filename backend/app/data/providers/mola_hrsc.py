@@ -45,9 +45,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
 
     MAX_CACHE_ENTRIES = 4
     _CACHE_LOCK = threading.RLock()
-    _PROCESS_CACHE: OrderedDict[tuple[str, int, int, int, int, int], _MOLACachedEntry] = (
-        OrderedDict()
-    )
+    _PROCESS_CACHE: OrderedDict[tuple[str, int, int, int, int, int], _MOLACachedEntry] = OrderedDict()
 
     def __init__(
         self,
@@ -58,9 +56,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
         settings = get_settings()
         self.dem_path = dem_path or settings.DEM_PATH
         self.use_real_dem = settings.USE_REAL_DEM if use_real_dem is None else use_real_dem
-        self.allow_fallback = (
-            settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
-        )
+        self.allow_fallback = settings.ALLOW_SYNTHETIC_FALLBACK if allow_fallback is None else allow_fallback
         self._raster_data: RasterData | None = None
         self._cached_file_id: tuple[str, int, int, int, int, int] | None = None
         self._fallback_provider: SyntheticTerrainProvider | None = None
@@ -108,10 +104,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                         err_detail = f" (provisioning error: {err_data['error']})"
                 except Exception:
                     pass
-            msg = (
-                f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found at: "
-                f"{self.dem_path}{err_detail}"
-            )
+            msg = f"Real DEM requested (MARSPATH_USE_REAL_DEM=true) but file not found at: {self.dem_path}{err_detail}"
             if not self.allow_fallback:
                 raise TerrainDataUnavailableError(msg)
             logger.warning("%s. Falling back to synthetic test model.", msg)
@@ -126,14 +119,10 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             self._validate_dem_integrity(loaded_raster)
             loaded_raster.mark_readonly()
             with self._CACHE_LOCK:
-                stale = [
-                    k for k in self._PROCESS_CACHE if k[0] == file_id[0] and k != file_id
-                ]
+                stale = [k for k in self._PROCESS_CACHE if k[0] == file_id[0] and k != file_id]
                 for k in stale:
                     self._PROCESS_CACHE.pop(k, None)
-                self._PROCESS_CACHE[file_id] = _MOLACachedEntry(
-                    file_identity=file_id, raster=loaded_raster
-                )
+                self._PROCESS_CACHE[file_id] = _MOLACachedEntry(file_identity=file_id, raster=loaded_raster)
                 while len(self._PROCESS_CACHE) > self.MAX_CACHE_ENTRIES:
                     self._PROCESS_CACHE.popitem(last=False)
             self._raster_data = loaded_raster
@@ -217,11 +206,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
             sidecar_id = get_file_identity(f"{self.dem_path}.provenance.json")
             with self._CACHE_LOCK:
                 entry = self._PROCESS_CACHE.get(file_id) if file_id is not None else None
-                if (
-                    entry is not None
-                    and entry.provenance is not None
-                    and entry.sidecar_identity == sidecar_id
-                ):
+                if entry is not None and entry.provenance is not None and entry.sidecar_identity == sidecar_id:
                     return copy.deepcopy(entry.provenance)
 
                 if entry is not None and entry.file_sha256 is not None:
@@ -275,9 +260,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 source_checksum_verified = True
                 dataset_name = matched_prod["product_name"]
                 official_product_id = matched_prod["id"]
-                official_source_url = (
-                    matched_prod.get("landing_page") or matched_prod.get("upstream_url")
-                )
+                official_source_url = matched_prod.get("landing_page") or matched_prod.get("upstream_url")
                 pds_doi = matched_prod.get("pds_doi")
                 mission_instruments = matched_prod.get("mission_instruments")
                 data_publisher = matched_prod.get("publisher")
@@ -292,9 +275,7 @@ class MOLAHRSCRasterProvider(BaseRasterProvider):
                 source_checksum_verified = False
                 dataset_name = matched_prod["product_name"]
                 official_product_id = matched_prod["id"]
-                official_source_url = (
-                    matched_prod.get("landing_page") or matched_prod.get("upstream_url")
-                )
+                official_source_url = matched_prod.get("landing_page") or matched_prod.get("upstream_url")
                 pds_doi = matched_prod.get("pds_doi")
                 mission_instruments = matched_prod.get("mission_instruments")
                 data_publisher = matched_prod.get("publisher")

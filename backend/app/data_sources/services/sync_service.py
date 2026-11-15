@@ -22,7 +22,9 @@ class DataSourceSyncService:
 
     async def get_global_status(self) -> GlobalSourcesStatus:
         sources = self.registry.list_sources()
-        connected = sum(1 for s in sources if s.connection_status in (ConnectionState.CONNECTED, ConnectionState.DATA_INGESTED))
+        connected = sum(
+            1 for s in sources if s.connection_status in (ConnectionState.CONNECTED, ConnectionState.DATA_INGESTED)
+        )
         meta_avail = sum(1 for s in sources if s.metadata_access_status)
         ingested = sum(1 for s in sources if s.is_data_ingested)
         total_prods = sum(s.indexed_products_count for s in sources)

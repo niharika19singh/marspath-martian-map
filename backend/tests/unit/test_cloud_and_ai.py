@@ -85,7 +85,9 @@ class TestLocalStorageAdapter:
         monkeypatch.setenv("GCS_BUCKET", "")
         monkeypatch.setenv("MARSPATH_GCS_ENABLED", "false")
 
-        adapter = GCSStorageAdapter(bucket_name="test-bucket", local_fallback_root=tmp_path / "fallback", is_enabled=False)
+        adapter = GCSStorageAdapter(
+            bucket_name="test-bucket", local_fallback_root=tmp_path / "fallback", is_enabled=False
+        )
         assert adapter.is_fallback_mode is True
         status = asyncio.run(adapter.get_status())
         assert status.provider == "local_filesystem"

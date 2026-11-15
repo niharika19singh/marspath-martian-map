@@ -105,51 +105,61 @@ class GeminiProvider(BaseAIProvider):
 
         if obs_id:
             referenced_products.append(obs_id)
-            citations.append({
-                "product_id": obs_id,
-                "instrument": context.get("instrument", "HiRISE / CTX"),
-                "source": context.get("source_name", "NASA PDS Geosciences"),
-                "doi": context.get("doi", "10.17189/1518932"),
-                "archive_url": context.get("archive_url", "https://ode.rsl.wustl.edu/mars/"),
-            })
+            citations.append(
+                {
+                    "product_id": obs_id,
+                    "instrument": context.get("instrument", "HiRISE / CTX"),
+                    "source": context.get("source_name", "NASA PDS Geosciences"),
+                    "doi": context.get("doi", "10.17189/1518932"),
+                    "archive_url": context.get("archive_url", "https://ode.rsl.wustl.edu/mars/"),
+                }
+            )
         else:
             msg_lower = message.lower()
             if "meda" in msg_lower or "weather" in msg_lower or "temperature" in msg_lower:
                 referenced_products.append("urn:nasa:pds:mars2020_meda")
-                citations.append({
-                    "product_id": "urn:nasa:pds:mars2020_meda",
-                    "instrument": "MEDA",
-                    "source": "NASA PDS Atmospheres Node",
-                    "doi": "10.1007/s11214-021-00816-9",
-                    "archive_url": "https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/PERSEVERANCE/meda.html",
-                })
+                citations.append(
+                    {
+                        "product_id": "urn:nasa:pds:mars2020_meda",
+                        "instrument": "MEDA",
+                        "source": "NASA PDS Atmospheres Node",
+                        "doi": "10.1007/s11214-021-00816-9",
+                        "archive_url": "https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/PERSEVERANCE/meda.html",
+                    }
+                )
             elif "crism" in msg_lower or "mineral" in msg_lower or "clay" in msg_lower or "carbonate" in msg_lower:
                 referenced_products.append("HRL000040FF")
-                citations.append({
-                    "product_id": "HRL000040FF",
-                    "instrument": "CRISM",
-                    "source": "NASA PDS Geosciences Node",
-                    "doi": "10.1029/2009JE003439",
-                    "archive_url": "https://ode.rsl.wustl.edu/mars/productsearch.aspx?p=HRL000040FF",
-                })
+                citations.append(
+                    {
+                        "product_id": "HRL000040FF",
+                        "instrument": "CRISM",
+                        "source": "NASA PDS Geosciences Node",
+                        "doi": "10.1029/2009JE003439",
+                        "archive_url": "https://ode.rsl.wustl.edu/mars/productsearch.aspx?p=HRL000040FF",
+                    }
+                )
             elif "themis" in msg_lower or "thermal" in msg_lower or "sinkage" in msg_lower:
                 referenced_products.append("THEMIS_IR_GLOBAL_100M")
-                citations.append({
-                    "product_id": "THEMIS_IR_GLOBAL_100M",
-                    "instrument": "THEMIS",
-                    "source": "Arizona State University / Mars Trek",
-                    "doi": "10.1029/2003JE002178",
-                    "archive_url": "https://themis.asu.edu/data",
-                })
+                citations.append(
+                    {
+                        "product_id": "THEMIS_IR_GLOBAL_100M",
+                        "instrument": "THEMIS",
+                        "source": "Arizona State University / Mars Trek",
+                        "doi": "10.1029/2003JE002178",
+                        "archive_url": "https://themis.asu.edu/data",
+                    }
+                )
             else:
                 referenced_products.append("ESP_069176_1985")
-                citations.append({
-                    "product_id": "ESP_069176_1985",
-                    "instrument": "HiRISE",
-                    "source": "NASA PDS / University of Arizona",
-                    "doi": "10.17189/1518932",
-                    "archive_url": "https://hirise.lpl.arizona.edu/ESP_069176_1985",
-                })
+                citations.append(
+                    {
+                        "product_id": "ESP_069176_1985",
+                        "instrument": "HiRISE",
+                        "source": "NASA PDS / University of Arizona",
+                        "doi": "10.17189/1518932",
+                        "archive_url": "https://hirise.lpl.arizona.edu/ESP_069176_1985",
+                    }
+                )
 
         system_instruction = (
             "You are the MARSPath Mars Science Copilot, an expert planetary geologist and mission-planning assistant. "

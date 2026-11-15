@@ -32,9 +32,7 @@ USGS_JEZERO_WINDOW_ARRAY_SHA256 = "e9a823c7ee00f68e6b5985425b90e574e30638f6223d0
 # Deterministic SHA-256 of the float32 elevation array for the Jezero TRN HiRISE 1m DTM corridor window
 # (col_off=9428, row_off=13592, width=4506, height=4032; 77.3819891°E-77.4580081°E, 18.3719875°N-18.4400097°N)
 # streamed from USGS JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40.tif (DOI: 10.5066/P9REJ9JN)
-USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256 = (
-    "8c057bac0f51377a82963c86b8689e654726172a3c01c5e2298cc5b875a1f251"
-)
+USGS_HIRISE_TRN_DTM_WINDOW_ARRAY_SHA256 = "8c057bac0f51377a82963c86b8689e654726172a3c01c5e2298cc5b875a1f251"
 
 DATA_CATALOG_MANIFEST: list[dict[str, Any]] = [
     {
@@ -513,9 +511,7 @@ def _verify_window_against_source_file(
         with rasterio.open(extracted_path) as ext_src:
             ext_data = np.ascontiguousarray(ext_src.read(1), dtype=np.float32)
 
-        return src_win_data.shape == ext_data.shape and np.allclose(
-            src_win_data, ext_data, equal_nan=True
-        )
+        return src_win_data.shape == ext_data.shape and np.allclose(src_win_data, ext_data, equal_nan=True)
     except Exception:
         return False
 
@@ -562,11 +558,7 @@ def verify_manifest_provenance(
     # `upstream_md5` and `file_path` is not a distinctly named PDS3/HiRISE product that
     # lacks a catalogued MD5 digest (avoiding redundant 381+ MB full-file reads).
     norm_tags = {str(k).upper(): str(v).strip().strip('"') for k, v in metadata_tags.items()}
-    declared_prod_id = (
-        norm_tags.get("PRODUCT_ID")
-        or norm_tags.get("OFFICIAL_PRODUCT_ID")
-        or ""
-    ).upper()
+    declared_prod_id = (norm_tags.get("PRODUCT_ID") or norm_tags.get("OFFICIAL_PRODUCT_ID") or "").upper()
     has_applicable_md5_candidate = False
     for item in effective_manifest:
         up_md5 = item.get("upstream_md5")
@@ -633,9 +625,7 @@ def verify_manifest_provenance(
                         cat_sha = str(item.get("sha256") or "").lower().strip()
                         md5_ok = bool(cat_md5 and actual_src_md5 == cat_md5)
                         sha_ok = bool(cat_sha and actual_src_sha256 == cat_sha)
-                        if (md5_ok or sha_ok) and _verify_window_against_source_file(
-                            fp, source_ref, window_bounds
-                        ):
+                        if (md5_ok or sha_ok) and _verify_window_against_source_file(fp, source_ref, window_bounds):
                             return True, "authoritative_full_source_bytes_verified", item
 
                 # Path 2b: Official endpoint partial HTTP range extraction (/vsicurl/)

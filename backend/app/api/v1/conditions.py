@@ -220,9 +220,7 @@ def get_mars_conditions(
 
     # Sunlight day / twilight / night classification
     daylight_state = (
-        "DAYLIGHT"
-        if m24.solar_elevation_deg > 0
-        else ("TWILIGHT" if m24.solar_elevation_deg > -6.0 else "NIGHT")
+        "DAYLIGHT" if m24.solar_elevation_deg > 0 else ("TWILIGHT" if m24.solar_elevation_deg > -6.0 else "NIGHT")
     )
 
     sun_block = {
@@ -315,37 +313,25 @@ def get_mars_conditions(
             m24_src,
             "VALID" if m24.sunset_ltst_hours is not None else m24.polar_day_state,
         ),
-        "daylight_duration_mars_hours": _metric(
-            m24.daylight_mars_hours, "mars_hours", "astronomical_exact", m24_src
-        ),
+        "daylight_duration_mars_hours": _metric(m24.daylight_mars_hours, "mars_hours", "astronomical_exact", m24_src),
         "daylight_duration_earth_hours": _metric(
             m24.daylight_earth_hours, "earth_hours", "astronomical_exact", m24_src
         ),
         "tt_minus_utc": _metric(m24.tt_minus_utc_s, "s", "astronomical_exact", m24_src),
-        "terrain_shadow_state": _metric(
-            shadow.shadow_state, "state", "dem_derived", dem_src, dem_status
-        ),
-        "max_horizon_obstruction": _metric(
-            shadow.max_horizon_angle_deg, "deg", "dem_derived", dem_src, dem_status
-        ),
+        "terrain_shadow_state": _metric(shadow.shadow_state, "state", "dem_derived", dem_src, dem_status),
+        "max_horizon_obstruction": _metric(shadow.max_horizon_angle_deg, "deg", "dem_derived", dem_src, dem_status),
         "effective_solar_clearance": _metric(
             shadow.effective_solar_clearance_deg, "deg", "dem_derived", dem_src, dem_status
         ),
-        "observer_elevation": _metric(
-            shadow.observer_elevation_m, "m", "dem_derived", dem_src, dem_status
-        ),
-        "surface_incidence_angle": _metric(
-            shadow.surface_incidence_deg, "deg", "dem_derived", dem_src, dem_status
-        ),
+        "observer_elevation": _metric(shadow.observer_elevation_m, "m", "dem_derived", dem_src, dem_status),
+        "surface_incidence_angle": _metric(shadow.surface_incidence_deg, "deg", "dem_derived", dem_src, dem_status),
         "modelled_air_temperature": _metric(
             climatology["air_temperature_c"], "°C", "modelled_climatology", clim_src, "MODELLED"
         ),
         "modelled_ground_temperature": _metric(
             climatology["ground_temperature_c"], "°C", "modelled_climatology", clim_src, "MODELLED"
         ),
-        "modelled_pressure": _metric(
-            climatology["pressure_pa"], "Pa", "modelled_climatology", clim_src, "MODELLED"
-        ),
+        "modelled_pressure": _metric(climatology["pressure_pa"], "Pa", "modelled_climatology", clim_src, "MODELLED"),
         "modelled_wind_speed": _metric(
             climatology["wind_speed_m_s"], "m/s", "modelled_climatology", clim_src, "MODELLED"
         ),

@@ -221,7 +221,9 @@ class LocalStorageAdapter(BaseStorageAdapter):
         if not target_path.exists():
             raise FileNotFoundError(f"Object not found for signed URL: '{object_name}'")
 
-        token = hashlib.sha256(f"{object_name}:{expiration_seconds}:{target_path.stat().st_mtime}".encode()).hexdigest()[:16]
+        token = hashlib.sha256(
+            f"{object_name}:{expiration_seconds}:{target_path.stat().st_mtime}".encode()
+        ).hexdigest()[:16]
         return f"/api/v1/cloud/storage/download?object={object_name}&token={token}&expires={expiration_seconds}"
 
     async def list_objects(

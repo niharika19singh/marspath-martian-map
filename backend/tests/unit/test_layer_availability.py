@@ -234,9 +234,7 @@ def test_official_endpoint_extraction_exposes_official_source_and_unverified_che
             actual_sha = hashlib.sha256(f.read()).hexdigest()
         arr_sha = hashlib.sha256(np.ascontiguousarray(data, dtype=np.float32).tobytes()).hexdigest()
 
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_arr_sha = usgs_entry.get("jezero_window_array_sha256")
         usgs_entry["jezero_window_array_sha256"] = arr_sha
 
@@ -317,9 +315,7 @@ def test_verified_full_source_dem_exposes_verified_provenance():
         with open(tmp_path, "rb") as f:
             actual_sha = hashlib.sha256(f.read()).hexdigest()
 
-        usgs_entry = next(
-            p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2"
-        )
+        usgs_entry = next(p for p in DATA_CATALOG_MANIFEST if p["id"] == "Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2")
         orig_sha = usgs_entry.get("sha256")
         usgs_entry["sha256"] = actual_sha
 
@@ -354,4 +350,3 @@ def test_verified_full_source_dem_exposes_verified_provenance():
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-

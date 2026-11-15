@@ -32,7 +32,7 @@ class MissionKnowledgeGraph:
         self._nodes: dict[str, GraphNode] = {}
         self._edges: dict[str, GraphEdge] = {}
         self._out_edges: dict[str, list[str]] = {}  # node_id -> [edge_ids]
-        self._in_edges: dict[str, list[str]] = {}   # node_id -> [edge_ids]
+        self._in_edges: dict[str, list[str]] = {}  # node_id -> [edge_ids]
 
     def add_node(self, node: GraphNode) -> None:
         self._nodes[node.node_id] = node
@@ -246,8 +246,7 @@ class MissionKnowledgeGraph:
 
         node_ids_set = {n.node_id for n in matching_nodes}
         matching_edges: list[GraphEdge] = [
-            e for e in self._edges.values()
-            if e.source_node_id in node_ids_set or e.target_node_id in node_ids_set
+            e for e in self._edges.values() if e.source_node_id in node_ids_set or e.target_node_id in node_ids_set
         ]
         # Include any endpoint nodes so edges are not dangling
         for e in matching_edges:
@@ -342,10 +341,14 @@ def populate_knowledge_graph_from_mission(
 
         # Link to respective Dataset
         parent_ds = (
-            "ds:usgs_hirise_dtm_1m" if "hirise" in obs.instrument.lower()
-            else "ds:usgs_mola_hrsc_200m" if "mola" in obs.instrument.lower()
-            else "ds:themis_night_ir" if "themis" in obs.instrument.lower()
-            else "ds:m2020_meda" if "meda" in obs.instrument.lower()
+            "ds:usgs_hirise_dtm_1m"
+            if "hirise" in obs.instrument.lower()
+            else "ds:usgs_mola_hrsc_200m"
+            if "mola" in obs.instrument.lower()
+            else "ds:themis_night_ir"
+            if "themis" in obs.instrument.lower()
+            else "ds:m2020_meda"
+            if "meda" in obs.instrument.lower()
             else None
         )
         if parent_ds:
@@ -366,7 +369,10 @@ def populate_knowledge_graph_from_mission(
         node_type=GraphNodeType.TERRAIN_REGION,
         label="Neretva Vallis Delta Fan",
         description="Fluvial deltaic depositional fan rich in smectite and carbonate bearing strata.",
-        spatial_extent={"type": "Polygon", "coordinates": [[[77.38, 18.40], [77.46, 18.40], [77.46, 18.46], [77.38, 18.46], [77.38, 18.40]]]},
+        spatial_extent={
+            "type": "Polygon",
+            "coordinates": [[[77.38, 18.40], [77.46, 18.40], [77.46, 18.46], [77.38, 18.46], [77.38, 18.40]]],
+        },
         bbox=[77.38, 18.40, 77.46, 18.46],
         properties={"geology": "Delta front siltstone", "relief_m": 85.0},
     )
@@ -514,9 +520,9 @@ def populate_knowledge_graph_from_mission(
             p1 = coords[idx]
             p2 = coords[min(idx + step, len(coords) - 1)]
             seg_node = GraphNode(
-                node_id=f"seg:{route_id}_step_{i+1}",
+                node_id=f"seg:{route_id}_step_{i + 1}",
                 node_type=GraphNodeType.ROUTE_SEGMENT,
-                label=f"Route Segment {i+1} ({route_id})",
+                label=f"Route Segment {i + 1} ({route_id})",
                 description=f"Traverse segment from ({p1[0]:.4f}, {p1[1]:.4f}) to ({p2[0]:.4f}, {p2[1]:.4f}).",
                 spatial_extent={"type": "LineString", "coordinates": [p1, p2]},
                 bbox=[min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1])],

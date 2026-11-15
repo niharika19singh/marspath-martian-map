@@ -32,13 +32,15 @@ class ProvenanceValidatorJob(BaseCloudRunJob):
         verified_sources = []
         for s in sources:
             doi = s.citation_information.get("doi") if isinstance(s.citation_information, dict) else None
-            verified_sources.append({
-                "source_id": s.source_id,
-                "name": s.source_name,
-                "doi": doi,
-                "official_url": s.official_url,
-                "status": "PROVENANCE_CONFIRMED" if doi else "UNVERIFIED",
-            })
+            verified_sources.append(
+                {
+                    "source_id": s.source_id,
+                    "name": s.source_name,
+                    "doi": doi,
+                    "official_url": s.official_url,
+                    "status": "PROVENANCE_CONFIRMED" if doi else "UNVERIFIED",
+                }
+            )
 
         output_key = "catalog/provenance/provenance_audit_summary.json"
         data = json.dumps(verified_sources, indent=2).encode("utf-8")

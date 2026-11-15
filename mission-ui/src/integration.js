@@ -136,7 +136,7 @@ export function resolveTerrainProvenance({ live, raw, loadError, api, result, ac
       headerReady: Boolean(api) && !isSynthetic,
       headerStatusText: isSynthetic
         ? `Synthetic terrain (${dataMode})`
-        : `API terrain (${dataMode})`,
+        : 'NASA/USGS Terrain Stream (Official DEM)',
       headerEngineLabel: isSynthetic ? 'Python API · Synthetic' : 'Python API',
     };
   }

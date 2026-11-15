@@ -118,9 +118,7 @@ def compute_gaussian_filter_pixel_sigmas(
             f"correlation_length_m must be a positive finite number, got {correlation_length_m}."
         )
     if dx_meters <= 0.0 or dy_meters <= 0.0:
-        raise InvalidConstraintError(
-            f"Physical pixel sizes must be positive: dx={dx_meters}, dy={dy_meters}."
-        )
+        raise InvalidConstraintError(f"Physical pixel sizes must be positive: dx={dx_meters}, dy={dy_meters}.")
     sigma_x = float(correlation_length_m) / float(dx_meters)
     sigma_y = float(correlation_length_m) / float(dy_meters)
     return sigma_x, sigma_y
@@ -152,9 +150,7 @@ def generate_perturbed_elevation(
         (perturbed_elevation_f32, perturbation_f64, realized_valid_std_m)
     """
     if vertical_sigma_m <= 0.0 or not math.isfinite(vertical_sigma_m):
-        raise InvalidConstraintError(
-            f"vertical_sigma_m must be a positive finite number, got {vertical_sigma_m}."
-        )
+        raise InvalidConstraintError(f"vertical_sigma_m must be a positive finite number, got {vertical_sigma_m}.")
 
     sigma_x, sigma_y = compute_gaussian_filter_pixel_sigmas(
         correlation_length_m=correlation_length_m,
@@ -201,10 +197,7 @@ def generate_perturbed_elevation(
         perturbed_f32[nodata_mask] = baseline_elevation[nodata_mask]
 
     if valid_count >= 2:
-        realized_diff = (
-            perturbed_f32[valid_mask].astype(np.float64)
-            - baseline_elevation[valid_mask].astype(np.float64)
-        )
+        realized_diff = perturbed_f32[valid_mask].astype(np.float64) - baseline_elevation[valid_mask].astype(np.float64)
         realized_std = float(np.std(realized_diff, ddof=0))
     else:
         realized_std = 0.0
@@ -256,17 +249,11 @@ def compute_cost_regret_fraction(
     floating-point precision; never conceals genuine negative inconsistencies.
     """
     if scenario_optimal_cost <= 0.0 or not math.isfinite(scenario_optimal_cost):
-        raise ValueError(
-            f"scenario_optimal_cost must be positive and finite, got {scenario_optimal_cost}"
-        )
+        raise ValueError(f"scenario_optimal_cost must be positive and finite, got {scenario_optimal_cost}")
     if not math.isfinite(baseline_cost_in_scenario):
-        raise ValueError(
-            f"baseline_cost_in_scenario must be finite, got {baseline_cost_in_scenario}"
-        )
+        raise ValueError(f"baseline_cost_in_scenario must be finite, got {baseline_cost_in_scenario}")
 
-    raw_regret = (float(baseline_cost_in_scenario) - float(scenario_optimal_cost)) / float(
-        scenario_optimal_cost
-    )
+    raw_regret = (float(baseline_cost_in_scenario) - float(scenario_optimal_cost)) / float(scenario_optimal_cost)
     if -1e-9 <= raw_regret < 0.0:
         return 0.0
     return raw_regret
@@ -408,9 +395,7 @@ def _solve_scenario_objective(
     d_row, d_col = dest_px
     mode_label = scenario_graph.mode.value
 
-    if not scenario_graph.is_in_bounds(s_row, s_col) or not bool(
-        scenario_graph.traversable[s_row, s_col]
-    ):
+    if not scenario_graph.is_in_bounds(s_row, s_col) or not bool(scenario_graph.traversable[s_row, s_col]):
         return (
             "failed_untraversable_endpoint",
             [],
@@ -420,9 +405,7 @@ def _solve_scenario_objective(
             f"Start cell ({s_row}, {s_col}) became untraversable under mode '{mode_label}' in scenario {scenario_idx}.",
         )
 
-    if not scenario_graph.is_in_bounds(d_row, d_col) or not bool(
-        scenario_graph.traversable[d_row, d_col]
-    ):
+    if not scenario_graph.is_in_bounds(d_row, d_col) or not bool(scenario_graph.traversable[d_row, d_col]):
         return (
             "failed_untraversable_endpoint",
             [],
@@ -433,9 +416,7 @@ def _solve_scenario_objective(
         )
 
     for w_idx, (w_row, w_col) in enumerate(required_waypoints):
-        if not scenario_graph.is_in_bounds(w_row, w_col) or not bool(
-            scenario_graph.traversable[w_row, w_col]
-        ):
+        if not scenario_graph.is_in_bounds(w_row, w_col) or not bool(scenario_graph.traversable[w_row, w_col]):
             return (
                 "failed_untraversable_waypoint",
                 [],
@@ -540,9 +521,7 @@ def _build_route_interpretation(
                 "corridor shifted materially under the assumed terrain perturbations."
             )
     if mean_regret is not None:
-        parts.append(
-            f"Mean relative cost regret across feasible scenarios was {mean_regret:.4f}."
-        )
+        parts.append(f"Mean relative cost regret across feasible scenarios was {mean_regret:.4f}.")
     parts.append(MANDATORY_ROBUSTNESS_DISCLAIMER)
     return " ".join(parts)
 
@@ -793,9 +772,7 @@ class RobustnessService:
 
         # Snapshot read-only copy of baseline elevation and nodata mask
         baseline_elev_copy = np.array(cropped_elevation, copy=True)
-        baseline_nodata_mask, _ = compute_nodata_and_boundary_masks(
-            baseline_elev_copy, cropped_meta.nodata_value
-        )
+        baseline_nodata_mask, _ = compute_nodata_and_boundary_masks(baseline_elev_copy, cropped_meta.nodata_value)
 
         sigma_x, sigma_y = compute_gaussian_filter_pixel_sigmas(
             correlation_length_m=config.correlation_length_m,
@@ -841,9 +818,7 @@ class RobustnessService:
                     scenario_seed=scen_seed,
                 )
 
-                scen_nodata_mask, _ = compute_nodata_and_boundary_masks(
-                    perturbed_elev, cropped_meta.nodata_value
-                )
+                scen_nodata_mask, _ = compute_nodata_and_boundary_masks(perturbed_elev, cropped_meta.nodata_value)
                 scen_slope = compute_slope_degrees(
                     perturbed_elev,
                     dx_meters=dx_meters,
@@ -973,9 +948,7 @@ class RobustnessService:
                 comp_status, opt_nodes, opt_cost, opt_len_m, obj_expanded, comp_err = obj_res
 
                 if comp_status == "completed" and opt_cost is not None and opt_nodes:
-                    base_cnt, scen_cnt, shared_cnt, jaccard = compute_jaccard_route_overlap(
-                        r_nodes, opt_nodes
-                    )
+                    base_cnt, scen_cnt, shared_cnt, jaccard = compute_jaccard_route_overlap(r_nodes, opt_nodes)
                     jaccard_val: float | None = round(jaccard, 4)
                 else:
                     base_cnt = len(set(r_nodes))
@@ -1012,31 +985,21 @@ class RobustnessService:
                         scenario_optimal_node_count=scen_cnt,
                         shared_node_count=shared_cnt,
                         jaccard_overlap_fraction=jaccard_val,
-                        baseline_cost_in_scenario=(
-                            round(base_scen_cost, 2) if base_scen_cost is not None else None
-                        ),
+                        baseline_cost_in_scenario=(round(base_scen_cost, 2) if base_scen_cost is not None else None),
                         scenario_optimal_cost=(
-                            round(opt_cost, 2)
-                            if (comp_status == "completed" and opt_cost is not None)
-                            else None
+                            round(opt_cost, 2) if (comp_status == "completed" and opt_cost is not None) else None
                         ),
                         cost_regret_fraction=regret_rounded,
                         within_regret_threshold=within_thresh,
                         exceeds_regret_threshold=exceeds_thresh,
                         scenario_nodes_expanded=obj_expanded,
-                        scenario_route_length_meters=(
-                            opt_len_m if comp_status == "completed" else None
-                        ),
+                        scenario_route_length_meters=(opt_len_m if comp_status == "completed" else None),
                     )
                 )
 
             # Determine scenario-level status while preserving per-route statuses
-            completed_routes_in_scen = [
-                r_res for r_res in route_scen_results if r_res.comparison_status == "completed"
-            ]
-            failed_routes_in_scen = [
-                r_res for r_res in route_scen_results if r_res.comparison_status != "completed"
-            ]
+            completed_routes_in_scen = [r_res for r_res in route_scen_results if r_res.comparison_status == "completed"]
+            failed_routes_in_scen = [r_res for r_res in route_scen_results if r_res.comparison_status != "completed"]
 
             if len(completed_routes_in_scen) == len(route_scen_results) and route_scen_results:
                 scen_status = "completed"
@@ -1051,11 +1014,7 @@ class RobustnessService:
                 )
                 completed_count += 1
             else:
-                scen_status = (
-                    route_scen_results[0].comparison_status
-                    if route_scen_results
-                    else "failed_error"
-                )
+                scen_status = route_scen_results[0].comparison_status if route_scen_results else "failed_error"
                 scen_error = (
                     route_scen_results[0].comparison_error_reason
                     if route_scen_results
@@ -1076,14 +1035,10 @@ class RobustnessService:
                     terrain_generation_status="completed",
                     scenario_status=scen_status,
                     realized_perturbation_std_m=round(realized_std, 4),
-                    scenario_optimal_cost=(
-                        primary_ref.scenario_optimal_cost if primary_ref is not None else None
-                    ),
+                    scenario_optimal_cost=(primary_ref.scenario_optimal_cost if primary_ref is not None else None),
                     scenario_nodes_expanded=scen_total_expanded,
                     scenario_route_length_meters=(
-                        primary_ref.scenario_route_length_meters
-                        if primary_ref is not None
-                        else None
+                        primary_ref.scenario_route_length_meters if primary_ref is not None else None
                     ),
                     baseline_route_results=route_scen_results,
                     error_reason=scen_error,
@@ -1103,10 +1058,7 @@ class RobustnessService:
                 for b_res in s_res.baseline_route_results:
                     if b_res.route_id == r_id:
                         all_route_outcomes.append(b_res)
-                        if (
-                            s_res.terrain_generation_status == "completed"
-                            and not b_res.feasible
-                        ):
+                        if s_res.terrain_generation_status == "completed" and not b_res.feasible:
                             confirmed_baseline_infeasible_count += 1
                         if b_res.comparison_status == "completed":
                             completed_route_outcomes.append(b_res)
@@ -1124,24 +1076,16 @@ class RobustnessService:
                     for o in completed_route_outcomes
                     if o.jaccard_overlap_fraction is not None
                 ]
-                mean_overlap: float | None = (
-                    round(float(np.mean(overlaps)), 4) if overlaps else None
-                )
-                min_overlap: float | None = (
-                    round(float(np.min(overlaps)), 4) if overlaps else None
-                )
+                mean_overlap: float | None = round(float(np.mean(overlaps)), 4) if overlaps else None
+                min_overlap: float | None = round(float(np.min(overlaps)), 4) if overlaps else None
 
                 regrets = [
                     o.cost_regret_fraction
                     for o in completed_route_outcomes
                     if o.feasible and o.cost_regret_fraction is not None
                 ]
-                mean_regret: float | None = (
-                    round(float(np.mean(regrets)), 6) if regrets else None
-                )
-                max_regret: float | None = (
-                    round(float(np.max(regrets)), 6) if regrets else None
-                )
+                mean_regret: float | None = round(float(np.mean(regrets)), 6) if regrets else None
+                max_regret: float | None = round(float(np.max(regrets)), 6) if regrets else None
 
                 within_cnt = sum(1 for o in completed_route_outcomes if o.within_regret_threshold)
                 exceed_cnt = sum(1 for o in completed_route_outcomes if o.exceeds_regret_threshold)
@@ -1210,17 +1154,11 @@ class RobustnessService:
             )
 
         prov = provenance or {}
-        active_data_mode = str(
-            prov.get("data_mode", "synthetic_test_fixture" if is_synthetic else "real")
-        )
+        active_data_mode = str(prov.get("data_mode", "synthetic_test_fixture" if is_synthetic else "real"))
         primary_tier = (
             baseline_routes[0].evidence_passport.quality_tier
             if (baseline_routes and baseline_routes[0].evidence_passport is not None)
-            else (
-                EvidenceQualityTier.UNVERIFIED
-                if is_synthetic
-                else EvidenceQualityTier.LOW
-            )
+            else (EvidenceQualityTier.UNVERIFIED if is_synthetic else EvidenceQualityTier.LOW)
         )
 
         L_kernel = float(config.correlation_length_m)
@@ -1252,9 +1190,7 @@ class RobustnessService:
             actual_dy_meters=round(dy_meters, 3),
             theoretical_autocorrelation_sigma_m=round(autocorr_sigma_m, 4),
             theoretical_efolding_distance_m=round(efolding_dist_m, 4),
-            cost_regret_threshold_fraction=round(
-                float(config.cost_regret_threshold_fraction), 6
-            ),
+            cost_regret_threshold_fraction=round(float(config.cost_regret_threshold_fraction), 6),
         )
 
         return RouteRobustnessAssessment(

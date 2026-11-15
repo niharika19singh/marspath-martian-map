@@ -30,7 +30,9 @@ class ThemisProcessorJob(BaseCloudRunJob):
 
         themis_obs = catalog.get_themis_observations()
 
-        high_risk_count = sum(1 for o in themis_obs if o.thermal_inertia_tiu is not None and o.thermal_inertia_tiu < 150)
+        high_risk_count = sum(
+            1 for o in themis_obs if o.thermal_inertia_tiu is not None and o.thermal_inertia_tiu < 150
+        )
         bedrock_count = sum(1 for o in themis_obs if o.thermal_inertia_tiu is not None and o.thermal_inertia_tiu >= 300)
 
         output_key = "processed/thermal/themis_jezero_traversability.json"

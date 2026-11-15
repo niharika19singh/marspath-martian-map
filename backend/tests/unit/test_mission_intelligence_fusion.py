@@ -51,6 +51,7 @@ class TestDataFusionAndEvidenceModel:
 
     def test_meda_weather_normalization(self):
         from datetime import UTC, datetime
+
         obs_temp = UnifiedSourceNormalizer.normalize_meda_observation(
             sol=1050,
             timestamp_utc=datetime(2024, 2, 4, 14, 0, tzinfo=UTC),

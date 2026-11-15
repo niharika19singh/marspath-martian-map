@@ -313,7 +313,9 @@ export default function CloudAiPanel({
           <span className="cloud-icon-pill">MARS &bull; AI</span>
           <h2>AI Mission Intelligence &amp; Cloud Operations</h2>
           <span className="env-pill sandbox-pill">
-            {costs?.billing_protection_mode || 'ZERO_COST_LOCAL_SANDBOX'}
+            {costs?.billing_protection_mode === 'ZERO_COST_LOCAL_SANDBOX'
+              ? 'Zero-Cost Sandbox Mode'
+              : (costs?.billing_protection_mode || 'Zero-Cost Sandbox Mode')}
           </span>
         </div>
         <div className="cloud-tabs">
@@ -1109,6 +1111,27 @@ export default function CloudAiPanel({
                 disabled={isSubmittingChat}
               >
                 Explain Active Route Optimization
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setInputPrompt("What is the Marswalk Survivability Score for this corridor and what are the main limiting factors?")}
+                disabled={isSubmittingChat}
+              >
+                🥽 EVA Walkability & Consumables
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setInputPrompt("Where is the nearest topographic radiation shelter in Jezero if a Solar Particle Event occurs?")}
+                disabled={isSubmittingChat}
+              >
+                ⚡ SPE Radiation Shelter Proximity
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setInputPrompt("Evaluate regolith sinkage and boot traction along this path based on THEMIS thermal inertia.")}
+                disabled={isSubmittingChat}
+              >
+                🥾 Regolith Footing & Thermal Inertia
               </button>
             </div>
           </div>

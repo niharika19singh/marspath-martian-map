@@ -25,12 +25,8 @@ class LayerInfo(BaseModel):
         description="'tile_service' for direct web map display or 'analysis_derived' for internal routing matrices",
     )
     description: str = Field(..., description="Detailed layer scientific description")
-    units: str = Field(
-        ..., description="Physical measurement unit (e.g., meters, degrees, dimensionless)"
-    )
-    resolution_meters: float = Field(
-        ..., description="Spatial resolution per pixel in physical meters"
-    )
+    units: str = Field(..., description="Physical measurement unit (e.g., meters, degrees, dimensionless)")
+    resolution_meters: float = Field(..., description="Spatial resolution per pixel in physical meters")
     bounds: BoundingBox = Field(..., description="Spatial coverage extent")
     crs: CRSInfo = Field(..., description="Coordinate system definition")
     source_name: str = Field(..., description="Data source or terrain model name")
@@ -54,12 +50,8 @@ class LayerInfo(BaseModel):
         default=None,
         description="Explicit provenance status disclosure or limitation note",
     )
-    is_numerical: bool = Field(
-        ..., description="Whether layer contains floating-point physical values"
-    )
-    is_available: bool = Field(
-        ..., description="Whether layer is currently loaded and ready for queries"
-    )
+    is_numerical: bool = Field(..., description="Whether layer contains floating-point physical values")
+    is_available: bool = Field(..., description="Whether layer is currently loaded and ready for queries")
     is_renderable: bool = Field(
         default=False,
         description="True if layer can be directly rendered in OpenLayers/Leaflet via tile/raster URL",
@@ -68,9 +60,7 @@ class LayerInfo(BaseModel):
         default=None,
         description="WMTS or XYZ tile URL template if renderable",
     )
-    is_synthetic: bool = Field(
-        ..., description="True if operating on test fixture rather than verified NASA raster"
-    )
+    is_synthetic: bool = Field(..., description="True if operating on test fixture rather than verified NASA raster")
 
 
 class LayerListResponse(BaseModel):

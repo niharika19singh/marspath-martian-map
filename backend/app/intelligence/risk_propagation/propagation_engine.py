@@ -19,6 +19,7 @@ from backend.app.intelligence.risk_propagation.segment_evaluator import (
 
 class CausalTraceLink(BaseModel):
     """Explicit causal chain element tracing observation to operational mission impact."""
+
     observation_id: str
     observation_name: str
     instrument: str
@@ -31,6 +32,7 @@ class CausalTraceLink(BaseModel):
 
 class RouteRiskPropagationResult(BaseModel):
     """Subsystem-level risk propagation assessment across an entire mission traverse."""
+
     route_id: str
     evaluated_segments_count: int
     hazard_exposed_segments_count: int
@@ -113,7 +115,11 @@ class RiskPropagationEngine:
         causal_chains: list[CausalTraceLink] = []
 
         # Example A: Steep slope terrain hazard chain
-        slope_segments = [s.segment_index for s in segment_evals if any(h["hazard_type"] == "STEEP_SLOPE_EXCEEDANCE" for h in s.active_hazards)]
+        slope_segments = [
+            s.segment_index
+            for s in segment_evals
+            if any(h["hazard_type"] == "STEEP_SLOPE_EXCEEDANCE" for h in s.active_hazards)
+        ]
         if slope_segments:
             causal_chains.append(
                 CausalTraceLink(
@@ -129,7 +135,11 @@ class RiskPropagationEngine:
             )
 
         # Example B: THEMIS thermal sinkage chain
-        sinkage_segments = [s.segment_index for s in segment_evals if any(h["hazard_type"] == "UNCONSOLIDATED_REGOLITH_SINKAGE" for h in s.active_hazards)]
+        sinkage_segments = [
+            s.segment_index
+            for s in segment_evals
+            if any(h["hazard_type"] == "UNCONSOLIDATED_REGOLITH_SINKAGE" for h in s.active_hazards)
+        ]
         if sinkage_segments:
             causal_chains.append(
                 CausalTraceLink(

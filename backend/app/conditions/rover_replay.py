@@ -63,9 +63,7 @@ class RoverReplayService:
             lat = float(coords[1])
             elev = float(coords[2]) if len(coords) > 2 and coords[2] is not None else -2570.0
             dist_m = float(props.get("dist_m", props.get("drive_m", 0.0)) or 0.0)
-            total_m = float(
-                props.get("dist_total_m", props.get("odometry_m", props.get("total_m", 0.0))) or 0.0
-            )
+            total_m = float(props.get("dist_total_m", props.get("odometry_m", props.get("total_m", 0.0))) or 0.0)
             approx_dt = PERSEVERANCE_LANDING_UTC + timedelta(seconds=sol * MARS_SOL_SECONDS)
             item = {
                 "waypoint_index": idx,

@@ -88,7 +88,9 @@ class OrbiterProfile:
         factor = 1.5 * MARS_J2 * ((MARS_RADIUS_EQ / self.p) ** 2) * self.n
         self.d_raan_dt = -factor * math.cos(self.i_rad)
         # Apsidal precession (rad/s)
-        self.d_omega_dt = 0.75 * MARS_J2 * ((MARS_RADIUS_EQ / self.p) ** 2) * self.n * (5.0 * (math.cos(self.i_rad) ** 2) - 1.0)
+        self.d_omega_dt = (
+            0.75 * MARS_J2 * ((MARS_RADIUS_EQ / self.p) ** 2) * self.n * (5.0 * (math.cos(self.i_rad) ** 2) - 1.0)
+        )
 
 
 # Authoritative Mars Orbiter Catalog with official mission parameters

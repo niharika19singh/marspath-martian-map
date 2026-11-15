@@ -194,9 +194,7 @@ def test_candidate_route_comparison_numerical_grounding():
 def test_scientific_terrain_interpretation_evidence_typing():
     engine = get_mission_intelligence_engine()
 
-    res = engine.interpret_scientific_terrain(
-        route_summary={"total_distance_meters": 3280.0, "max_slope_deg": 11.4}
-    )
+    res = engine.interpret_scientific_terrain(route_summary={"total_distance_meters": 3280.0, "max_slope_deg": 11.4})
 
     assert "Jezero" in res.geological_setting
     assert len(res.measured_data_evidence) >= 2
@@ -329,7 +327,11 @@ def test_pdf_export_contains_ai_mission_intelligence():
                 "total_cost": 4073.2,
                 "summary": {"total_distance_meters": 3280.0, "max_slope_deg": 11.4},
                 "cost_breakdown": {"slope_penalty": 320.0, "base_distance_cost": 3280.0},
-                "turnaround": {"status": "FEASIBLE", "buffer_margin_minutes": 120.0, "total_traverse_duration_hours": 4.2},
+                "turnaround": {
+                    "status": "FEASIBLE",
+                    "buffer_margin_minutes": 120.0,
+                    "total_traverse_duration_hours": 4.2,
+                },
                 "robustness_assessment": {"total_scenarios_evaluated": 50, "reliability_score_pct": 94.0},
             }
         ],

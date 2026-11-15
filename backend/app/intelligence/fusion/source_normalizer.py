@@ -47,13 +47,15 @@ class UnifiedSourceNormalizer:
         default_bbox = bbox or [77.385, 18.365, 77.465, 18.465]
         geometry = {
             "type": "Polygon",
-            "coordinates": [[
-                [default_bbox[0], default_bbox[1]],
-                [default_bbox[2], default_bbox[1]],
-                [default_bbox[2], default_bbox[3]],
-                [default_bbox[0], default_bbox[3]],
-                [default_bbox[0], default_bbox[1]],
-            ]]
+            "coordinates": [
+                [
+                    [default_bbox[0], default_bbox[1]],
+                    [default_bbox[2], default_bbox[1]],
+                    [default_bbox[2], default_bbox[3]],
+                    [default_bbox[0], default_bbox[3]],
+                    [default_bbox[0], default_bbox[1]],
+                ]
+            ],
         }
         return NormalizedObservation(
             observation_id=f"obs_hirise_dtm_{product_id}",
@@ -77,7 +79,7 @@ class UnifiedSourceNormalizer:
             official_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZ_hirise_soc_006_dtm_1m",
             title="USGS HiRISE 1 m Digital Terrain Model (Jezero Crater)",
             description="1.0 m/pixel stereo photogrammetric DTM derived from MRO HiRISE stereo pairs ESP_045994_1985 and ESP_046060_1985.",
-            metadata={"product_id": product_id, "mission": "Mars 2020 Terrain Relative Navigation"}
+            metadata={"product_id": product_id, "mission": "Mars 2020 Terrain Relative Navigation"},
         )
 
     @staticmethod
@@ -89,13 +91,15 @@ class UnifiedSourceNormalizer:
         default_bbox = bbox or [77.380, 18.360, 77.470, 18.470]
         geometry = {
             "type": "Polygon",
-            "coordinates": [[
-                [default_bbox[0], default_bbox[1]],
-                [default_bbox[2], default_bbox[1]],
-                [default_bbox[2], default_bbox[3]],
-                [default_bbox[0], default_bbox[3]],
-                [default_bbox[0], default_bbox[1]],
-            ]]
+            "coordinates": [
+                [
+                    [default_bbox[0], default_bbox[1]],
+                    [default_bbox[2], default_bbox[1]],
+                    [default_bbox[2], default_bbox[3]],
+                    [default_bbox[0], default_bbox[3]],
+                    [default_bbox[0], default_bbox[1]],
+                ]
+            ],
         }
         return NormalizedObservation(
             observation_id=f"obs_hirise_ortho_{product_id}",
@@ -118,7 +122,7 @@ class UnifiedSourceNormalizer:
             official_url="https://astrogeology.usgs.gov/search/map/Mars/Mars2020/JEZ_hirise_soc_006_orthoMosaic_25cm",
             title="HiRISE Jezero Delta 25 cm Controlled Orthomosaic",
             description="Controlled, map-projected high-resolution visual imagery orthorectified to HiRISE TRN DTM.",
-            metadata={"product_id": product_id}
+            metadata={"product_id": product_id},
         )
 
     @staticmethod
@@ -126,13 +130,15 @@ class UnifiedSourceNormalizer:
         bbox = [77.0, 18.0, 78.0, 19.0]
         geometry = {
             "type": "Polygon",
-            "coordinates": [[
-                [bbox[0], bbox[1]],
-                [bbox[2], bbox[1]],
-                [bbox[2], bbox[3]],
-                [bbox[0], bbox[3]],
-                [bbox[0], bbox[1]],
-            ]]
+            "coordinates": [
+                [
+                    [bbox[0], bbox[1]],
+                    [bbox[2], bbox[1]],
+                    [bbox[2], bbox[3]],
+                    [bbox[0], bbox[3]],
+                    [bbox[0], bbox[1]],
+                ]
+            ],
         }
         return NormalizedObservation(
             observation_id="obs_mola_hrsc_blend_200m",
@@ -155,7 +161,7 @@ class UnifiedSourceNormalizer:
             official_url="https://astrogeology.usgs.gov/search/map/Mars/Topography/HRSC_MOLA_Blend/Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2",
             title="USGS MOLA-HRSC Blended Digital Elevation Model (200 m/px)",
             description="Regional/global blended topographic model combining Mars Express HRSC photogrammetry with Mars Global Surveyor MOLA precision altimetry.",
-            metadata={"product_id": "MarsHRSC_MOLA_BlendDEM_Global_200mp_v2"}
+            metadata={"product_id": "MarsHRSC_MOLA_BlendDEM_Global_200mp_v2"},
         )
 
     @staticmethod
@@ -211,7 +217,7 @@ class UnifiedSourceNormalizer:
             official_url="https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/MARS/mars_2020/meda.html",
             title=f"Perseverance MEDA In-Situ Meteorology (Sol {sol})",
             description="Calibrated surface temperature, pressure, wind, and aerosol opacity collected by MEDA on Mars 2020.",
-            metadata={"sol": sol}
+            metadata={"sol": sol},
         )
 
     @staticmethod
@@ -230,13 +236,15 @@ class UnifiedSourceNormalizer:
         bbox = [min_lon, min_lat, max_lon, max_lat]
         geometry = {
             "type": "Polygon",
-            "coordinates": [[
-                [min_lon, min_lat],
-                [max_lon, min_lat],
-                [max_lon, max_lat],
-                [min_lon, max_lat],
-                [min_lon, min_lat],
-            ]]
+            "coordinates": [
+                [
+                    [min_lon, min_lat],
+                    [max_lon, min_lat],
+                    [max_lon, max_lat],
+                    [min_lon, max_lat],
+                    [min_lon, min_lat],
+                ]
+            ],
         }
         # Classify traversability sinkage / mobility hazard based on thermal inertia
         if thermal_inertia < 150.0:
@@ -269,7 +277,7 @@ class UnifiedSourceNormalizer:
             official_url="https://themis.asu.edu/",
             title=f"THEMIS Thermal Inertia Observation [{product_id}]",
             description="Derived thermal inertia indicating surface particle size, bedrock fraction, and rover sinkage susceptibility.",
-            metadata={"thermal_inertia": thermal_inertia, "product_id": product_id}
+            metadata={"thermal_inertia": thermal_inertia, "product_id": product_id},
         )
 
     @staticmethod
@@ -285,7 +293,12 @@ class UnifiedSourceNormalizer:
         timestamp_utc: datetime,
     ) -> NormalizedObservation:
         geom = footprint_geojson or {"type": "Point", "coordinates": [center_lon, center_lat]}
-        bbox = _compute_bbox(geom.get("coordinates", [])) or [center_lon - 0.01, center_lat - 0.01, center_lon + 0.01, center_lat + 0.01]
+        bbox = _compute_bbox(geom.get("coordinates", [])) or [
+            center_lon - 0.01,
+            center_lat - 0.01,
+            center_lon + 0.01,
+            center_lat + 0.01,
+        ]
 
         return NormalizedObservation(
             observation_id=f"obs_orbit_{observation_id}",
@@ -355,7 +368,7 @@ class UnifiedSourceNormalizer:
             official_url="https://an.rsl.wustl.edu/",
             title=f"{rover_id.capitalize()} Surface Position · Sol {sol} ({site_name or waypoint_id})",
             description=f"Verified ground localization waypoint of the {rover_id.capitalize()} rover.",
-            metadata={"rover_id": rover_id, "sol": sol}
+            metadata={"rover_id": rover_id, "sol": sol},
         )
 
     @staticmethod
@@ -394,5 +407,5 @@ class UnifiedSourceNormalizer:
             doi=source_doi,
             title=f"Terrain Traversal Hazard: {hazard_type} ({severity})",
             description=f"Steep or rough localized surface anomaly identified from {source_dem_name}.",
-            metadata={"severity": severity, "source_dem": source_dem_name}
+            metadata={"severity": severity, "source_dem": source_dem_name},
         )

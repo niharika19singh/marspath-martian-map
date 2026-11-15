@@ -115,7 +115,12 @@ class PdsReleasesConnector(BaseDataSourceConnector):
         return {
             "authority": "NASA Planetary Data System (PDS) Central Node",
             "subscription_service_url": PDS_RELEASES_URL,
-            "monitored_missions": ["Mars 2020", "Mars Science Laboratory", "Mars Reconnaissance Orbiter", "2001 Mars Odyssey"],
+            "monitored_missions": [
+                "Mars 2020",
+                "Mars Science Laboratory",
+                "Mars Reconnaissance Orbiter",
+                "2001 Mars Odyssey",
+            ],
             "release_cadence": "Quarterly public releases per NASA PDS charter",
             "indexed_releases_count": len(AUTHENTIC_PDS_RELEASES),
             "latest_release": AUTHENTIC_PDS_RELEASES[0].model_dump(),

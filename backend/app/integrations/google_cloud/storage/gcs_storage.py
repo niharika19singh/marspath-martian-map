@@ -70,7 +70,9 @@ class GCSStorageAdapter(BaseStorageAdapter):
             self._init_error = "Package 'google-cloud-storage' not installed. Falling back to local storage adapter."
             logger.warning(self._init_error)
         except Exception as e:
-            self._init_error = f"Failed to authenticate with Google Cloud Storage: {e}. Falling back to local storage adapter."
+            self._init_error = (
+                f"Failed to authenticate with Google Cloud Storage: {e}. Falling back to local storage adapter."
+            )
             logger.warning(self._init_error)
 
     async def upload_bytes(
