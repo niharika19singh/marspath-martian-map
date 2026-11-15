@@ -10,10 +10,15 @@ from backend.app.core.config import Settings, get_settings
 from backend.app.integrations.ai.providers.base import BaseAIProvider
 from backend.app.integrations.ai.schemas.models import (
     AIProviderInfo,
+    CandidateRouteComparisonResponse,
     ImageryInterpretationResponse,
     MarsScienceChatResponse,
+    MissionRiskBriefingResponse,
+    NaturalLanguageMissionPlanResponse,
     RouteExplanationResponse,
+    ScientificTerrainInterpretationResponse,
 )
+from backend.app.intelligence.mission_intelligence import get_mission_intelligence_engine
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,10 @@ class AzureFoundryProvider(BaseAIProvider):
                 "text_chat",
                 "route_explanation_comparison",
                 "model_benchmarking",
+                "natural_language_mission_planning",
+                "candidate_route_comparison",
+                "scientific_terrain_interpretation",
+                "mission_risk_briefing",
             ],
             status_message=(
                 f"Configured with Azure deployment '{self.model_name}'"
@@ -221,4 +230,62 @@ class AzureFoundryProvider(BaseAIProvider):
             provider_used="Microsoft Azure AI Foundry",
             model_used=self.model_name,
             latency_ms=latency,
+        )
+
+    async def plan_mission_from_prompt(
+        self,
+        user_prompt: str,
+        current_coords: dict[str, float] | None = None,
+    ) -> NaturalLanguageMissionPlanResponse:
+        engine = get_mission_intelligence_engine()
+        return engine.parse_natural_language_mission(
+            user_prompt=user_prompt,
+            current_coords=current_coords,
+            provider_name="Microsoft Azure AI Foundry",
+            model_name=self.model_name,
+        )
+
+    async def compare_route_candidates(
+        self,
+        routes: list[dict[str, Any]],
+        mission_objective: str | None = None,
+    ) -> CandidateRouteComparisonResponse:
+        engine = get_mission_intelligence_engine()
+        return engine.compare_route_candidates(
+            routes=routes,
+            mission_objective=mission_objective,
+            provider_name="Microsoft Azure AI Foundry",
+            model_name=self.model_name,
+        )
+
+    async def interpret_scientific_terrain(
+        self,
+        route_summary: dict[str, Any] | None = None,
+        corridor_bounds: list[float] | None = None,
+        geological_focus: str | None = None,
+    ) -> ScientificTerrainInterpretationResponse:
+        engine = get_mission_intelligence_engine()
+        return engine.interpret_scientific_terrain(
+            route_summary=route_summary,
+            corridor_bounds=corridor_bounds,
+            geological_focus=geological_focus,
+            provider_name="Microsoft Azure AI Foundry",
+            model_name=self.model_name,
+        )
+
+    async def generate_mission_risk_briefing(
+        self,
+        selected_route: dict[str, Any],
+        operational_stress_suite: dict[str, Any] | None = None,
+        robustness_assessment: dict[str, Any] | None = None,
+        turnaround: dict[str, Any] | None = None,
+    ) -> MissionRiskBriefingResponse:
+        engine = get_mission_intelligence_engine()
+        return engine.generate_mission_risk_briefing(
+            selected_route=selected_route,
+            operational_stress_suite=operational_stress_suite,
+            robustness_assessment=robustness_assessment,
+            turnaround=turnaround,
+            provider_name="Microsoft Azure AI Foundry",
+            model_name=self.model_name,
         )

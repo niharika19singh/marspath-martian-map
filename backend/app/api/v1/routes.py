@@ -64,11 +64,13 @@ def export_mission_plan_pdf(payload: dict[str, Any]):
         plan_data = payload.get("plan") or payload
         selected_route_id = payload.get("selected_route_id")
         request_data = payload.get("request")
+        ai_mission_intel = payload.get("ai_mission_intel")
 
         pdf_bytes = generate_mission_pdf(
             plan_data=plan_data,
             selected_route_id=selected_route_id,
             request_data=request_data,
+            ai_mission_intel=ai_mission_intel,
         )
         mission_id = plan_data.get("mission_id", "jezero_mission")
         filename = f"marspath_mission_{mission_id}.pdf"

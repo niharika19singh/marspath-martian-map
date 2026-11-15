@@ -12,14 +12,22 @@ from backend.app.integrations.ai.providers.base import BaseAIProvider
 from backend.app.integrations.ai.providers.gemini import GeminiProvider
 from backend.app.integrations.ai.schemas.models import (
     AIProviderInfo,
+    CandidateRouteComparisonRequest,
+    CandidateRouteComparisonResponse,
     ImageryInterpretationRequest,
     ImageryInterpretationResponse,
     MarsScienceChatRequest,
     MarsScienceChatResponse,
+    MissionRiskBriefingRequest,
+    MissionRiskBriefingResponse,
     ModelComparisonRequest,
     ModelComparisonResponse,
+    NaturalLanguageMissionPlanRequest,
+    NaturalLanguageMissionPlanResponse,
     RouteExplanationRequest,
     RouteExplanationResponse,
+    ScientificTerrainInterpretationRequest,
+    ScientificTerrainInterpretationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -159,6 +167,49 @@ class MarsScienceAssistantService:
             comparison_summary=summary,
             latency_delta_ms=latency_delta,
             citation_alignment_score=1.0,
+        )
+
+    async def plan_mission_from_prompt(
+        self, request: NaturalLanguageMissionPlanRequest
+    ) -> NaturalLanguageMissionPlanResponse:
+        """Parses natural-language mission prompts into validated routing parameters."""
+        provider = self.get_provider(request.provider)
+        return await provider.plan_mission_from_prompt(
+            user_prompt=request.user_prompt,
+            current_coords=request.current_coords,
+        )
+
+    async def compare_route_candidates(
+        self, request: CandidateRouteComparisonRequest
+    ) -> CandidateRouteComparisonResponse:
+        """Compares route candidates with strict grounding on computed engineering metrics."""
+        provider = self.get_provider(request.provider)
+        return await provider.compare_route_candidates(
+            routes=request.routes,
+            mission_objective=request.mission_objective,
+        )
+
+    async def interpret_scientific_terrain(
+        self, request: ScientificTerrainInterpretationRequest
+    ) -> ScientificTerrainInterpretationResponse:
+        """Interprets terrain morphology and mineralogy with clear evidence provenance."""
+        provider = self.get_provider(request.provider)
+        return await provider.interpret_scientific_terrain(
+            route_summary=request.route_summary,
+            corridor_bounds=request.corridor_bounds,
+            geological_focus=request.geological_focus,
+        )
+
+    async def generate_mission_risk_briefing(
+        self, request: MissionRiskBriefingRequest
+    ) -> MissionRiskBriefingResponse:
+        """Synthesizes risk, stress testing, and return feasibility into an executive risk briefing."""
+        provider = self.get_provider(request.provider)
+        return await provider.generate_mission_risk_briefing(
+            selected_route=request.selected_route,
+            operational_stress_suite=request.operational_stress_suite,
+            robustness_assessment=request.robustness_assessment,
+            turnaround=request.turnaround,
         )
 
 

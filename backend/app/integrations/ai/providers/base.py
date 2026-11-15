@@ -5,9 +5,13 @@ from typing import Any
 
 from backend.app.integrations.ai.schemas.models import (
     AIProviderInfo,
+    CandidateRouteComparisonResponse,
     ImageryInterpretationResponse,
     MarsScienceChatResponse,
+    MissionRiskBriefingResponse,
+    NaturalLanguageMissionPlanResponse,
     RouteExplanationResponse,
+    ScientificTerrainInterpretationResponse,
 )
 
 
@@ -50,4 +54,43 @@ class BaseAIProvider(ABC):
         image_bytes: bytes | None = None,
     ) -> ImageryInterpretationResponse:
         """Performs visual morphological analysis with mandatory scientific caveats."""
+        pass
+
+    @abstractmethod
+    async def plan_mission_from_prompt(
+        self,
+        user_prompt: str,
+        current_coords: dict[str, float] | None = None,
+    ) -> NaturalLanguageMissionPlanResponse:
+        """Parses natural-language mission objective into structured, validated routing parameters."""
+        pass
+
+    @abstractmethod
+    async def compare_route_candidates(
+        self,
+        routes: list[dict[str, Any]],
+        mission_objective: str | None = None,
+    ) -> CandidateRouteComparisonResponse:
+        """Compares route candidates with strict grounding on computed engineering metrics."""
+        pass
+
+    @abstractmethod
+    async def interpret_scientific_terrain(
+        self,
+        route_summary: dict[str, Any] | None = None,
+        corridor_bounds: list[float] | None = None,
+        geological_focus: str | None = None,
+    ) -> ScientificTerrainInterpretationResponse:
+        """Interprets terrain morphology and mineralogy with clear evidence provenance."""
+        pass
+
+    @abstractmethod
+    async def generate_mission_risk_briefing(
+        self,
+        selected_route: dict[str, Any],
+        operational_stress_suite: dict[str, Any] | None = None,
+        robustness_assessment: dict[str, Any] | None = None,
+        turnaround: dict[str, Any] | None = None,
+    ) -> MissionRiskBriefingResponse:
+        """Synthesizes risk, stress testing, and return feasibility into an executive risk briefing."""
         pass

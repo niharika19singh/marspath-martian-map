@@ -1459,7 +1459,45 @@ function App() {
               onHighlightSegment={idx => {}}
             />
           ) : cloudAiMode ? (
-            <CloudAiPanel activeRoute={active} currentCoords={start} />
+            <CloudAiPanel
+              activeRoute={active}
+              currentCoords={start}
+              allRoutes={result?.routes || (active ? [active] : [])}
+              onSelectCandidate={(routeId) => {
+                setSelected(routeId);
+                setHover(null);
+              }}
+              onExecutePlan={(extracted) => {
+                if (extracted.resolved_start) {
+                  setStart({
+                    lon: String(extracted.resolved_start.lon),
+                    lat: String(extracted.resolved_start.lat),
+                  });
+                }
+                if (extracted.resolved_destination) {
+                  setDestination({
+                    lon: String(extracted.resolved_destination.lon),
+                    lat: String(extracted.resolved_destination.lat),
+                  });
+                }
+                if (extracted.routing_profile) {
+                  setMode(extracted.routing_profile);
+                }
+                if (extracted.constraints?.max_slope_deg) {
+                  setMaxSlope(Number(extracted.constraints.max_slope_deg));
+                }
+                if (extracted.constraints?.eva_time_budget_hours) {
+                  setEvaBudgetHours(Number(extracted.constraints.eva_time_budget_hours));
+                }
+                const req = buildRequest({
+                  start: extracted.resolved_start ? { lon: Number(extracted.resolved_start.lon), lat: Number(extracted.resolved_start.lat) } : undefined,
+                  destination: extracted.resolved_destination ? { lon: Number(extracted.resolved_destination.lon), lat: Number(extracted.resolved_destination.lat) } : undefined,
+                  mode: extracted.routing_profile || mode,
+                  max_eva_hours: extracted.constraints?.eva_time_budget_hours || evaBudgetHours,
+                });
+                run(req);
+              }}
+            />
           ) : nasaDataMode ? (
             <NasaDataPanel
               apiUrl={api?.url || apiUrl || ''}
