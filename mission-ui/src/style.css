@@ -2410,47 +2410,162 @@
   }
 }
 
-/* Traverse Legend HUD & Highlight Styling */
+/* Consolidated Recorded Traverse & Navigation HUD */
+.recorded-traverse-hud,
 .traverse-legend-hud {
   position: absolute;
-  top: 78px;
+  top: 54px;
   transform: translateX(-50%);
-  z-index: 25;
+  z-index: 6;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 6px 14px;
+  gap: 10px;
+  padding: 4px 12px;
   border-radius: 999px;
-  background: rgba(9, 15, 18, 0.88);
+  background: rgba(9, 15, 18, 0.90);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(12px);
-  font-size: 11px;
+  backdrop-filter: blur(14px);
+  font-size: 10.5px;
   color: #c9d6cf;
   white-space: nowrap;
   pointer-events: auto;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
-  transition: left 0.22s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  transition: left 0.22s ease, max-width 0.22s ease;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+/* Go to Location Dropdown Menu */
+.goto-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.goto-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #e2ede7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+.goto-btn:hover,
+.goto-btn.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(92, 255, 176, 0.35);
+  color: #ffffff;
+}
+.goto-btn strong {
+  color: #5cffb0;
+  font-weight: 600;
+}
+.dropdown-caret {
+  font-size: 9px;
+  opacity: 0.7;
+}
+.goto-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 210px;
+  background: rgba(8, 14, 18, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  padding: 6px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.goto-dropdown-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #7b9286;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 2px;
+}
+.goto-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+  width: 100%;
+}
+.goto-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.goto-dropdown-item.active {
+  background: rgba(92, 255, 176, 0.12);
+}
+.goto-item-labels {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.goto-item-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e6ebe9;
+}
+.goto-dropdown-item.active .goto-item-name {
+  color: #5cffb0;
+}
+.goto-item-sub {
+  font-size: 9.5px;
+  color: #8da197;
+}
+
+.hud-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .traverse-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
+.traverse-swatch.passive-road,
 .traverse-swatch.passive {
   display: inline-block;
   width: 16px;
-  height: 2.5px;
+  height: 2.2px;
   border-radius: 2px;
-  background: #bfa07a;
-  box-shadow: 0 0 0 1px #090d10ee;
+  background: #9c9489;
+  box-shadow: 0 0 0 1px rgba(10, 14, 18, 0.7);
 }
+.traverse-swatch.amber-glow,
 .traverse-swatch.highlighted {
   display: inline-block;
   width: 16px;
-  height: 3.5px;
+  height: 3.2px;
   border-radius: 2px;
   background: #ffb867;
-  box-shadow: 0 0 5px rgba(255, 184, 103, 0.6);
+  box-shadow: 0 0 6px rgba(255, 184, 103, 0.65);
+}
+.traverse-swatch.planned-mint {
+  display: inline-block;
+  width: 16px;
+  height: 3.2px;
+  border-radius: 2px;
+  background: #5cffb0;
+  box-shadow: 0 0 6px rgba(92, 255, 176, 0.65);
 }
 .traverse-marker-dot {
   display: inline-block;
@@ -2495,6 +2610,7 @@
   border-radius: 3px;
 }
 @media (max-width: 850px) {
+  .recorded-traverse-hud,
   .traverse-legend-hud {
     top: auto;
     bottom: 110px;

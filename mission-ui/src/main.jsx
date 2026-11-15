@@ -187,23 +187,55 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      fetch(getAssetUrl('/mission-data/perseverance-traverse.geojson')),
-      fetch(getAssetUrl('/mission-data/perseverance-waypoints.geojson'))
-    ])
-      .then(async rs => {
-        if (rs.some(r => !r.ok)) throw Error('The recorded traverse could not load.');
-        const [t, w] = await Promise.all(rs.map(r => r.json()));
-        validateTraverse(t);
-        if (cancelled) return;
-        setTraverse(t);
-        setWaypointData(w);
-        setSolCut(Math.max(...t.features.map(f => f.properties.sol)));
-        setHistoryFit(n => n + 1);
-      })
-      .catch(e => {
-        if (!cancelled) setTraverseError(e.message);
-      });
+    async function loadTraverseData() {
+      let t = null;
+      let w = null;
+      // Gracefully attempt to refresh from official NASA/JPL MMGIS feed if accessible
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3500);
+        const [onlineT, onlineW] = await Promise.all([
+          fetch('https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_traverse.json', { signal: controller.signal }),
+          fetch('https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_waypoints.json', { signal: controller.signal }),
+        ]);
+        clearTimeout(timeout);
+        if (onlineT.ok && onlineW.ok) {
+          const [parsedT, parsedW] = await Promise.all([onlineT.json(), onlineW.json()]);
+          validateTraverse(parsedT);
+          t = parsedT;
+          w = parsedW;
+        }
+      } catch (err) {
+        // Upstream unavailable or blocked; fall back to verified bundled snapshot
+      }
+
+      // If upstream failed or returned empty, load validated local snapshot
+      if (!t || !w) {
+        try {
+          const rs = await Promise.all([
+            fetch(getAssetUrl('/mission-data/perseverance-traverse.geojson')),
+            fetch(getAssetUrl('/mission-data/perseverance-waypoints.geojson')),
+          ]);
+          if (rs.some(r => !r.ok)) throw Error('The recorded traverse could not load.');
+          const [parsedT, parsedW] = await Promise.all(rs.map(r => r.json()));
+          validateTraverse(parsedT);
+          t = parsedT;
+          w = parsedW;
+        } catch (err) {
+          if (!cancelled) setTraverseError(err.message);
+          return;
+        }
+      }
+
+      if (cancelled) return;
+      setTraverse(t);
+      setWaypointData(w);
+      const maxS = Math.max(...t.features.map(f => f.properties.sol));
+      setSolCut(maxS);
+      setHistoryFit(n => n + 1);
+    }
+
+    loadTraverseData();
     return () => {
       cancelled = true;
     };
@@ -315,7 +347,7 @@ function App() {
   const [departureUtc, setDepartureUtc] = useState('2026-06-15T08:00:00Z');
   const [daylightBufferMinutes, setDaylightBufferMinutes] = useState(0);
   const [rescueThresholdMinutes, setRescueThresholdMinutes] = useState(30);
-  const [showReachableZone, setShowReachableZone] = useState(true);
+  const [showReachableZone, setShowReachableZone] = useState(false);
   const [showRescueMap, setShowRescueMap] = useState(false);
 
   // Results & analysis state
@@ -1273,61 +1305,6 @@ function App() {
           </span>
           <span className="quick-badge-arrow">›</span>
         </div>
-
-        {/* Phase 5.A: Floating Route Candidate Selector on Primary Map HUD */}
-        {result?.routes?.length > 0 && missionView === 'planner' && (
-          <div
-            className="floating-candidate-hud glass"
-            role="group"
-            aria-label="Primary route candidate selector"
-            data-testid="floating-candidate-hud"
-            style={{
-              left: `calc(50% + ${((leftOpen ? 372 : 24) - (plannerMode ? (rightExpanded ? 452 : 392) : 24)) / 2}px)`,
-            }}
-          >
-            <div className="candidate-hud-label">
-              <span className="hud-badge-dot" />
-              <span>Route Candidates</span>
-            </div>
-            {result.routes.map((r, i) => {
-              const isSelected = r.route_id === (selected || result.routes[0].route_id);
-              const title = i === 0 ? 'Primary Route' : (i === 1 ? 'Alternative Corridor' : 'Safety Backup');
-              const energyVal = r.summary?.energy_index ?? r.summary?.observed_energy_index_partial ?? 1.0;
-              return (
-                <button
-                  key={r.route_id}
-                  type="button"
-                  className={`candidate-hud-pill ${isSelected ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelected(r.route_id);
-                    setHover(null);
-                  }}
-                  onPointerEnter={() => setHoveredRoute(r.route_id)}
-                  onPointerLeave={() => setHoveredRoute(null)}
-                  aria-pressed={isSelected}
-                  title={`Switch to ${title} (${r.route_id})`}
-                >
-                  <div className="candidate-hud-header">
-                    <span className={`hud-dot dot-${i}`} />
-                    <span>{title}</span>
-                    {r.is_pareto_optimal && <span className="pareto-mini-tag">Pareto</span>}
-                  </div>
-                  <div className="candidate-hud-metrics">
-                    <span>{fmt(r.summary?.total_distance_meters / 1000, 2)} km</span>
-                    <span>·</span>
-                    <span>{Number.isFinite(r.summary?.estimated_duration_hours) ? fmt(r.summary.estimated_duration_hours, 1) + ' h' : '—'}</span>
-                    <span>·</span>
-                    <span>{fmt(r.total_cost, 0)} cost</span>
-                    <span>·</span>
-                    <span>Slope {fmt(r.summary?.max_slope_deg ?? r.summary?.max_slope_degrees ?? 0, 1)}°</span>
-                    <span>·</span>
-                    <span>{fmt(energyVal, 2)}× effort</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
 
         {!leftOpen && (
           <button className="route-reopen glass" onClick={() => setLeftOpen(true)} aria-label="Open mission control panel">

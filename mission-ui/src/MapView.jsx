@@ -97,10 +97,23 @@ export default function MapView(props) {
     onSelectObservation, onSelectSpacecraft, curiosityTraverse = null, curiosityWaypoints = [], focusedProduct = null,
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
-    showReachableZone = true, showRescueMap = false,
+    showReachableZone = false, showRescueMap = false,
   } = props;
 
   const [selectedScienceTarget, setSelectedScienceTarget] = useState(null);
+  const [gotoOpen, setGotoOpen] = useState(false);
+  const gotoMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!gotoOpen) return;
+    const onDocClick = e => {
+      if (gotoMenuRef.current && !gotoMenuRef.current.contains(e.target)) {
+        setGotoOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDocClick);
+    return () => document.removeEventListener('pointerdown', onDocClick);
+  }, [gotoOpen]);
 
   const effectiveTerrain = activeDemTerrain || terrain;
   const terrainRef = useRef(effectiveTerrain);
@@ -781,10 +794,11 @@ export default function MapView(props) {
       const f = new Feature({ geometry: new Point([tgt.lon, tgt.lat]), scienceTarget: tgt });
       f.setStyle((feature, resolution) => {
         const resM = resolution * M_PER_DEG;
+        if (!isSelected && resM > 6.0) return null; // Off in default overview
         const showLabel = isSelected || resM <= 3.5;
         return new Style({
           image: new CircleStyle({
-            radius: isSelected ? 7 : (resM > 12 ? 3.5 : 5),
+            radius: isSelected ? 7 : (resM > 12 ? 3 : 4.5),
             fill: new Fill({ color: isSelected ? '#5cffb0' : '#ffd166' }),
             stroke: new Stroke({ color: '#141008', width: isSelected ? 2.5 : 1.5 }),
           }),
@@ -1160,7 +1174,7 @@ export default function MapView(props) {
         }),
         new Style({
           text: new Text({
-            text: `Perseverance · ${Math.round(currentPlayback.distTraveled)} m (${Math.round(currentPlayback.headingDeg)}°)`,
+            text: `Simulated rover · ${Math.round(currentPlayback.distTraveled)} m (${Math.round(currentPlayback.headingDeg)}°)`,
             font: '600 11px Inter, sans-serif',
             offsetY: -22,
             fill: new Fill({ color: '#5cffb0' }),
@@ -1195,10 +1209,10 @@ export default function MapView(props) {
       });
       f.setStyle([
         new Style({
-          stroke: new Stroke({ color: '#090d10ee', width: 4.5, lineCap: 'round', lineJoin: 'round' }),
+          stroke: new Stroke({ color: 'rgba(10, 14, 18, 0.65)', width: 3.2, lineCap: 'round', lineJoin: 'round' }),
         }),
         new Style({
-          stroke: new Stroke({ color: '#bfa07a', width: 1.8, lineCap: 'round', lineJoin: 'round' }),
+          stroke: new Stroke({ color: '#9c9489', width: 1.5, lineCap: 'round', lineJoin: 'round' }),
         }),
       ]);
       src.addFeature(f);
@@ -1221,13 +1235,16 @@ export default function MapView(props) {
       });
       f.setStyle([
         new Style({
-          stroke: new Stroke({ color: '#090d10ee', width: 8.5, lineCap: 'round', lineJoin: 'round' }),
+          stroke: new Stroke({ color: 'rgba(255, 170, 60, 0.20)', width: 8.5, lineCap: 'round', lineJoin: 'round' }),
         }),
         new Style({
-          stroke: new Stroke({ color: '#ffb867', width: 4.2, lineCap: 'round', lineJoin: 'round' }),
+          stroke: new Stroke({ color: 'rgba(255, 184, 103, 0.50)', width: 4.8, lineCap: 'round', lineJoin: 'round' }),
         }),
         new Style({
-          stroke: new Stroke({ color: '#ffeab8', width: 1.6, lineCap: 'round', lineJoin: 'round' }),
+          stroke: new Stroke({ color: '#ffb867', width: 2.6, lineCap: 'round', lineJoin: 'round' }),
+        }),
+        new Style({
+          stroke: new Stroke({ color: '#fff3db', width: 1.0, lineCap: 'round', lineJoin: 'round' }),
         }),
       ]);
       src.addFeature(f);
@@ -1282,18 +1299,21 @@ export default function MapView(props) {
       const isCurrent = w === activeWp;
       if (isCurrent) return;
       const f = new Feature({ geometry: new Point([c[0], c[1]]), waypoint: w });
-      f.setStyle(
-        new Style({
+      const isSelected = waypoint && (waypoint.properties?.RMC === w.properties?.RMC || waypoint.properties?.sol === w.properties?.sol);
+      f.setStyle((feature, resolution) => {
+        const resM = resolution * M_PER_DEG;
+        if (!isSelected && resM > 1.8) return null; // Strip out per-segment dots in overview
+        return new Style({
           image: new CircleStyle({
-            radius: 3.5,
-            fill: new Fill({ color: '#f6a7f3' }),
-            stroke: new Stroke({ color: '#18151e', width: 1.5 }),
+            radius: isSelected ? 6 : 2.5,
+            fill: new Fill({ color: isSelected ? '#ffb867' : '#d8cbba' }),
+            stroke: new Stroke({ color: '#101518', width: isSelected ? 2 : 1 }),
           }),
-        })
-      );
+        });
+      });
       pinsSrc.addFeature(f);
     });
-  }, [waypoints, roverWaypoint, showHistory, showWaypoints, maxSol]);
+  }, [waypoints, roverWaypoint, showHistory, showWaypoints, maxSol, waypoint]);
 
   const fitFullTraverse = () => {
     if (view3d) { terrain3D.current?.fit(); return; }
@@ -1518,7 +1538,7 @@ export default function MapView(props) {
   const rightInset = !historyMode ? (rightExpanded ? 452 : 392) : 76;
   const corridorCenterStyle = `calc(50% + ${(leftInset - rightInset) / 2}px)`;
   const corridorWidthStyle = `calc(100vw - ${leftInset + rightInset}px)`;
-  const showPlaybackDeck = !historyMode && Boolean(currentPlayback);
+  const showPlaybackDeck = !historyMode && Boolean(currentPlayback && (isPlaying || playbackProgress > 0));
   const inspectBottomOffset = profileExpanded
     ? undefined
     : showPlaybackDeck
@@ -1543,75 +1563,105 @@ export default function MapView(props) {
         <span />Jezero Crater <small>18.41°N · 77.42°E</small>
       </div>
 
-      {/* Planetary Bookmark Bar */}
-      <div
-        className="planetary-bookmark-bar glass"
-        role="region"
-        aria-label="Planetary region bookmarks"
-        style={{
-          left: corridorCenterStyle,
-          maxWidth: corridorWidthStyle,
-        }}
-      >
-        {PLANETARY_BOOKMARKS.map(bm => (
-          <button
-            key={bm.id}
-            type="button"
-            className={activeBookmark === bm.id ? 'active' : ''}
-            onClick={() => {
-              interact();
-              focus({ lon: bm.lon, lat: bm.lat, resolution: bm.resolution });
-              onSelectBookmark?.(bm);
-            }}
-            title={bm.sub}
-          >
-            <span className="bm-dot" style={{ background: bm.hasDem ? '#5cffb0' : '#64dfdf' }} />
-            {bm.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Traverse Legend HUD (Full Archive + Highlighted 15-sol Window) */}
+      {/* Consolidated Recorded Traverse & Navigation HUD */}
       {showHistory && (
         <div
-          className="traverse-legend-hud glass"
+          className="recorded-traverse-hud glass"
           style={{
             left: corridorCenterStyle,
             maxWidth: corridorWidthStyle,
-            top: (showRoute && response?.routes?.length) ? '134px' : undefined,
           }}
           data-testid="traverse-legend-hud"
         >
-          <div className="traverse-legend-item">
-            <span className="traverse-swatch passive" />
+          {/* Go to Location Dropdown Menu */}
+          <div className="goto-menu-wrapper" ref={gotoMenuRef}>
+            <button
+              type="button"
+              className={`goto-btn ${gotoOpen ? 'active' : ''}`}
+              onClick={() => setGotoOpen(v => !v)}
+              aria-expanded={gotoOpen}
+              aria-haspopup="true"
+              title="Go to location on Mars"
+            >
+              <span>📍 Go to: <strong>{PLANETARY_BOOKMARKS.find(b => b.id === activeBookmark)?.label || 'Jezero'}</strong></span>
+              <span className="dropdown-caret">▾</span>
+            </button>
+            {gotoOpen && (
+              <div className="goto-dropdown glass" role="menu">
+                <div className="goto-dropdown-title">Planetary Landmarks</div>
+                {PLANETARY_BOOKMARKS.map(bm => (
+                  <button
+                    key={bm.id}
+                    type="button"
+                    role="menuitem"
+                    className={`goto-dropdown-item ${activeBookmark === bm.id ? 'active' : ''}`}
+                    onClick={() => {
+                      interact();
+                      focus({ lon: bm.lon, lat: bm.lat, resolution: bm.resolution });
+                      onSelectBookmark?.(bm);
+                      setGotoOpen(false);
+                    }}
+                  >
+                    <span className="bm-dot" style={{ background: bm.hasDem ? '#5cffb0' : '#64dfdf' }} />
+                    <div className="goto-item-labels">
+                      <span className="goto-item-name">{bm.label}</span>
+                      <small className="goto-item-sub">{bm.sub}</small>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="hud-divider" />
+
+          {/* Full Recorded Traverse Swatch */}
+          <div className="traverse-legend-item" title="Complete NASA/JPL published drive archive through Sol 2022">
+            <span className="traverse-swatch passive-road" />
             <span>Full recorded traverse</span>
           </div>
-          <div className="traverse-legend-item">
-            <span className="traverse-swatch highlighted" />
+
+          {/* 15-Sol Glow Swatch */}
+          <div className="traverse-legend-item" title="Trailing 15-sol elapsed observation window">
+            <span className="traverse-swatch amber-glow" />
             <span>
               Highlighted window: <strong>15 sols</strong> (Sol {Math.max(0, (solCut ?? 2022) - 14)}–{solCut ?? 2022})
             </span>
           </div>
+
+          {/* Planned Route Swatch (when active) */}
+          {showRoute && response?.routes?.length > 0 && (
+            <div className="traverse-legend-item" title="Active computed navigation plan">
+              <span className="traverse-swatch planned-mint" />
+              <span>Planned route</span>
+            </div>
+          )}
+
+          {/* Rover Marker Info */}
           <div className="traverse-legend-item">
             <span className="traverse-marker-dot" />
             <span>
               {(solCut ?? 2022) >= (maxSol || 2022)
                 ? `Last recorded position · Sol ${maxSol || 2022}`
-                : `Perseverance position · Sol ${solCut}`}
+                : `Perseverance · Sol ${solCut}`}
             </span>
           </div>
+
+          {/* Empty Window Notice */}
           {windowStats && windowStats.segments === 0 && (
             <span className="empty-window-pill">
               No recorded drives in this window
             </span>
           )}
+
+          {/* Fit Full Traverse Action */}
           <button
             type="button"
             className="fit-traverse-btn"
             onClick={() => { interact(); fitFullTraverse(); }}
             title="Fit full recorded traverse in view"
           >
-            Fit full traverse
+            <Icon name="fit" /> Fit full traverse
           </button>
         </div>
       )}
