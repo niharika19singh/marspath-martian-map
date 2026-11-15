@@ -335,7 +335,7 @@ function App() {
   const [rightExpanded, setRightExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [robustnessSettingsOpen, setRobustnessSettingsOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const [profileExpanded, setProfileExpanded] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [showRoute, setShowRoute] = useState(() => new URLSearchParams(location.search).get('view') === 'planner');
@@ -1250,6 +1250,61 @@ function App() {
           <span className="quick-badge-arrow">›</span>
         </div>
 
+        {/* Phase 5.A: Floating Route Candidate Selector on Primary Map HUD */}
+        {result?.routes?.length > 0 && missionView === 'planner' && (
+          <div
+            className="floating-candidate-hud glass"
+            role="group"
+            aria-label="Primary route candidate selector"
+            data-testid="floating-candidate-hud"
+            style={{
+              left: `calc(50% + ${((leftOpen ? 372 : 24) - (plannerMode ? (rightExpanded ? 452 : 392) : 24)) / 2}px)`,
+            }}
+          >
+            <div className="candidate-hud-label">
+              <span className="hud-badge-dot" />
+              <span>Route Candidates</span>
+            </div>
+            {result.routes.map((r, i) => {
+              const isSelected = r.route_id === (selected || result.routes[0].route_id);
+              const title = i === 0 ? 'Primary Route' : (i === 1 ? 'Alternative Corridor' : 'Safety Backup');
+              const energyVal = r.summary?.energy_index ?? r.summary?.observed_energy_index_partial ?? 1.0;
+              return (
+                <button
+                  key={r.route_id}
+                  type="button"
+                  className={`candidate-hud-pill ${isSelected ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelected(r.route_id);
+                    setHover(null);
+                  }}
+                  onPointerEnter={() => setHoveredRoute(r.route_id)}
+                  onPointerLeave={() => setHoveredRoute(null)}
+                  aria-pressed={isSelected}
+                  title={`Switch to ${title} (${r.route_id})`}
+                >
+                  <div className="candidate-hud-header">
+                    <span className={`hud-dot dot-${i}`} />
+                    <span>{title}</span>
+                    {r.is_pareto_optimal && <span className="pareto-mini-tag">Pareto</span>}
+                  </div>
+                  <div className="candidate-hud-metrics">
+                    <span>{fmt(r.summary?.total_distance_meters / 1000, 2)} km</span>
+                    <span>·</span>
+                    <span>{Number.isFinite(r.summary?.estimated_duration_hours) ? fmt(r.summary.estimated_duration_hours, 1) + ' h' : '—'}</span>
+                    <span>·</span>
+                    <span>{fmt(r.total_cost, 0)} cost</span>
+                    <span>·</span>
+                    <span>Slope {fmt(r.summary?.max_slope_deg ?? r.summary?.max_slope_degrees ?? 0, 1)}°</span>
+                    <span>·</span>
+                    <span>{fmt(energyVal, 2)}× effort</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {!leftOpen && (
           <button className="route-reopen glass" onClick={() => setLeftOpen(true)} aria-label="Open mission control panel">
             <Icon name="sliders" />
@@ -2036,8 +2091,14 @@ function App() {
                   unit={Number.isFinite(active?.summary?.estimated_duration_hours) ? 'hrs' : 'ETA unavail'}
                   primary
                 />
+                <Metric
+                  label="Energy Index / Effort"
+                  value={active?.summary?.energy_index ?? active?.summary?.observed_energy_index_partial ?? 1.0}
+                  digits={2}
+                  unit="× flat"
+                />
 
-              {rightExpanded && (
+                {rightExpanded && (
                   <>
                     <Metric label="Weighted cost" value={active?.total_cost} digits={0} unit="units" />
                     <Metric
@@ -2098,6 +2159,68 @@ function App() {
                   {/* TAB 1: OVERVIEW */}
                   {analysisTab === 'overview' && (
                     <div className="tab-pane overview-pane" role="tabpanel">
+                      {/* Phase 5.E: Advanced Mission Intelligence Deep-Link Entry Points */}
+                      <div className="advanced-intel-bar" data-testid="advanced-intel-navigation">
+                        <div style={{ width: '100%', fontSize: '10.5px', color: '#8ba295', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px', fontWeight: 600 }}>
+                          Advanced Mission Intelligence Entry Points:
+                        </div>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setRightExpanded(true);
+                            setAnalysisTab('robustness');
+                          }}
+                          title="Open Monte Carlo terrain uncertainty perturbation and reliability assessment"
+                        >
+                          🛡️ Uncertainty &amp; Robustness
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('science');
+                          }}
+                          title="Open Pareto multi-objective trade-off explorer"
+                        >
+                          ⚖️ Pareto Trade-off Explorer
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('uncertainty');
+                          }}
+                          title="Open Next-Best-Reconnaissance observation targets"
+                        >
+                          🛰️ Next-Best-Reconnaissance
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('science');
+                          }}
+                          title="Inspect Scientific Return per EVA Hour and Geological Targets"
+                        >
+                          🔬 Science Return per EVA Hour
+                        </button>
+                        <button
+                          type="button"
+                          className="intel-pill-btn"
+                          onClick={() => {
+                            setProfileExpanded(true);
+                            setActiveProfileTab('stress');
+                          }}
+                          title="Run 7-Scenario Operational Mission Stress Testing"
+                        >
+                          ⚡ Mission Stress Testing
+                        </button>
+                      </div>
+
                       <div className="route-candidates" role="group" aria-label="Route candidates">
                         {result?.routes.map((r, i) => (
                           <button
@@ -2129,6 +2252,81 @@ function App() {
                           </p>
                         )}
                       </div>
+
+                      {/* Phase 5.D: Dedicated Mission Resource Summary Card */}
+                      {active && (
+                        <section className="mission-resource-card" data-testid="mission-resource-summary">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <strong style={{ fontSize: '11.5px', color: '#5cffb0', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                              Mission Resource Summary
+                            </strong>
+                            <span className="badge-tag">Actual Backend Telemetry</span>
+                          </div>
+                          <div className="resource-grid">
+                            <div className="resource-item">
+                              <span>Total Distance</span>
+                              <strong>{fmt(active.summary?.total_distance_meters / 1000, 2)} km</strong>
+                              <small>{fmt(active.summary?.surface_3d_distance_meters || active.summary?.total_distance_meters, 0)} m (3D surface)</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Estimated Travel Time</span>
+                              <strong>{Number.isFinite(active.summary?.estimated_duration_hours) ? fmt(active.summary.estimated_duration_hours, 1) + ' hrs' : '—'}</strong>
+                              <small>{active.summary?.motion_profile || 'Nominal 0.15 m/s'}</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Outbound Leg</span>
+                              <strong>{fmt(active.mission_clock?.outbound_leg?.total_duration_hours ?? active.summary?.estimated_duration_hours, 1)} hrs</strong>
+                              <small>{fmt((active.mission_clock?.outbound_leg?.distance_m ?? active.summary?.total_distance_meters) / 1000, 2)} km</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Return Leg</span>
+                              <strong>{fmt(active.mission_clock?.return_leg?.walking_duration_hours ?? active.summary?.estimated_duration_hours, 1)} hrs</strong>
+                              <small>{fmt((active.mission_clock?.return_leg?.distance_m ?? active.summary?.total_distance_meters) / 1000, 2)} km</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Total Mission Duration</span>
+                              <strong>{fmt(active.mission_clock?.total_duration_hours ?? active.science_eva_plan?.total_eva_duration_hours ?? (active.summary?.estimated_duration_hours ? active.summary.estimated_duration_hours * 2 : null), 1)} hrs</strong>
+                              <small>Outbound + Science + Return</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>EVA Budget</span>
+                              <strong>{fmt(active.science_eva_plan?.max_eva_budget_hours ?? active.mission_clock?.max_eva_duration_hours ?? 8.0, 1)} hrs</strong>
+                              <small>Hard Physiological Limit</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Used EVA Time</span>
+                              <strong>{fmt(active.science_eva_plan?.total_eva_duration_hours ?? active.mission_clock?.total_duration_hours ?? active.summary?.estimated_duration_hours, 1)} hrs</strong>
+                              <small>Walking + Sample Stops</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Remaining EVA Margin</span>
+                              <strong style={{ color: ((active.science_eva_plan?.max_eva_budget_hours ?? 8.0) - (active.science_eva_plan?.total_eva_duration_hours ?? active.summary?.estimated_duration_hours ?? 0)) > 1 ? '#5cffb0' : '#e56858' }}>
+                                {fmt(Math.max(0, (active.science_eva_plan?.max_eva_budget_hours ?? 8.0) - (active.science_eva_plan?.total_eva_duration_hours ?? active.summary?.estimated_duration_hours ?? 0)), 1)} hrs
+                              </strong>
+                              <small>Contingency buffer</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Return Feasibility</span>
+                              <strong style={{ color: active.turnaround?.feasible_before_sunset && !active.summary?.exceeds_return_budget ? '#5cffb0' : '#e56858' }}>
+                                {active.turnaround?.feasible_before_sunset && !active.summary?.exceeds_return_budget ? 'FEASIBLE' : (active.turnaround?.limiting_constraint ? active.turnaround.limiting_constraint.replace(/_/g, ' ').toUpperCase() : 'EXCEEDS BUDGET')}
+                              </strong>
+                              <small>{active.turnaround?.feasible_before_sunset ? 'Returns before sunset' : 'Daylight / EVA restricted'}</small>
+                            </div>
+                            <div className="resource-item">
+                              <span>Solar Turnaround Time</span>
+                              <strong>{active.turnaround?.turnaround_ltst_hms ? `${active.turnaround.turnaround_ltst_hms} LTST` : (active.turnaround?.turnaround_utc || 'N/A')}</strong>
+                              <small>Sunset: {active.turnaround?.sunset_ltst_hms || '17:30 LTST'}</small>
+                            </div>
+                            <div className="resource-item" style={{ gridColumn: 'span 2' }}>
+                              <span>Energy Index / Mechanical Effort</span>
+                              <strong style={{ color: '#5cffb0' }}>
+                                {active.summary?.energy_index ? `${fmt(active.summary.energy_index, 2)}× flat baseline` : '1.00×'}
+                              </strong>
+                              <small>Minetti cost of transport model factoring uphill gradient and Mars gravity (dimensionless index, not kWh)</small>
+                            </div>
+                          </div>
+                        </section>
+                      )}
 
                       {result?.algorithm_comparison && (
                         <div className="algorithm-benchmark-card">
@@ -2317,12 +2515,22 @@ function App() {
                         </dl>
                       </div>
 
+                      {/* Phase 5.B: Cost & Terrain Breakdown (visible by default, collapsible, not labeled as currency) */}
                       <details className="analysis-details" open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
                         <summary>
-                          <span>Cost & Terrain Breakdown</span>
+                          <span>Cost &amp; Terrain Breakdown</span>
                           <Icon name="chevron" />
                         </summary>
                         <div className="details-body">
+                          <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                              <strong style={{ fontSize: '11px', color: '#5cffb0' }}>Total Weighted Route Cost</strong>
+                              <strong style={{ fontSize: '15px', fontFamily: 'var(--mono)', color: '#5cffb0' }}>{fmt(active?.total_cost, 1)}</strong>
+                            </div>
+                            <small style={{ display: 'block', color: '#8fa498', fontSize: '10px', marginTop: '3px' }}>
+                              Dimensionless weighted traversal cost (3D distance + slope + roughness + hazard penalties; NOT monetary expenditure).
+                            </small>
+                          </div>
                           <dl>
                             <dt>Max slope</dt>
                             <dd>{fmt(active?.summary?.max_slope_deg, 1)}°</dd>

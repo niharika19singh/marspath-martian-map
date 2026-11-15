@@ -839,17 +839,51 @@ export default function MapView(props) {
     src.clear();
     if (!response) return;
     [...response.routes].reverse().forEach(r => {
-      const primary = r.score_rank === 1, line = new LineString(r.geometry.coordinates.map(c => [c[0], c[1]])), f = new Feature({ geometry: line, routeId: r.route_id });
+      const line = new LineString(r.geometry.coordinates.map(c => [c[0], c[1]]));
+      const f = new Feature({ geometry: line, routeId: r.route_id });
       const flow = new Stroke({ color: '#d6ffe7bb', width: 1.5, lineDash: [8, 22] });
-      const styles = primary
-        ? [new Style({ stroke: new Stroke({ color: '#000000aa', width: 10 }) }), new Style({ stroke: new Stroke({ color: '#5cffb04d', width: 8 }) }), new Style({ stroke: new Stroke({ color: '#5cffb0', width: 5 }) }), new Style({ stroke: flow })]
-        : [new Style({ stroke: new Stroke({ color: '#0c171dcc', width: 4 }) }), new Style({ stroke: new Stroke({ color: '#b7c5c580', width: 2, lineDash: [6, 5] }) })];
+
+      const selectedStyles = [
+        new Style({ stroke: new Stroke({ color: '#000000aa', width: 11 }) }),
+        new Style({ stroke: new Stroke({ color: '#5cffb04d', width: 8 }) }),
+        new Style({ stroke: new Stroke({ color: '#5cffb0', width: 5 }) }),
+        new Style({ stroke: flow }),
+      ];
+
+      const hoveredStyles = [
+        new Style({ stroke: new Stroke({ color: '#000000cc', width: 9 }) }),
+        new Style({ stroke: new Stroke({ color: '#ffb867cc', width: 6 }) }),
+        new Style({ stroke: new Stroke({ color: '#ffdd9e', width: 3 }) }),
+      ];
+
+      const altStyles = [
+        new Style({ stroke: new Stroke({ color: '#0c171dcc', width: 5 }) }),
+        new Style({
+          stroke: new Stroke({
+            color: r.score_rank === 2 ? '#ffb867cc' : '#8ab4f8cc',
+            width: 2.5,
+            lineDash: [8, 6],
+          }),
+        }),
+      ];
+
       f.setStyle(() => {
         const p = callbacks.current.props;
         if (!p.showRoute) return null;
-        if (!primary && !p.showAlternatives && r.route_id !== p.selected && r.route_id !== p.hoveredRoute) return null;
-        flow.setLineDashOffset(matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : -performance.now() / 60);
-        return styles;
+        const activeSelectedId = p.selected || response.routes[0]?.route_id;
+        const isSelected = r.route_id === activeSelectedId;
+        const isHovered = r.route_id === p.hoveredRoute;
+
+        if (!isSelected && !p.showAlternatives && !isHovered) return null;
+
+        if (isSelected) {
+          flow.setLineDashOffset(matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : -performance.now() / 60);
+          return selectedStyles;
+        }
+        if (isHovered) {
+          return hoveredStyles;
+        }
+        return altStyles;
       });
       src.addFeature(f);
       if (live && hazards) {
@@ -862,7 +896,7 @@ export default function MapView(props) {
         }
       }
     });
-  }, [terrain, response, live, hazards, coverage, backendStatus]);
+  }, [terrain, response, selected, hoveredRoute, showAlternatives, showRoute, live, hazards, coverage, backendStatus]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -1703,6 +1737,25 @@ export default function MapView(props) {
                 {Math.round(currentPlayback.headingDeg)}°
               </span>
             </div>
+          </div>
+        </div>
+      )}
+      {showReachableZone && response?.return_zone && (
+        <div className="return-zone-legend glass" data-testid="return-zone-legend">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+            <span style={{ fontWeight: 600, color: '#5cffb0', fontSize: '11px' }}>Reachable Return-Time Zone</span>
+            <span style={{ fontSize: '10px', color: '#9cb0a5', fontFamily: 'var(--mono)' }}>
+              {((response.return_zone.reachable_fraction || 0) * 100).toFixed(1)}% reachable
+            </span>
+          </div>
+          <div className="legend-gradient-bar" />
+          <div className="legend-labels">
+            <span>0m (Safe Hab)</span>
+            <span>≤ {response.return_zone.threshold_minutes || 30}m threshold</span>
+            <span>&gt; {response.return_zone.threshold_minutes || 30}m (Excess)</span>
+          </div>
+          <div style={{ fontSize: '9.5px', color: '#889b91', marginTop: '2px' }}>
+            Unreachable / NoData: 100% transparent alpha mask
           </div>
         </div>
       )}

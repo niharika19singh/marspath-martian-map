@@ -2201,3 +2201,212 @@
   transition: opacity 0.35s ease-in-out;
   filter: contrast(1.05) brightness(0.97) sepia(0.12) hue-rotate(-12deg);
 }
+
+/* Phase 5.A: Primary Map Floating Route Candidate Selector HUD */
+.floating-candidate-hud {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: rgba(8, 13, 17, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(16px);
+  max-width: calc(100vw - 80px);
+  overflow-x: auto;
+}
+.candidate-hud-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8da397;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+}
+.hud-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5cffb0;
+  box-shadow: 0 0 6px #5cffb088;
+}
+.candidate-hud-pill {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #c4d4cc;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+}
+.candidate-hud-pill:hover {
+  background: rgba(92, 255, 176, 0.08);
+  border-color: rgba(92, 255, 176, 0.35);
+  color: #eafbf2;
+}
+.candidate-hud-pill.active {
+  background: rgba(92, 255, 176, 0.15);
+  border-color: #5cffb0;
+  color: #5cffb0;
+  box-shadow: 0 0 12px rgba(92, 255, 176, 0.28);
+}
+.candidate-hud-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.hud-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.hud-dot.dot-0 { background: #5cffb0; }
+.hud-dot.dot-1 { background: #ffb867; }
+.hud-dot.dot-2 { background: #8ab4f8; }
+.pareto-mini-tag {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 209, 102, 0.2);
+  color: #ffd166;
+  border: 1px solid rgba(255, 209, 102, 0.4);
+  font-weight: 600;
+}
+.candidate-hud-metrics {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: #9cb0a5;
+  margin-top: 2px;
+}
+.candidate-hud-pill.active .candidate-hud-metrics {
+  color: #d1f4e3;
+}
+
+/* Phase 5.D: Mission Resource Summary Card */
+.mission-resource-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 14px;
+  margin-top: 8px;
+}
+.resource-item {
+  display: flex;
+  flex-direction: column;
+}
+.resource-item span {
+  font-size: 10px;
+  color: #8da197;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.resource-item strong {
+  font-size: 12px;
+  color: #e4efe9;
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+.resource-item small {
+  font-size: 9.5px;
+  color: #798d83;
+  margin-top: 1px;
+}
+
+/* Phase 5.E: Advanced Mission Intelligence Navigation Entry Points */
+.advanced-intel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.intel-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #b7cbbf;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.intel-pill-btn:hover {
+  background: rgba(92, 255, 176, 0.14);
+  border-color: rgba(92, 255, 176, 0.4);
+  color: #e5fbee;
+}
+
+/* Phase 7: Return Zone Isochrone Legend */
+.return-zone-legend {
+  position: absolute;
+  bottom: 24px;
+  right: 430px;
+  z-index: 4;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #c5d7cd;
+  background: rgba(9, 14, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.legend-gradient-bar {
+  height: 8px;
+  width: 175px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #48ebb2, #ffd166, #e2705c);
+}
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  font-family: var(--mono);
+  color: #9cb0a5;
+}
+@media (max-width: 900px) {
+  .return-zone-legend {
+    right: 20px;
+    bottom: 90px;
+  }
+  .floating-candidate-hud {
+    top: 60px;
+    padding: 6px 8px;
+  }
+}
+
