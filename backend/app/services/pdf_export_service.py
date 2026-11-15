@@ -9,17 +9,21 @@ import io
 from datetime import UTC, datetime
 from typing import Any
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import (
-    HRFlowable,
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.platypus import (
+        HRFlowable,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 
 def generate_mission_pdf(
@@ -28,8 +32,10 @@ def generate_mission_pdf(
     request_data: dict[str, Any] | None = None,
 ) -> bytes:
     """
-    Renders a comprehensive, multi-page Martian Mission Dossier PDF.
+    Constructs a multi-page operational mission dossier PDF from planning results.
     """
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab is required for PDF export. Install with 'pip install reportlab'.")
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
