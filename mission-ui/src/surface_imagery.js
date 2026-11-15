@@ -77,3 +77,38 @@ export const AUTHENTIC_NASA_SURFACE_IMAGES = [
     scientific_context: 'Designated primary topographic radiation shelter: crater rim and terraces provide up to 68% overhead proton flux shielding.',
   },
 ];
+
+/**
+ * Resolves the closest authentic NASA Perseverance rover image for a given waypoint or coordinate.
+ */
+export function getContextualRoverImage(waypointOrCoord) {
+  if (!waypointOrCoord) return AUTHENTIC_NASA_SURFACE_IMAGES[0];
+
+  const lat = Number(waypointOrCoord.lat ?? waypointOrCoord.geometry?.coordinates?.[1] ?? 18.4447);
+  const lon = Number(waypointOrCoord.lon ?? waypointOrCoord.geometry?.coordinates?.[0] ?? 77.4508);
+  const sol = Number(waypointOrCoord.properties?.sol ?? waypointOrCoord.sol ?? -1);
+
+  // 1. Check exact sol match or sol range
+  if (sol >= 0) {
+    if (sol <= 40) return { ...AUTHENTIC_NASA_SURFACE_IMAGES[0], matchType: 'Exact Sol Range' };
+    if (sol <= 120) return { ...AUTHENTIC_NASA_SURFACE_IMAGES[1], matchType: 'Exact Sol Range' };
+    if (sol <= 280) return { ...AUTHENTIC_NASA_SURFACE_IMAGES[3], matchType: 'Exact Sol Range' };
+    if (sol <= 550) return { ...AUTHENTIC_NASA_SURFACE_IMAGES[2], matchType: 'Exact Sol Range' };
+    return { ...AUTHENTIC_NASA_SURFACE_IMAGES[4], matchType: 'Exact Sol Range' };
+  }
+
+  // 2. Otherwise calculate closest geographic distance
+  let minD = Infinity;
+  let best = AUTHENTIC_NASA_SURFACE_IMAGES[0];
+
+  for (const img of AUTHENTIC_NASA_SURFACE_IMAGES) {
+    const d = Math.hypot(img.lat - lat, img.lon - lon);
+    if (d < minD) {
+      minD = d;
+      best = img;
+    }
+  }
+
+  return { ...best, matchType: 'Nearest Geographic Rover Station' };
+}
+

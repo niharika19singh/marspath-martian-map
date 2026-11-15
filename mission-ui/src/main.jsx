@@ -41,6 +41,8 @@ import {
 } from './intelligence.js';
 import WalkBackSafetyPanel from './WalkBackSafetyPanel.jsx';
 import PlanetaryProtectionPanel from './PlanetaryProtectionPanel.jsx';
+import SuitHudOverlay from './SuitHudOverlay.jsx';
+import SurvivabilityScorePanel from './SurvivabilityScorePanel.jsx';
 import { evaluateOnFootFeasibility, evaluateRFCommunication } from './walkback.js';
 import { evaluateRouteGeofenceClient, JEZERO_SPECIAL_REGIONS } from './planetary_protection.js';
 
@@ -363,6 +365,7 @@ function App() {
 
   // Astronaut Visor HUD & SPE Radiation Scenario State
   const [visorMode, setVisorMode] = useState(false);
+  const [suitHudMode, setSuitHudMode] = useState(false);
   const [showSurfacePov, setShowSurfacePov] = useState(false);
   const [speScenarioActive, setSpeScenarioActive] = useState(false);
 
@@ -1136,11 +1139,19 @@ function App() {
           </span>
           <button
             type="button"
+            className={`btn-header-action btn-suit-hud-toggle ${suitHudMode ? 'is-active' : ''}`}
+            onClick={() => setSuitHudMode(v => !v)}
+            title="Toggle Astronaut Suit HUD Field Overlay & Audio Alerts"
+          >
+            🥽 <span>Suit HUD</span>
+          </button>
+          <button
+            type="button"
             className={`btn-header-action btn-visor-hud-toggle ${visorMode ? 'is-active' : ''}`}
             onClick={() => setVisorMode(v => !v)}
-            title="Toggle Astronaut Visor HUD Field Tablet View"
+            title="Toggle Astronaut Visor HUD Full-Screen View"
           >
-            🥽 <span>VISOR HUD</span>
+            🕶️ <span>Visor View</span>
           </button>
           <button
             type="button"
@@ -2229,6 +2240,15 @@ function App() {
                 </button>
               </form>
 
+              {/* Feature 2: Marswalk Survivability Score & Solar Storm Scenario */}
+              <SurvivabilityScorePanel
+                activeRoute={active}
+                walkBackAssessment={active?.walk_back_assessment || result?.walk_back_assessment}
+                isStormActive={speScenarioActive}
+                onToggleStorm={handleToggleSpe}
+                evaBudgetHours={evaBudgetHours}
+              />
+
               {/* Astronaut Walk-Back Safety & Planetary Protection Panels */}
               <WalkBackSafetyPanel
                 walkBackAssessment={
@@ -3240,6 +3260,16 @@ function App() {
             <LayerToggle label="Alternatives" color="gray" checked={showAlternatives} onChange={setShowAlternatives} />
             <LayerToggle label="Reachable return zone" color="mint" checked={showReachableZone} onChange={setShowReachableZone} />
             <LayerToggle label="Rescue time map" color="amber" checked={showRescueMap} onChange={setShowRescueMap} />
+            <LayerToggle
+              label="Planetary Protection — Robot-Only Buffer"
+              color="rose"
+              checked={showOfficialZones || showCandidateZones || showDemoZones}
+              onChange={val => {
+                setShowOfficialZones(val);
+                setShowCandidateZones(val);
+                setShowDemoZones(val);
+              }}
+            />
             <LayerToggle label="Hazards & Obstacles" color="amber" checked={hazards} onChange={setHazards} />
             <LayerToggle label="Data coverage" color="gray" checked={coverage} onChange={setCoverage} />
             <LayerToggle label="Live Orbiters (MRO/ODY/MEX/TGO)" color="mint" checked={showOrbiters} onChange={setShowOrbiters} />
@@ -3545,6 +3575,20 @@ function App() {
             <span>Esc Close</span>
           </div>
         </Dialog>
+      )}
+
+      {/* Astronaut Suit HUD Mode & Audio Hazard Alerts */}
+      {suitHudMode && (
+        <SuitHudOverlay
+          activeRoute={active}
+          destination={destination}
+          start={start}
+          isSpeActive={speScenarioActive}
+          onToggleSpe={handleToggleSpe}
+          onClose={() => setSuitHudMode(false)}
+          walkBackAssessment={active?.walk_back_assessment || result?.walk_back_assessment}
+          planetaryProtectionAssessment={active?.planetary_protection_assessment || result?.planetary_protection}
+        />
       )}
 
       {/* Astronaut Visor HUD Overlay */}

@@ -55,6 +55,24 @@ class MarswalkSurvivabilityScore(BaseModel):
         None, description="Distance to nearest topographic shelter in meters"
     )
     recommended_shelter_id: str | None = Field(None, description="Identifier of nearest designated terrain shelter")
+    normalized_factors: dict[str, float] = Field(
+        default_factory=dict,
+        description="Normalized [0, 1] factor ratings: slope_safety, terrain_safety, time_safety, return_safety, distance_safety",
+    )
+    formula: str = Field(
+        default="Score = 100 × (0.25 × SlopeSafety + 0.25 × TerrainSafety + 0.20 × TimeSafety + 0.20 × ReturnSafety + 0.10 × DistanceSafety)",
+        description="Transparent weighted linear model definition",
+    )
+    weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "slope": 0.25,
+            "terrain": 0.25,
+            "time": 0.20,
+            "return": 0.20,
+            "distance": 0.10,
+        },
+        description="Component weight distribution",
+    )
     disclaimer: str = (
         "Conceptual decision-support score based on terrestrial human terramechanics and NASA analog models. "
         "Not a certified flight safety rating."
@@ -361,6 +379,22 @@ def compute_marswalk_survivability(
             f"consumables margin {margin_hours:.1f}h remaining, return buffer +{turnaround_buffer_min:.0f} min before local sunset."
         )
 
+    # 7. Compute normalized 5-factor model values strictly in [0.0, 1.0]
+    slope_safety = max(0.0, min(1.0, 1.0 - (max(0.0, max_slope_deg - 1.5) / 12.5)))
+    terrain_safety = max(0.0, min(1.0, 1.0 - (max(0.0, roughness_tri - 0.10) / 0.50)))
+    time_safety = max(0.0, min(1.0, 1.0 - (eva_duration_hours / max(1.0, eva_budget_hours))))
+    eff_margin_pct = max(0.0, min(100.0, (turnaround_buffer_min / 120.0) * 100.0 - (30.0 if is_spe_active else 0.0)))
+    return_safety = max(0.0, min(1.0, eff_margin_pct / 100.0))
+    distance_safety = max(0.0, min(1.0, 1.0 - (distance_km / 5.0)))
+
+    norm_factors = {
+        "slope_safety": round(slope_safety, 3),
+        "terrain_safety": round(terrain_safety, 3),
+        "time_safety": round(time_safety, 3),
+        "return_safety": round(return_safety, 3),
+        "distance_safety": round(distance_safety, 3),
+    }
+
     return MarswalkSurvivabilityScore(
         score=final_score,
         category=category,
@@ -372,6 +406,7 @@ def compute_marswalk_survivability(
         radiation_exposure_penalty=p_radiation,
         topographic_shelter_bonus=b_shelter,
         contributing_factors=factors,
+        normalized_factors=norm_factors,
         explanation=explanation,
         is_spe_active=is_spe_active,
         shelter_proximity_meters=round(min_dist_shelter_m, 1) if min_dist_shelter_m else None,
