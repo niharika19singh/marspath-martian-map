@@ -2201,3 +2201,449 @@
   transition: opacity 0.35s ease-in-out;
   filter: contrast(1.05) brightness(0.97) sepia(0.12) hue-rotate(-12deg);
 }
+
+/* ==========================================================================
+   P1 Mission Control UI Discoverability & HUD Enhancements
+   ========================================================================== */
+
+/* 1. Primary Map HUD — Alternative Route Corridor Selector */
+.map-hud-route-selector {
+  position: absolute;
+  top: 92px;
+  transform: translateX(-50%);
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(12, 18, 24, 0.92);
+  border: 1px solid rgba(92, 255, 176, 0.35);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: left 0.22s ease, max-width 0.22s ease;
+}
+
+.hud-route-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+
+.hud-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9becbf;
+}
+
+.hud-title-wrap strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.hud-subtitle {
+  font-size: 11px;
+  color: #8fa398;
+  margin-left: 4px;
+}
+
+.hud-quick-btn {
+  background: rgba(92, 255, 176, 0.12);
+  border: 1px solid rgba(92, 255, 176, 0.3);
+  color: #9becbf;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.hud-quick-btn:hover {
+  background: rgba(92, 255, 176, 0.22);
+  color: #fff;
+}
+
+.hud-candidates-deck {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.hud-candidates-deck::-webkit-scrollbar {
+  height: 4px;
+}
+.hud-candidates-deck::-webkit-scrollbar-thumb {
+  background: rgba(92, 255, 176, 0.25);
+  border-radius: 2px;
+}
+
+.hud-candidate-card {
+  flex: 1 1 200px;
+  min-width: 190px;
+  max-width: 280px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: all 0.18s ease;
+}
+
+.hud-candidate-card:hover {
+  background: rgba(92, 255, 176, 0.07);
+  border-color: rgba(92, 255, 176, 0.3);
+  transform: translateY(-1px);
+}
+
+.hud-candidate-card.is-selected {
+  background: rgba(92, 255, 176, 0.14);
+  border-color: rgba(92, 255, 176, 0.65);
+  box-shadow: 0 0 16px rgba(92, 255, 176, 0.22);
+}
+
+.card-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.candidate-badge {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #5cffb0;
+  font-weight: 700;
+  background: rgba(92, 255, 176, 0.15);
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.candidate-name {
+  font-size: 11px;
+  color: #e6ebe9;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.active-pill {
+  font-size: 8.5px;
+  font-weight: 700;
+  background: #5cffb0;
+  color: #06110d;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.card-metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 10.5px;
+  color: #c7d6d1;
+}
+
+.metric-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: #a8b8b3;
+}
+
+.metric-chip strong {
+  color: #fff;
+}
+
+.metric-chip.warn strong {
+  color: #ffb867;
+}
+
+.metric-chip.status.danger {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.metric-chip.status.nominal {
+  color: #5cffb0;
+  font-weight: 600;
+}
+
+/* 2. 2D Reachable Return Zone Legend & Overlay Toggle */
+.map-hud-return-legend {
+  position: absolute;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 27;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(12, 18, 24, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 11px;
+  color: #c7d6d1;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: left 0.22s ease;
+}
+
+.return-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #9becbf;
+}
+
+.return-toggle-label input[type="checkbox"] {
+  accent-color: #5cffb0;
+  cursor: pointer;
+}
+
+.legend-items {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding-left: 12px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: #a8b8b3;
+}
+
+.swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.swatch.mint {
+  background: #48eb7a;
+  box-shadow: 0 0 6px rgba(72, 235, 122, 0.4);
+}
+
+.swatch.coral {
+  background: #e2705c;
+  box-shadow: 0 0 6px rgba(226, 112, 92, 0.4);
+}
+
+.swatch.nodata {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+}
+
+/* 3. Mission Intelligence Quick Navigation Bar */
+.intel-quick-access-deck {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin: 10px 0;
+  padding: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.quick-intel-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #c7d6d1;
+  cursor: pointer;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.15;
+  transition: all 0.15s ease;
+}
+
+.quick-intel-pill:hover {
+  background: rgba(92, 255, 176, 0.1);
+  border-color: rgba(92, 255, 176, 0.35);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.quick-intel-pill.active {
+  background: rgba(92, 255, 176, 0.18);
+  border-color: rgba(92, 255, 176, 0.55);
+  color: #9becbf;
+  font-weight: 600;
+}
+
+.pill-icon {
+  font-size: 13px;
+}
+
+.pill-count {
+  font-size: 9px;
+  color: #7fa393;
+  margin-top: 1px;
+}
+
+.quick-intel-pill.active .pill-count {
+  color: #b5eed0;
+}
+
+/* 4. Mission Resources & Temporal Budget Card */
+.mission-resources-card {
+  margin-bottom: 12px;
+  border: 1px solid rgba(92, 255, 176, 0.25);
+}
+
+.resources-dl {
+  grid-template-columns: 155px 1fr !important;
+  gap: 5px 8px !important;
+  font-size: 11px !important;
+}
+
+.text-nominal {
+  color: #5cffb0 !important;
+  font-weight: 600;
+}
+
+.text-warn {
+  color: #ff9885 !important;
+  font-weight: 600;
+}
+
+/* 5. Educational Notice on Energy Model and Rover Power Sources */
+.energy-info-tooltip {
+  background: rgba(92, 255, 176, 0.05);
+  border: 1px solid rgba(92, 255, 176, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #b5c9c3;
+}
+
+.energy-info-tooltip .tooltip-header {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #5cffb0;
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.energy-info-tooltip p {
+  margin: 4px 0 0;
+}
+
+.energy-info-tooltip strong {
+  color: #fff;
+}
+
+.energy-info-tooltip code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #9becbf;
+  font-family: var(--mono);
+}
+
+/* 6. Cost Model Explainer and Progress Bars */
+.cost-model-explainer {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #b5c9c3;
+}
+
+.cost-model-explainer strong {
+  display: block;
+  font-size: 12px;
+  color: #64dfdf;
+  margin-bottom: 3px;
+}
+
+.cost-model-explainer p {
+  margin: 0;
+}
+
+.cost-model-explainer code {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #ffeaa7;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.cost-breakdown-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 10px 0 14px;
+}
+
+.cost-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cost-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: #a8b8b3;
+}
+
+.cost-bar-labels strong {
+  color: #fff;
+  font-family: var(--mono);
+}
+
+.cost-bar-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.cost-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
