@@ -2159,24 +2159,44 @@
 }
 
 
-/* Unified 6-Mode Navigation Strip */
+/* Unified Navigation Strip */
 .mission-mode.unified-modes {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  background: #05090b55;
+  background: rgba(10, 16, 22, 0.75);
   padding: 4px;
-  border-radius: 10px;
-  margin: -3px 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 0 0 14px;
 }
 .mission-mode.unified-modes button {
+  flex: 1 1 calc(25% - 4px);
+  min-width: 78px;
   padding: 6px 4px;
-  min-height: 30px;
+  min-height: 28px;
   font-size: 11px;
+  font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.mission-mode.unified-modes button:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.04);
+}
+.mission-mode.unified-modes button.active {
+  background: rgba(92, 255, 176, 0.14) !important;
+  color: #5cffb0 !important;
+  border-color: rgba(92, 255, 176, 0.35) !important;
+  font-weight: 600;
 }
 .floating-left.wide-panel {
   width: min(410px, calc(100vw - 110px));

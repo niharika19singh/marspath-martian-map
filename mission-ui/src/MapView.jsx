@@ -83,7 +83,7 @@ function buildThemisThermalCanvas(terrain) {
 export default function MapView(props) {
   const {
     historyMode, drives = [], waypoints = [], showHistory = true, showWaypoints = true, historyFit, waypoint, onWaypoint,
-    terrain, activeDemTerrain, start, destination, pick, onPin, base = 'auto',
+    terrain, activeDemTerrain, start, destination, pick, onPin, onSetStart, onSetDestination, base = 'auto',
     hazards = false, coverage = false, showHillshade = false, showSlope = false, showRoughness = false,
     showViking = true, showCtx = true, showHirise = true, showMolaTerrain = false,
     vikingOpacity, ctxOpacity, hiriseOpacity, molaOpacity = 0.78,
@@ -98,7 +98,7 @@ export default function MapView(props) {
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
     showReachableZone = true, showRescueMap = false, onOpenSurfacePov,
-    showRoverEnvelope = true, showWalkbackEnvelope = true, overlayMode = 'combined',
+    showRoverEnvelope = false, showWalkbackEnvelope = false, overlayMode = 'off',
     showOfficialZones = false, showCandidateZones = false, showDemoZones = false,
     onSelectSpecialRegion, habitat,
   } = props;
@@ -151,7 +151,7 @@ export default function MapView(props) {
   const [inspectPopup, setInspectPopup] = useState(null);
   const [activeWaypointPopup, setActiveWaypointPopup] = useState(null);
 
-  callbacks.current = { onPin, onSelectRoute, pick, props };
+  callbacks.current = { onPin, onSetStart, onSetDestination, onSelectRoute, pick, props };
   const interact = () => {
     setHint(false);
     setLocationVisible(false);
@@ -543,8 +543,9 @@ export default function MapView(props) {
 
     map.on('singleclick', e => {
       interact();
-      let routeId = null, recorded = null, obsId = null, scId = null, zoneData = null;
+      let routeId = null, recorded = null, obsId = null, scId = null, zoneData = null, scienceTgt = null;
       map.forEachFeatureAtPixel(e.pixel, f => {
+        if (f.get('scienceTarget')) { scienceTgt = f.get('scienceTarget'); return true; }
         if (f.get('zoneData')) { zoneData = f.get('zoneData'); return true; }
         if (f.get('observationId')) { obsId = f.get('observationId'); return true; }
         if (f.get('spacecraftId')) { scId = f.get('spacecraftId'); return true; }
@@ -558,6 +559,19 @@ export default function MapView(props) {
       }
       if (obsId) { callbacks.current.props.onSelectObservation?.(obsId); return; }
       if (scId) { callbacks.current.props.onSelectSpacecraft?.(scId); return; }
+      if (scienceTgt && !callbacks.current.pick) {
+        const wp = {
+          geometry: { type: 'Point', coordinates: [scienceTgt.lon, scienceTgt.lat] },
+          properties: {
+            name: scienceTgt.name,
+            sol: scienceTgt.sol || null,
+            Note: `Science Target (${scienceTgt.science_value_points || 90} pts) · ${scienceTgt.geological_unit || 'Jezero Formation'}`,
+          }
+        };
+        callbacks.current.props.onWaypoint?.(wp);
+        setActiveWaypointPopup(wp);
+        return;
+      }
       if (recorded && !callbacks.current.pick) {
         const wp = recorded.geometry?.type === 'Point'
           ? recorded
@@ -1586,12 +1600,12 @@ export default function MapView(props) {
       </div>
       <button className={'map-layers-button glass icon-button ' + (layersOpen ? 'active' : '')} onClick={onLayersToggle} aria-label="Map layers" aria-expanded={layersOpen} title="Scientific Layer Manager"><Icon name="layers" /></button>
       <button className={'map-tilt-button glass icon-button ' + (view3d ? 'active' : '')} onClick={onTiltToggle} aria-label={view3d ? 'Switch to 2D map' : 'Switch to 3D terrain'} title={view3d ? '2D map' : '3D terrain'} aria-pressed={view3d}><Icon name="cube" /><small>{view3d ? '3D' : '2D'}</small></button>
-      {(pick || hint) && (
+      {pick && (
         <div
           className="map-instruction glass"
           style={{ left: corridorCenterStyle, maxWidth: corridorWidthStyle }}
         >
-          {pick ? `Click terrain to place ${pick === 'start' ? 'start A' : 'destination B'}` : 'Drag to explore Mars WMTS (Viking 232m → CTX 6m → HiRISE 0.25m). Scroll to zoom.'}
+          {`Click terrain to place ${pick === 'start' ? 'Start (A)' : pick === 'destination' ? 'Destination (B)' : 'Science Waypoint'}`}
         </div>
       )}
 
@@ -1651,25 +1665,46 @@ export default function MapView(props) {
               <div style={{ fontSize: '10px', color: '#ff9885' }}>{inspectPopup.inspectError}</div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={() => {
-                onPin?.({ lon: inspectPopup.lon, lat: inspectPopup.lat });
+                const pt = { lon: inspectPopup.lon, lat: inspectPopup.lat };
+                (callbacks.current.onSetDestination || callbacks.current.props.onSetDestination)?.(pt);
                 setInspectPopup(null);
               }}
               style={{
                 flex: 1,
-                background: 'rgba(92,255,176,0.18)',
-                border: '1px solid #5cffb066',
+                minWidth: '130px',
+                background: 'rgba(92,255,176,0.22)',
+                border: '1px solid rgba(92,255,176,0.6)',
                 borderRadius: '8px',
-                padding: '6px 8px',
+                padding: '6px 10px',
                 color: '#5cffb0',
                 fontSize: '11px',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              Set Destination
+              🎯 Route To Here
+            </button>
+            <button
+              onClick={() => {
+                const pt = { lon: inspectPopup.lon, lat: inspectPopup.lat };
+                (callbacks.current.onSetStart || callbacks.current.props.onSetStart)?.(pt);
+                setInspectPopup(null);
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '8px',
+                padding: '6px 10px',
+                color: '#e2f1ec',
+                fontSize: '11px',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              📍 Set Start A
             </button>
             {onOpenSurfacePov && (
               <button
@@ -1704,7 +1739,7 @@ export default function MapView(props) {
                 cursor: 'pointer',
               }}
             >
-              Dismiss
+              ✕
             </button>
           </div>
         </div>
@@ -1728,11 +1763,11 @@ export default function MapView(props) {
             waypoint={activeWaypointPopup}
             onClose={() => setActiveWaypointPopup(null)}
             onSetDestination={(pt) => {
-              onPin?.(pt);
+              (callbacks.current.onSetDestination || callbacks.current.props.onSetDestination)?.(pt);
               setActiveWaypointPopup(null);
             }}
             onSetStart={(pt) => {
-              callbacks.current.props.onSetStart?.(pt);
+              (callbacks.current.onSetStart || callbacks.current.props.onSetStart)?.(pt);
               setActiveWaypointPopup(null);
             }}
             onOpenFullPov={() => {

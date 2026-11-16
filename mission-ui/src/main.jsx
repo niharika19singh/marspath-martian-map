@@ -333,9 +333,51 @@ function App() {
 
   function planFromWaypoint(w) {
     invalidate();
-    const c = w.geometry.coordinates;
-    setStart({ lon: c[0], lat: c[1] });
+    const c = w?.geometry?.coordinates || [77.405, 18.39];
+    const v = { lon: Number(c[0].toFixed(5)), lat: Number(c[1].toFixed(5)) };
+    setStart(v);
+    setShowRoute(true);
     switchMission('planner');
+    setNotice(`Start A set to Perseverance Sol ${w?.properties?.sol ?? 'selected'} waypoint. Generating route...`);
+    if (destination && Number.isFinite(Number(destination.lon))) {
+      setTimeout(() => {
+        run({ start: v });
+      }, 50);
+    }
+  }
+
+  function handleSetStart(point) {
+    invalidate();
+    const lon = Number(Number(point.lon ?? point[0]).toFixed(5));
+    const lat = Number(Number(point.lat ?? point[1]).toFixed(5));
+    const nextStart = { lon, lat };
+    setStart(nextStart);
+    setShowRoute(true);
+    switchMission('planner');
+    setPick(null);
+    setNotice(`Start A set to ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`);
+    if (destination && Number.isFinite(Number(destination.lon))) {
+      setTimeout(() => {
+        run({ start: nextStart });
+      }, 50);
+    }
+  }
+
+  function handleSetDestination(point) {
+    invalidate();
+    const lon = Number(Number(point.lon ?? point[0]).toFixed(5));
+    const lat = Number(Number(point.lat ?? point[1]).toFixed(5));
+    const nextDest = { lon, lat };
+    setDestination(nextDest);
+    setShowRoute(true);
+    switchMission('planner');
+    setPick(null);
+    setNotice(`Destination B set to ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E. Calculating route...`);
+    if (start && Number.isFinite(Number(start.lon))) {
+      setTimeout(() => {
+        run({ destination: nextDest });
+      }, 50);
+    }
   }
 
   function showAllHistory() {
@@ -392,9 +434,9 @@ function App() {
   const [rescueThresholdMinutes, setRescueThresholdMinutes] = useState(30);
   const [showReachableZone, setShowReachableZone] = useState(false);
   const [showRescueMap, setShowRescueMap] = useState(false);
-  const [showRoverEnvelope, setShowRoverEnvelope] = useState(true);
-  const [showWalkbackEnvelope, setShowWalkbackEnvelope] = useState(true);
-  const [envelopeOverlayMode, setEnvelopeOverlayMode] = useState('combined');
+  const [showRoverEnvelope, setShowRoverEnvelope] = useState(false);
+  const [showWalkbackEnvelope, setShowWalkbackEnvelope] = useState(false);
+  const [envelopeOverlayMode, setEnvelopeOverlayMode] = useState('off');
   const [showOfficialZones, setShowOfficialZones] = useState(false);
   const [showCandidateZones, setShowCandidateZones] = useState(false);
   const [showDemoZones, setShowDemoZones] = useState(false);
@@ -560,10 +602,10 @@ function App() {
     setResult(enriched);
     setPreviousResult(null);
     setSelected(enriched.routes[0].route_id);
+    setShowRoute(true);
     if (missionView === 'planner') {
       setRightExpanded(true);
       setDetailsOpen(true);
-      setShowRoute(true);
     }
     lastRequest.current = request;
     setFitToken(n => n + 1);
@@ -684,15 +726,29 @@ function App() {
     if (pick === 'start') {
       setStart(v);
       setPick('destination');
+      setNotice(`Start A placed at ${v.lat.toFixed(4)}°N, ${v.lon.toFixed(4)}°E. Click terrain to set Destination B.`);
     } else if (pick === 'destination') {
       setDestination(v);
       setPick(null);
+      setNotice(`Destination B placed at ${v.lat.toFixed(4)}°N, ${v.lon.toFixed(4)}°E. Generating route...`);
+      setTimeout(() => {
+        run({ destination: v });
+      }, 50);
     } else if (pick === 'waypoint') {
-      setScienceWaypoints(wps => [...wps, v]);
+      setScienceWaypoints(wps => {
+        const next = [...wps, v];
+        setTimeout(() => run({ science_waypoints: next }), 50);
+        return next;
+      });
       setPick(null);
+      setNotice(`Science stop placed at ${v.lat.toFixed(4)}°N, ${v.lon.toFixed(4)}°E.`);
     } else if (pick.startsWith('waypoint-')) {
       const idx = Number(pick.replace('waypoint-', ''));
-      setScienceWaypoints(wps => wps.map((w, i) => (i === idx ? v : w)));
+      setScienceWaypoints(wps => {
+        const next = wps.map((w, i) => (i === idx ? v : w));
+        setTimeout(() => run({ science_waypoints: next }), 50);
+        return next;
+      });
       setPick(null);
     }
   }
@@ -734,10 +790,22 @@ function App() {
     return { dem: raw, fallbackNote: null };
   }
 
+  function normalizeCoord(c, fallback) {
+    if (!c) return fallback;
+    const lon = Number(c.lon ?? c[0]);
+    const lat = Number(c.lat ?? c[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { lon, lat };
+    }
+    return fallback;
+  }
+
   function buildRequest(overrides = {}) {
+    const startCoord = normalizeCoord(overrides.start, { lon: Number(start.lon), lat: Number(start.lat) });
+    const destCoord = normalizeCoord(overrides.destination, { lon: Number(destination.lon), lat: Number(destination.lat) });
     const req = {
-      start: overrides.start || { lon: Number(start.lon), lat: Number(start.lat) },
-      destination: overrides.destination || { lon: Number(destination.lon), lat: Number(destination.lat) },
+      start: startCoord,
+      destination: destCoord,
       crs_identifier: 'IAU2000:49900',
       mode: overrides.mode || mode,
       constraints: {
@@ -836,7 +904,7 @@ function App() {
       return;
     }
 
-    const req = overrides?.start && overrides?.destination ? overrides : buildRequest(overrides);
+    const req = overrides?.crs_identifier && overrides?.constraints ? overrides : buildRequest(overrides);
     if ([req.start.lon, req.start.lat, req.destination.lon, req.destination.lat].some(n => !Number.isFinite(n))) {
       setError('Enter valid numeric latitude and longitude coordinates.');
       return;
@@ -929,7 +997,7 @@ function App() {
     setSpeScenarioActive(prev => {
       const next = !prev;
       if (result && !busy) {
-        setTimeout(() => planRoute({ is_spe_scenario: next }), 50);
+        setTimeout(() => run({ is_spe_scenario: next }), 50);
       }
       return next;
     });
@@ -1118,9 +1186,15 @@ function App() {
 
   function swap() {
     invalidate();
-    setStart(destination);
-    setDestination(start);
+    const nextStart = destination;
+    const nextDest = start;
+    setStart(nextStart);
+    setDestination(nextDest);
     setPick(null);
+    setNotice('Swapped Start A and Destination B. Generating reversed route...');
+    setTimeout(() => {
+      run({ start: nextStart, destination: nextDest });
+    }, 50);
   }
 
   function toggleLayers() {
@@ -1248,19 +1322,13 @@ function App() {
           </span>
           <button
             type="button"
-            className={'visor-hud-trigger ' + (visorActive ? 'is-active' : '')}
-            onClick={() => setVisorActive(v => !v)}
-            aria-label="Toggle Astronaut Visor Tactical HUD"
-            title="Switch to Astronaut Field Tactical Visor Mode [ESC to exit]"
-          >
-            <span className="visor-hud-badge">HUD</span>
-            <span>ASTRONAUT VISOR HUD</span>
-          </button>
-          <button
-            type="button"
-            className={`btn-header-action btn-suit-hud-toggle ${suitHudMode ? 'is-active' : ''}`}
-            onClick={() => setSuitHudMode(v => !v)}
-            title="Toggle Astronaut Suit HUD Field Overlay & Audio Alerts"
+            className={`btn-header-action btn-suit-hud-toggle ${suitHudMode || visorActive ? 'is-active' : ''}`}
+            onClick={() => {
+              const next = !suitHudMode;
+              setSuitHudMode(next);
+              setVisorActive(next);
+            }}
+            title="Toggle Astronaut Tactical Suit HUD [ESC to exit]"
           >
             🥽 <span>Suit HUD</span>
           </button>
@@ -1344,6 +1412,8 @@ function App() {
           scienceWaypoints={scienceWaypoints}
           pick={pick}
           onPin={mapPin}
+          onSetStart={handleSetStart}
+          onSetDestination={handleSetDestination}
           base={base}
           activeBookmark={activeBookmark}
           onSelectBookmark={bm => {
@@ -1924,10 +1994,7 @@ function App() {
                     marker="A"
                     active={pick === 'start'}
                     onDraft={invalidate}
-                    onCommit={p => {
-                      invalidate();
-                      setStart(p);
-                    }}
+                    onCommit={handleSetStart}
                     onPick={() => {
                       setShowRoute(true);
                       setPick(pick === 'start' ? null : 'start');
@@ -1980,10 +2047,7 @@ function App() {
                     marker="B"
                     active={pick === 'destination'}
                     onDraft={invalidate}
-                    onCommit={p => {
-                      invalidate();
-                      setDestination(p);
-                    }}
+                    onCommit={handleSetDestination}
                     onPick={() => {
                       setShowRoute(true);
                       setPick(pick === 'destination' ? null : 'destination');
