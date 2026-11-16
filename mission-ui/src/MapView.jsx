@@ -99,7 +99,7 @@ export default function MapView(props) {
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
     showReachableZone = true, showRescueMap = false, onOpenSurfacePov,
     showRoverEnvelope = true, showWalkbackEnvelope = true, overlayMode = 'combined',
-    showOfficialZones = true, showCandidateZones = true, showDemoZones = true,
+    showOfficialZones = false, showCandidateZones = false, showDemoZones = false,
     onSelectSpecialRegion, habitat,
   } = props;
 

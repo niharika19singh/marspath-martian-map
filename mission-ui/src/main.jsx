@@ -395,9 +395,9 @@ function App() {
   const [showRoverEnvelope, setShowRoverEnvelope] = useState(true);
   const [showWalkbackEnvelope, setShowWalkbackEnvelope] = useState(true);
   const [envelopeOverlayMode, setEnvelopeOverlayMode] = useState('combined');
-  const [showOfficialZones, setShowOfficialZones] = useState(true);
-  const [showCandidateZones, setShowCandidateZones] = useState(true);
-  const [showDemoZones, setShowDemoZones] = useState(true);
+  const [showOfficialZones, setShowOfficialZones] = useState(false);
+  const [showCandidateZones, setShowCandidateZones] = useState(false);
+  const [showDemoZones, setShowDemoZones] = useState(false);
   const [selectedSpecialRegionId, setSelectedSpecialRegionId] = useState('ppz_jezero_delta_aquifer');
   const [habitatBase, setHabitatBase] = useState(INITIAL.start);
 
