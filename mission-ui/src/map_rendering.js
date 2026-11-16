@@ -44,8 +44,7 @@ export function computeTimeOverlayPixels(zone, kind = 'return') {
             rgb = [0, Math.round(180 + frac * 40), 255]; // Cyan translucent vehicle envelope
             a = Math.round(55 + frac * 35);
           } else {
-            rgb = [226, 112, 92];
-            a = 40;
+            a = 0; // Unreachable or over-budget cells are 100% transparent
           }
         } else if (kind === 'walkback') {
           if (val <= budget) {
@@ -53,8 +52,7 @@ export function computeTimeOverlayPixels(zone, kind = 'return') {
             rgb = [Math.round(20 + frac * 30), 230, Math.round(110 - frac * 30)]; // Green translucent suited pedestrian envelope
             a = Math.round(60 + frac * 35);
           } else {
-            rgb = [226, 112, 92];
-            a = 40;
+            a = 0; // Unreachable or over-budget cells are 100% transparent
           }
         } else {
           if (val <= budget) {

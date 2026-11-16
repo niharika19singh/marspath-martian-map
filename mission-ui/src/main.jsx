@@ -170,7 +170,7 @@ function App() {
   const [scoutRoverModalOpen, setScoutRoverModalOpen] = useState(false);
   const [scoutRoverDispatched, setScoutRoverDispatched] = useState(false);
   const [selectedNasaPhoto, setSelectedNasaPhoto] = useState(null);
-  const [showWalkBackEnvelopes, setShowWalkBackEnvelopes] = useState(true);
+  const [showWalkBackEnvelopes, setShowWalkBackEnvelopes] = useState(false);
   const [showPlanetaryProtection, setShowPlanetaryProtection] = useState(true);
   const [showAuthenticPhotos, setShowAuthenticPhotos] = useState(true);
 
@@ -225,7 +225,8 @@ function App() {
   const windowStats = useMemo(() => traverseStats(highlightedDrives, highlightedWaypoints), [highlightedDrives, highlightedWaypoints]);
   const totalArchiveStats = useMemo(() => traverseStats(traverse?.features || [], waypointData || []), [traverse, waypointData]);
   const drivesThroughSol = useMemo(() => visibleDrives(traverse, solCut), [traverse, solCut]);
-  const historyStats = useMemo(() => traverseStats(drivesThroughSol, visibleWaypoints(waypointData, solCut)), [drivesThroughSol, waypointData, solCut]);
+  const waypointsThroughSol = useMemo(() => visibleWaypoints(waypointData, solCut), [waypointData, solCut]);
+  const historyStats = useMemo(() => traverseStats(drivesThroughSol, waypointsThroughSol), [drivesThroughSol, waypointsThroughSol]);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,8 +374,8 @@ function App() {
   const [base, setBase] = useState('auto');
   const [activeBookmark, setActiveBookmark] = useState('jezero');
   const [showViking, setShowViking] = useState(true);
-  const [showCtx, setShowCtx] = useState(false);
-  const [showHirise, setShowHirise] = useState(false);
+  const [showCtx, setShowCtx] = useState(true);
+  const [showHirise, setShowHirise] = useState(true);
   const [showMolaTerrain, setShowMolaTerrain] = useState(false);
   const [showHillshade, setShowHillshade] = useState(false);
   const [showSlope, setShowSlope] = useState(false);
@@ -559,9 +560,11 @@ function App() {
     setResult(enriched);
     setPreviousResult(null);
     setSelected(enriched.routes[0].route_id);
-    setRightExpanded(true);
-    setDetailsOpen(true);
-    setShowRoute(true);
+    if (missionView === 'planner') {
+      setRightExpanded(true);
+      setDetailsOpen(true);
+      setShowRoute(true);
+    }
     lastRequest.current = request;
     setFitToken(n => n + 1);
     setBusy(false);
@@ -1319,8 +1322,8 @@ function App() {
           onSelectProtectionZone={(zone) => setSelectedProtectionZone(zone)}
           onSelectNasaPhoto={(photo) => setSelectedNasaPhoto(photo)}
           historyMode={historyMode}
-          drives={highlightedDrives}
-          waypoints={highlightedWaypoints}
+          drives={drivesThroughSol}
+          waypoints={waypointsThroughSol}
           fullTraverse={traverse}
           fullWaypoints={waypointData}
           roverWaypoint={activeRoverWp}

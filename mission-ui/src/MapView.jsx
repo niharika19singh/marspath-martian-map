@@ -33,12 +33,6 @@ import {
 } from './map_rendering.js';
 import { JEZERO_SPECIAL_REGIONS } from './planetary_protection.js';
 import WaypointPovPopup from './WaypointPovPopup.jsx';
-import {
-  HABITAT_BASE_COORD,
-  PLANETARY_PROTECTION_ZONES,
-  getDualRadiusWalkBackGeoJSON,
-  AUTHENTIC_NASA_SURFACE_IMAGERY,
-} from './survivability.js';
 
 export { computeTimeOverlayPixels, buildTimeOverlayCanvas, calculateEdgeFeatherGradients };
 
@@ -89,44 +83,25 @@ function buildThemisThermalCanvas(terrain) {
 export default function MapView(props) {
   const {
     historyMode, drives = [], waypoints = [], showHistory = true, showWaypoints = true, historyFit, waypoint, onWaypoint,
-    fullTraverse = null, roverWaypoint = null, windowStats = null, solCut = 2022, maxSol = 2022, minSol = 14, onSolChange,
-    selectedScienceTarget: propSelectedSciTarget, onSelectScienceTarget,
     terrain, activeDemTerrain, start, destination, pick, onPin, base = 'auto',
     hazards = false, coverage = false, showHillshade = false, showSlope = false, showRoughness = false,
-    showViking = true, showCtx = false, showHirise = false, showMolaTerrain = false,
+    showViking = true, showCtx = true, showHirise = true, showMolaTerrain = false,
     vikingOpacity, ctxOpacity, hiriseOpacity, molaOpacity = 0.78,
     imageryOpacity = 1.0, terrainOpacity = 0.72,
     maxSlope = 20, maxRough = 0.85, response, selected, onSelectRoute,
     hover, fitToken, live, backendStatus, provenance, showRoute = true, showAlternatives = false, hoveredRoute = null,
     view3d = false, layersOpen, onLayersToggle, onTiltToggle, actionsRef,
     leftOpen = true, rightExpanded = false, profileExpanded = false,
-    showOrbiters = false, showGroundTracks = false, showFootprints = false, showCuriosity = false,
+    showOrbiters = true, showGroundTracks = true, showFootprints = true, showCuriosity = false,
     spacecraftPositions = [], groundTracks = [], orbitalObservations = [], selectedObservation = null, selectedSpacecraft = null,
     onSelectObservation, onSelectSpacecraft, curiosityTraverse = null, curiosityWaypoints = [], focusedProduct = null,
     showThemisOverlay = false, showScienceTargets = true, scienceTargets = [], roverReplayState = null,
     activeBookmark = 'jezero', onSelectBookmark, onWmtsStatusChange,
-    showReachableZone = false, showRescueMap = false, onOpenSurfacePov,
+    showReachableZone = true, showRescueMap = false, onOpenSurfacePov,
     showRoverEnvelope = true, showWalkbackEnvelope = true, overlayMode = 'combined',
     showOfficialZones = true, showCandidateZones = true, showDemoZones = true,
     onSelectSpecialRegion, habitat,
-    showWalkBackEnvelopes = true, showPlanetaryProtection = true, showAuthenticPhotos = true,
-    onSelectProtectionZone, onSelectNasaPhoto,
   } = props;
-
-  const [selectedScienceTarget, setSelectedScienceTarget] = useState(null);
-  const [gotoOpen, setGotoOpen] = useState(false);
-  const gotoMenuRef = useRef(null);
-
-  useEffect(() => {
-    if (!gotoOpen) return;
-    const onDocClick = e => {
-      if (gotoMenuRef.current && !gotoMenuRef.current.contains(e.target)) {
-        setGotoOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onDocClick);
-    return () => document.removeEventListener('pointerdown', onDocClick);
-  }, [gotoOpen]);
 
   const effectiveTerrain = activeDemTerrain || terrain;
   const terrainRef = useRef(effectiveTerrain);
@@ -345,24 +320,20 @@ export default function MapView(props) {
     const rescueZoneLayer = new ImageLayer({ zIndex: 13.9, visible: false, opacity: 0.78 });
     const roverEnvelopeLayer = new ImageLayer({ zIndex: 13.7, visible: false, opacity: 0.72 });
     const walkbackEnvelopeLayer = new ImageLayer({ zIndex: 13.85, visible: false, opacity: 0.75 });
+    const planetaryProtectionLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18 });
+    const habitatMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 22.5 });
     const risk = new ImageLayer({ zIndex: 14, visible: false });
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
-    const walkBackEnvelopesLayer = new VectorLayer({ source: new VectorSource(), zIndex: 14.7, visible: Boolean(props.showWalkBackEnvelopes ?? true) });
-    const planetaryProtectionLayer = new VectorLayer({ source: new VectorSource(), zIndex: 14.9, visible: Boolean(props.showPlanetaryProtection ?? true) });
-    const habitatMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 22.5 });
-    const passiveTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
-    const highlightedTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
-    const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16.5 });
+    const historyLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
+    const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
     const historyPins = new VectorLayer({ source: new VectorSource(), zIndex: 17 });
-    const roverMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18 });
-    const authenticPhotosLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18.5, visible: Boolean(props.showAuthenticPhotos ?? true) });
     const scienceTargetsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 19 });
     const routes = new VectorLayer({ source: new VectorSource(), zIndex: 20 });
     const pins = new VectorLayer({ source: new VectorSource(), zIndex: 22 });
     const turnaroundLayer = new VectorLayer({ source: new VectorSource(), zIndex: 23 });
     const hoverLayer = new VectorLayer({ source: new VectorSource(), zIndex: 24 });
     const roverReplayLayer = new VectorLayer({ source: new VectorSource(), zIndex: 25 });
-    const spacecraftLayer = new VectorLayer({ source: new VectorSource(), zIndex: 26, visible: false });
+    const spacecraftLayer = new VectorLayer({ source: new VectorSource(), zIndex: 26 });
     const playbackLayer = new VectorLayer({ source: new VectorSource(), zIndex: 27 });
 
     // Populate DEM & Imagery Coverage Boundaries (visible strictly when coverage toggle is active)
@@ -407,19 +378,15 @@ export default function MapView(props) {
         rescueZoneLayer,
         roverEnvelopeLayer,
         walkbackEnvelopeLayer,
+        planetaryProtectionLayer,
         themisLayer,
         footprintsLayer,
         groundTracksLayer,
         data,
         risk,
-        walkBackEnvelopesLayer,
-        planetaryProtectionLayer,
-        passiveTraverseLayer,
-        highlightedTraverseLayer,
+        historyLayer,
         curiosityLayer,
         historyPins,
-        roverMarkerLayer,
-        authenticPhotosLayer,
         scienceTargetsLayer,
         routes,
         pins,
@@ -518,19 +485,14 @@ export default function MapView(props) {
       rescueZoneLayer,
       roverEnvelopeLayer,
       walkbackEnvelopeLayer,
+      planetaryProtectionLayer,
       habitatMarkerLayer,
       themisLayer,
       footprintsLayer,
       groundTracksLayer,
       risk,
       data,
-      walkBackEnvelopesLayer,
-      planetaryProtectionLayer,
-      passiveTraverseLayer,
-      highlightedTraverseLayer,
-      roverMarkerLayer,
-      authenticPhotosLayer,
-      historyLayer: highlightedTraverseLayer,
+      historyLayer,
       curiosityLayer,
       historyPins,
       scienceTargetsLayer,
@@ -581,33 +543,17 @@ export default function MapView(props) {
 
     map.on('singleclick', e => {
       interact();
-      let routeId = null, recorded = null, obsId = null, scId = null, sciTgt = null, protZone = null, nasaPhoto = null, zoneData = null;
+      let routeId = null, recorded = null, obsId = null, scId = null, zoneData = null;
       map.forEachFeatureAtPixel(e.pixel, f => {
-        if (f.get('nasaPhoto')) { nasaPhoto = f.get('nasaPhoto'); return true; }
-        if (f.get('protectionZone')) { protZone = f.get('protectionZone'); return true; }
         if (f.get('zoneData')) { zoneData = f.get('zoneData'); return true; }
-        if (f.get('scienceTarget')) { sciTgt = f.get('scienceTarget'); return true; }
         if (f.get('observationId')) { obsId = f.get('observationId'); return true; }
         if (f.get('spacecraftId')) { scId = f.get('spacecraftId'); return true; }
         if (f.get('waypoint')) { recorded = f.get('waypoint'); return true; }
         if (f.get('driveRecord')) { recorded = f.get('driveRecord'); return true; }
         if (f.get('routeId')) { routeId = f.get('routeId'); return true; }
-      }, { hitTolerance: 14 });
-      if (nasaPhoto) {
-        callbacks.current.props.onSelectNasaPhoto?.(nasaPhoto);
-        return;
-      }
-      if (protZone) {
-        callbacks.current.props.onSelectProtectionZone?.(protZone);
-        return;
-      }
+      }, { hitTolerance: 6 });
       if (zoneData && !callbacks.current.pick) {
         callbacks.current.props.onSelectSpecialRegion?.(zoneData.id);
-        return;
-      }
-      if (sciTgt) {
-        setSelectedScienceTarget(prev => prev === sciTgt.target_id ? null : sciTgt.target_id);
-        callbacks.current.props.onSelectScienceTarget?.(sciTgt);
         return;
       }
       if (obsId) { callbacks.current.props.onSelectObservation?.(obsId); return; }
@@ -727,16 +673,16 @@ export default function MapView(props) {
     l.wmtsMolaTerrain?.setVisible(molaVisible);
     l.wmtsMolaTerrain?.setOpacity(molaOpacity);
 
-    // 2. Regional CTX (6 m/px) - Optional, off by default to avoid square patches
-    const ctxVisible = Boolean(showCtx && (isCtx || (!isViking && !isAuto)));
-    l.wmtsCtxRegional?.setVisible(ctxVisible);
-    l.wmtsCtxRegional?.setMaxResolution((isCtx ? 8000 : 150) / M_PER_DEG);
+    // 2. Regional CTX (6 m/px)
+    const ctxVisible = Boolean(showCtx && (isAuto || isCtx || isHirise || !isViking));
+    l.wmtsCtxRegional?.setVisible(ctxVisible && !isViking);
+    l.wmtsCtxRegional?.setMaxResolution((isCtx ? 8000 : 800) / M_PER_DEG);
     l.wmtsCtxRegional?.setOpacity(effCtxOpacity);
 
-    // 3. Local HiRISE (0.25 m/px) - Optional, off by default, only shown at close zoom
-    const hiriseVisible = Boolean(showHirise && (isHirise || (!isViking && !isAuto)));
-    l.wmtsHiriseLocal?.setVisible(hiriseVisible);
-    l.wmtsHiriseLocal?.setMaxResolution((isHirise ? 2500 : 8) / M_PER_DEG);
+    // 3. Local HiRISE (0.25 m/px)
+    const hiriseVisible = Boolean(showHirise && (isAuto || isHirise));
+    l.wmtsHiriseLocal?.setVisible(hiriseVisible && !isViking && !isCtx);
+    l.wmtsHiriseLocal?.setMaxResolution((isHirise ? 2500 : 25) / M_PER_DEG);
     l.wmtsHiriseLocal?.setOpacity(effHiriseOpacity);
 
     if (!effectiveTerrain) return;
@@ -778,14 +724,13 @@ export default function MapView(props) {
     l.risk.setOpacity(terrainOpacity);
     l.data.setVisible(Boolean(coverage));
     l.data.setOpacity(terrainOpacity);
-    l.demBoundaryLayer?.setVisible(Boolean(coverage));
     l.demBoundaryLayer?.changed();
 
-    // Update HiRISE & CTX coverage boundary vectors (visible strictly when coverage toggle is active)
+    // Update HiRISE & CTX coverage boundary vectors
     if (l.hiriseBoundary) {
       const src = l.hiriseBoundary.getSource();
       src.clear();
-      if (coverage) {
+      if (coverage || isHirise) {
         const orthoE = JEZERO_HIRISE_ORTHO_BOUNDS;
         const fOrtho = new Feature(new Polygon([[
           [orthoE[0], orthoE[1]], [orthoE[2], orthoE[1]], [orthoE[2], orthoE[3]], [orthoE[0], orthoE[3]], [orthoE[0], orthoE[1]],
@@ -830,40 +775,36 @@ export default function MapView(props) {
     maxSlope, maxRough, live, showThemisOverlay,
   ]);
 
-  // Science Target markers: compact golden stars at wide zoom; labels revealed on selection or closer zoom
+  // Science Target markers
   useEffect(() => {
     if (!mapRef.current || !layers.current.scienceTargetsLayer) return;
     const l = layers.current, src = l.scienceTargetsLayer.getSource();
     src.clear();
     l.scienceTargetsLayer.setVisible(Boolean(showScienceTargets));
     if (!showScienceTargets || !scienceTargets?.length) return;
-    const activeSelectedId = propSelectedSciTarget ?? selectedScienceTarget;
     scienceTargets.forEach(tgt => {
       if (!Number.isFinite(tgt.lon) || !Number.isFinite(tgt.lat)) return;
-      const isSelected = activeSelectedId === tgt.target_id;
       const f = new Feature({ geometry: new Point([tgt.lon, tgt.lat]), scienceTarget: tgt });
       f.setStyle((feature, resolution) => {
         const resM = resolution * M_PER_DEG;
-        if (!isSelected && resM > 6.0) return null; // Off in default overview
-        const showLabel = isSelected || resM <= 3.5;
         return new Style({
           image: new CircleStyle({
-            radius: isSelected ? 7 : (resM > 12 ? 3 : 4.5),
-            fill: new Fill({ color: isSelected ? '#5cffb0' : '#ffd166' }),
-            stroke: new Stroke({ color: '#141008', width: isSelected ? 2.5 : 1.5 }),
+            radius: resM > 400 ? 3.5 : 5.5,
+            fill: new Fill({ color: '#ffd166' }),
+            stroke: new Stroke({ color: '#141008', width: 1.8 }),
           }),
-          text: showLabel ? new Text({
+          text: resM > 400 ? undefined : new Text({
             text: `★ ${tgt.name} (${tgt.science_value_points} pts)`,
-            font: isSelected ? '600 11px Inter, sans-serif' : '500 10px Inter, sans-serif',
-            offsetY: 15,
-            fill: new Fill({ color: isSelected ? '#a3f4ca' : '#ffe8a3' }),
+            font: '500 10px Inter, sans-serif',
+            offsetY: 14,
+            fill: new Fill({ color: '#ffe8a3' }),
             stroke: new Stroke({ color: '#0b1012', width: 3 }),
-          }) : undefined,
+          }),
         });
       });
       src.addFeature(f);
     });
-  }, [terrain, showScienceTargets, scienceTargets, selectedScienceTarget, propSelectedSciTarget]);
+  }, [terrain, showScienceTargets, scienceTargets]);
 
   // Synchronized Rover Replay marker from Mars Time Machine
   useEffect(() => {
@@ -926,57 +867,22 @@ export default function MapView(props) {
     src.clear();
     if (!response) return;
     [...response.routes].reverse().forEach(r => {
-      const line = new LineString(r.geometry.coordinates.map(c => [c[0], c[1]]));
-      const f = new Feature({ geometry: line, routeId: r.route_id });
+      const primary = r.score_rank === 1, line = new LineString(r.geometry.coordinates.map(c => [c[0], c[1]])), f = new Feature({ geometry: line, routeId: r.route_id });
       const flow = new Stroke({ color: '#d6ffe7bb', width: 1.5, lineDash: [8, 22] });
-
-      const selectedStyles = [
-        new Style({ stroke: new Stroke({ color: '#000000aa', width: 11 }) }),
-        new Style({ stroke: new Stroke({ color: '#5cffb04d', width: 8 }) }),
-        new Style({ stroke: new Stroke({ color: '#5cffb0', width: 5 }) }),
-        new Style({ stroke: flow }),
-      ];
-
-      const hoveredStyles = [
-        new Style({ stroke: new Stroke({ color: '#000000cc', width: 9 }) }),
-        new Style({ stroke: new Stroke({ color: '#ffb867cc', width: 6 }) }),
-        new Style({ stroke: new Stroke({ color: '#ffdd9e', width: 3 }) }),
-      ];
-
-      const altStyles = [
-        new Style({ stroke: new Stroke({ color: '#0c171dcc', width: 5 }) }),
-        new Style({
-          stroke: new Stroke({
-            color: r.score_rank === 2 ? '#ffb867cc' : '#8ab4f8cc',
-            width: 2.5,
-            lineDash: [8, 6],
-          }),
-        }),
-      ];
-
+      const styles = primary
+        ? [new Style({ stroke: new Stroke({ color: '#000000aa', width: 10 }) }), new Style({ stroke: new Stroke({ color: '#5cffb04d', width: 8 }) }), new Style({ stroke: new Stroke({ color: '#5cffb0', width: 5 }) }), new Style({ stroke: flow })]
+        : [new Style({ stroke: new Stroke({ color: '#0c171dcc', width: 4 }) }), new Style({ stroke: new Stroke({ color: '#b7c5c580', width: 2, lineDash: [6, 5] }) })];
       f.setStyle(() => {
         const p = callbacks.current.props;
         if (!p.showRoute) return null;
-        const activeSelectedId = p.selected || response.routes[0]?.route_id;
-        const isSelected = r.route_id === activeSelectedId;
-        const isHovered = r.route_id === p.hoveredRoute;
-
-        if (!isSelected && !p.showAlternatives && !isHovered) return null;
-
-        if (isSelected) {
-          flow.setLineDashOffset(matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : -performance.now() / 60);
-          return selectedStyles;
-        }
-        if (isHovered) {
-          return hoveredStyles;
-        }
-        return altStyles;
+        if (!primary && !p.showAlternatives && r.route_id !== p.selected && r.route_id !== p.hoveredRoute) return null;
+        flow.setLineDashOffset(matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : -performance.now() / 60);
+        return styles;
       });
       src.addFeature(f);
 
       // Highlight route breach if route intersects planetary protection geofence buffer
-      const isPrimary = r.score_rank === 1 || r.route_id === response?.routes?.[0]?.route_id;
-      const ppAssessment = r.planetary_protection_assessment || (isPrimary ? response?.planetary_protection : null);
+      const ppAssessment = r.planetary_protection_assessment || (primary ? response?.planetary_protection : null);
       if (ppAssessment && ppAssessment.intersected_regions && ppAssessment.intersected_regions.length > 0) {
         const breachLine = new Feature({ geometry: line.clone(), routeId: r.route_id });
         breachLine.setStyle(new Style({
@@ -995,7 +901,7 @@ export default function MapView(props) {
         }
       }
     });
-  }, [terrain, response, selected, hoveredRoute, showAlternatives, showRoute, live, hazards, coverage, backendStatus]);
+  }, [terrain, response, live, hazards, coverage, backendStatus]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -1017,7 +923,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
 
     const rz = response?.return_zone;
-    if (showRoute && showReachableZone && rz?.minutes_grid?.length && rz?.bounds?.length === 4) {
+    if (!historyMode && showRoute && showReachableZone && rz?.minutes_grid?.length && rz?.bounds?.length === 4) {
       l.returnZoneLayer?.setSource(
         new ImageStatic({
           url: buildTimeOverlayCanvas(rz, 'return'),
@@ -1032,7 +938,7 @@ export default function MapView(props) {
     }
 
     const rsz = response?.rescue_zone;
-    if (showRoute && showRescueMap && rsz?.minutes_grid?.length && rsz?.bounds?.length === 4) {
+    if (!historyMode && showRoute && showRescueMap && rsz?.minutes_grid?.length && rsz?.bounds?.length === 4) {
       l.rescueZoneLayer?.setSource(
         new ImageStatic({
           url: buildTimeOverlayCanvas(rsz, 'rescue'),
@@ -1080,7 +986,7 @@ export default function MapView(props) {
 
     // Dual-Radius Envelopes: Rover-Assisted (Cyan) & On-Foot Walk-Back (Green)
     const roverGrid = response?.dual_envelopes?.rover_assisted?.time_grid || response?.rescue_zone;
-    const shouldShowRover = showRoute && (overlayMode === 'combined' || showRoverEnvelope);
+    const shouldShowRover = !historyMode && showRoute && (overlayMode === 'combined' || showRoverEnvelope);
     if (shouldShowRover && roverGrid?.minutes_grid?.length && roverGrid?.bounds?.length === 4) {
       l.roverEnvelopeLayer?.setSource(
         new ImageStatic({
@@ -1096,7 +1002,7 @@ export default function MapView(props) {
     }
 
     const walkGrid = response?.dual_envelopes?.on_foot_walkback?.time_grid || response?.return_zone;
-    const shouldShowWalk = showRoute && (overlayMode === 'combined' || showWalkbackEnvelope);
+    const shouldShowWalk = !historyMode && showRoute && (overlayMode === 'combined' || showWalkbackEnvelope);
     if (shouldShowWalk && walkGrid?.minutes_grid?.length && walkGrid?.bounds?.length === 4) {
       l.walkbackEnvelopeLayer?.setSource(
         new ImageStatic({
@@ -1356,7 +1262,7 @@ export default function MapView(props) {
         }),
         new Style({
           text: new Text({
-            text: `Simulated rover · ${Math.round(currentPlayback.distTraveled)} m (${Math.round(currentPlayback.headingDeg)}°)`,
+            text: `Perseverance · ${Math.round(currentPlayback.distTraveled)} m (${Math.round(currentPlayback.headingDeg)}°)`,
             font: '600 11px Inter, sans-serif',
             offsetY: -22,
             fill: new Fill({ color: '#5cffb0' }),
@@ -1372,275 +1278,47 @@ export default function MapView(props) {
     }
   }, [currentPlayback, historyMode, isPlaying]);
 
-  // 1. Full Recorded Traverse Layer (All 559 published drives across Jezero archive)
   useEffect(() => {
-    if (!mapRef.current || !layers.current.passiveTraverseLayer) return;
-    const l = layers.current;
-    const src = l.passiveTraverseLayer.getSource();
-    src.clear();
-    l.passiveTraverseLayer.setVisible(Boolean(showHistory));
-
-    const allFeats = fullTraverse?.features || drives;
-    if (!allFeats?.length) return;
-
-    for (const drive of allFeats) {
-      if (!drive.geometry?.coordinates || drive.geometry.coordinates.length < 2) continue;
-      const f = new Feature({
-        geometry: new LineString(drive.geometry.coordinates.map(c => [c[0], c[1]])),
-        driveRecord: drive,
-      });
-      f.setStyle([
-        new Style({
-          stroke: new Stroke({ color: 'rgba(10, 14, 18, 0.65)', width: 3.2, lineCap: 'round', lineJoin: 'round' }),
-        }),
-        new Style({
-          stroke: new Stroke({ color: '#9c9489', width: 1.5, lineCap: 'round', lineJoin: 'round' }),
-        }),
-      ]);
-      src.addFeature(f);
-    }
-  }, [fullTraverse, showHistory]);
-
-  // 2. Highlighted 15-Sol Trailing Window Layer
-  useEffect(() => {
-    if (!mapRef.current || !layers.current.highlightedTraverseLayer) return;
-    const l = layers.current;
-    const src = l.highlightedTraverseLayer.getSource();
-    src.clear();
-    l.highlightedTraverseLayer.setVisible(Boolean(showHistory));
-
+    if (!mapRef.current) return;
+    const l = layers.current, source = l.historyLayer.getSource(), pins = l.historyPins.getSource();
+    source.clear();
+    pins.clear();
+    l.historyLayer.setVisible(showHistory);
+    l.historyPins.setVisible(showHistory && showWaypoints);
     for (const drive of drives) {
-      if (!drive.geometry?.coordinates || drive.geometry.coordinates.length < 2) continue;
-      const f = new Feature({
-        geometry: new LineString(drive.geometry.coordinates.map(c => [c[0], c[1]])),
-        driveRecord: drive,
-      });
-      f.setStyle([
-        new Style({
-          stroke: new Stroke({ color: 'rgba(255, 170, 60, 0.20)', width: 8.5, lineCap: 'round', lineJoin: 'round' }),
-        }),
-        new Style({
-          stroke: new Stroke({ color: 'rgba(255, 184, 103, 0.50)', width: 4.8, lineCap: 'round', lineJoin: 'round' }),
-        }),
-        new Style({
-          stroke: new Stroke({ color: '#ffb867', width: 2.6, lineCap: 'round', lineJoin: 'round' }),
-        }),
-        new Style({
-          stroke: new Stroke({ color: '#fff3db', width: 1.0, lineCap: 'round', lineJoin: 'round' }),
-        }),
-      ]);
-      src.addFeature(f);
+      const f = new Feature({ geometry: new LineString(drive.geometry.coordinates.map(c => [c[0], c[1]])), driveRecord: drive });
+      f.setStyle([new Style({ stroke: new Stroke({ color: '#101318ed', width: 8, lineCap: 'round', lineJoin: 'round' }) }), new Style({ stroke: new Stroke({ color: '#ffb867', width: 4, lineCap: 'round', lineJoin: 'round' }) }), new Style({ stroke: new Stroke({ color: '#ffe1aa', width: 1 }) })]);
+      source.addFeature(f);
     }
-  }, [drives, showHistory]);
-
-  // 3. Rover Marker & Milestone Waypoint Stops
-  useEffect(() => {
-    if (!mapRef.current || !layers.current.roverMarkerLayer || !layers.current.historyPins) return;
-    const l = layers.current;
-    const markerSrc = l.roverMarkerLayer.getSource();
-    const pinsSrc = l.historyPins.getSource();
-    markerSrc.clear();
-    pinsSrc.clear();
-    l.roverMarkerLayer.setVisible(Boolean(showHistory));
-    l.historyPins.setVisible(Boolean(showHistory && showWaypoints));
-
-    const activeWp = roverWaypoint || waypoints?.at(-1);
-    if (activeWp?.geometry?.coordinates) {
-      const c = activeWp.geometry.coordinates;
-      const f = new Feature({
-        geometry: new Point([c[0], c[1]]),
-        waypoint: activeWp,
-      });
-      const isLatest = activeWp.properties.sol >= (maxSol || 2022);
-      const markerLabel = isLatest
-        ? `Last recorded position · Sol ${maxSol || 2022}`
-        : `Perseverance · Sol ${activeWp.properties.sol}`;
-
-      f.setStyle(
-        new Style({
-          image: new CircleStyle({
-            radius: 8.5,
-            fill: new Fill({ color: '#ffb867' }),
-            stroke: new Stroke({ color: '#0b1014', width: 2.5 }),
-          }),
-          text: new Text({
-            text: markerLabel,
-            font: '600 11px Inter, sans-serif',
-            offsetY: -22,
-            fill: new Fill({ color: '#ffe2b8' }),
-            stroke: new Stroke({ color: '#0b1014', width: 3.5 }),
-          }),
-        })
-      );
-      markerSrc.addFeature(f);
-    }
-
-    waypoints.forEach(w => {
-      if (!w.geometry?.coordinates) return;
-      const c = w.geometry.coordinates;
-      const isCurrent = w === activeWp;
-      if (isCurrent) return;
-      const f = new Feature({ geometry: new Point([c[0], c[1]]), waypoint: w });
-      const isSelected = waypoint && (waypoint.properties?.RMC === w.properties?.RMC || waypoint.properties?.sol === w.properties?.sol);
+    waypoints.forEach((w, i) => {
+      const latest = i === waypoints.length - 1, chosen = w === waypoint, c = w.geometry.coordinates, f = new Feature({ geometry: new Point([c[0], c[1]]), waypoint: w });
       f.setStyle((feature, resolution) => {
         const resM = resolution * M_PER_DEG;
-        if (!isSelected && resM > 1.8) return null; // Strip out per-segment dots in overview
-        return new Style({
-          image: new CircleStyle({
-            radius: isSelected ? 6 : 2.5,
-            fill: new Fill({ color: isSelected ? '#ffb867' : '#d8cbba' }),
-            stroke: new Stroke({ color: '#101518', width: isSelected ? 2 : 1 }),
-          }),
-        });
+        const ring = latest || chosen || i % 25 === 0 || resM < 2;
+        return [
+          new Style({ image: new CircleStyle({ radius: latest ? 7 : chosen ? 6 : 2.5, fill: new Fill({ color: latest ? '#87f1ee' : chosen ? '#f6a7f3' : '#c982d9' }), stroke: new Stroke({ color: '#18151e', width: 1.5 }) }) }),
+          ...(ring ? [new Style({ image: new CircleStyle({ radius: latest ? 15 : chosen ? 20 : 10, stroke: new Stroke({ color: latest ? '#8bf3eeaa' : '#d38ce4aa', width: 1.5 }) }), text: latest || chosen ? new Text({ text: 'Sol ' + w.properties.sol, font: '500 12px Inter, sans-serif', offsetY: -24, fill: new Fill({ color: '#f7e5fd' }), stroke: new Stroke({ color: '#10151a', width: 4 }) }) : undefined })] : []),
+        ];
       });
-      pinsSrc.addFeature(f);
+      pins.addFeature(f);
     });
-  }, [waypoints, roverWaypoint, showHistory, showWaypoints, maxSol, waypoint]);
+  }, [terrain, drives, waypoints, showHistory, showWaypoints, waypoint]);
 
-  // 4. Dual-Radius Walk-Back Safety Envelopes (Rover-Assisted vs On-Foot)
-  useEffect(() => {
-    if (!mapRef.current || !layers.current.walkBackEnvelopesLayer) return;
-    const l = layers.current.walkBackEnvelopesLayer;
-    const src = l.getSource();
-    src.clear();
-    l.setVisible(Boolean(showWalkBackEnvelopes));
-    if (!showWalkBackEnvelopes) return;
-
-    const envelopesGeo = getDualRadiusWalkBackGeoJSON(HABITAT_BASE_COORD);
-    for (const feat of envelopesGeo.features) {
-      const coords = feat.geometry.coordinates[0];
-      const olPoly = new Polygon([coords]);
-      const olFeat = new Feature({
-        geometry: olPoly,
-        properties: feat.properties,
-        walkBackSafety: feat.properties,
-      });
-
-      const isRover = feat.properties.envelope === 'rover_assisted';
-      olFeat.setStyle((f, resolution) => {
-        const resM = resolution * M_PER_DEG;
-        return new Style({
-          stroke: new Stroke({
-            color: isRover ? '#00d4ff' : '#5cffb0',
-            width: isRover ? 1.8 : 2.2,
-            lineDash: isRover ? [6, 4] : undefined,
-          }),
-          fill: new Fill({
-            color: isRover ? 'rgba(0, 212, 255, 0.07)' : 'rgba(92, 255, 176, 0.10)',
-          }),
-          text: new Text({
-            text: isRover
-              ? (resM > 60 ? 'ROVER ENVELOPE (5.2 km)' : 'ROVER-ASSISTED REACHABLE ENVELOPE (5.2 km)')
-              : (resM > 60 ? 'FOOT LIMIT (1.8 km)' : 'ON-FOOT ASTRONAUT SAFE RETURN RADIUS (1.8 km)'),
-            font: '600 11px Inter, sans-serif',
-            offsetY: isRover ? -18 : 16,
-            fill: new Fill({ color: isRover ? '#7dd3fc' : '#a3f4ca' }),
-            stroke: new Stroke({ color: '#091319', width: 3 }),
-          }),
-        });
-      });
-      src.addFeature(olFeat);
-    }
-  }, [showWalkBackEnvelopes]);
-
-  // 5. Planetary Protection Special Regions (COSPAR Cat IVc, Candidate, Science Zones)
-  useEffect(() => {
-    if (!mapRef.current || !layers.current.planetaryProtectionLayer) return;
-    const l = layers.current.planetaryProtectionLayer;
-    const src = l.getSource();
-    src.clear();
-    l.setVisible(Boolean(showPlanetaryProtection));
-    if (!showPlanetaryProtection) return;
-
-    for (const zone of PLANETARY_PROTECTION_ZONES) {
-      const coords = zone.coordinates[0];
-      const olPoly = new Polygon([coords]);
-      const olFeat = new Feature({
-        geometry: olPoly,
-        protectionZone: zone,
-      });
-
-      const isCatIVc = zone.category === 'COSPAR Category IVc';
-      const isCandidate = zone.category === 'Candidate Sensitive';
-      const strokeColor = isCatIVc ? '#ef4444' : isCandidate ? '#f59e0b' : '#c084fc';
-      const fillColor = isCatIVc ? 'rgba(239, 68, 68, 0.22)' : isCandidate ? 'rgba(245, 158, 11, 0.18)' : 'rgba(168, 85, 247, 0.16)';
-
-      olFeat.setStyle((f, resolution) => {
-        const resM = resolution * M_PER_DEG;
-        return new Style({
-          stroke: new Stroke({
-            color: strokeColor,
-            width: 2.0,
-            lineDash: isCandidate ? [6, 4] : undefined,
-          }),
-          fill: new Fill({ color: fillColor }),
-          text: new Text({
-            text: resM > 120 ? zone.id : `${zone.id} · ${zone.name} (${zone.category})`,
-            font: '600 11px Inter, sans-serif',
-            offsetY: -12,
-            fill: new Fill({ color: strokeColor }),
-            stroke: new Stroke({ color: '#091319', width: 3.2 }),
-          }),
-        });
-      });
-      src.addFeature(olFeat);
-    }
-  }, [showPlanetaryProtection]);
-
-  // 6. Authentic NASA Surface Photo Vantage Points (Perseverance Mastcam-Z & SuperCam)
-  useEffect(() => {
-    if (!mapRef.current || !layers.current.authenticPhotosLayer) return;
-    const l = layers.current.authenticPhotosLayer;
-    const src = l.getSource();
-    src.clear();
-    l.setVisible(Boolean(showAuthenticPhotos));
-    if (!showAuthenticPhotos) return;
-
-    for (const key of Object.keys(AUTHENTIC_NASA_SURFACE_IMAGERY)) {
-      const photo = AUTHENTIC_NASA_SURFACE_IMAGERY[key];
-      const olPt = new Point(photo.coordinates);
-      const olFeat = new Feature({
-        geometry: olPt,
-        nasaPhoto: photo,
-      });
-
-      olFeat.setStyle((f, resolution) => {
-        const resM = resolution * M_PER_DEG;
-        return new Style({
-          image: new CircleStyle({
-            radius: 7.5,
-            fill: new Fill({ color: '#38bdf8' }),
-            stroke: new Stroke({ color: '#08121a', width: 2.5 }),
-          }),
-          text: new Text({
-            text: resM > 90 ? `📷 ${photo.pdsPhotojournalId}` : `📷 ${photo.pdsPhotojournalId} · ${photo.name} (${photo.instrument})`,
-            font: '600 11px Inter, sans-serif',
-            offsetY: -18,
-            fill: new Fill({ color: '#e0f2fe' }),
-            stroke: new Stroke({ color: '#0b1319', width: 3.5 }),
-          }),
-        });
-      });
-      src.addFeature(olFeat);
-    }
-  }, [showAuthenticPhotos]);
-
-  const fitFullTraverse = () => {
+  function fitHistory() {
     if (view3d) { terrain3D.current?.fit(); return; }
-    const feats = fullTraverse?.features || drives;
-    const coords = feats?.flatMap(f => f.geometry.coordinates).map(c => [c[0], c[1]]) || [];
+    const coords = drives.flatMap(f => f.geometry.coordinates).map(c => [c[0], c[1]]);
     if (!coords.length || !mapRef.current) return;
     const xs = coords.map(p => p[0]), ys = coords.map(p => p[1]), mobile = innerWidth < 850;
-    const padDeg = 150 / M_PER_DEG;
+    const padDeg = 250 / M_PER_DEG;
     mapRef.current.getView().fit(
       [Math.min(...xs) - padDeg, Math.min(...ys) - padDeg, Math.max(...xs) + padDeg, Math.max(...ys) + padDeg],
-      { padding: mobile ? [160, 50, 140, 30] : [90, 120, 150, 380], duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500, minResolution: 0.8 / M_PER_DEG }
+      { padding: mobile ? [200, 75, 150, 25] : [90, 125, 160, 395], duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450, minResolution: 0.8 / M_PER_DEG }
     );
-  };
-  useEffect(() => { if (historyMode) fitFullTraverse(); }, [terrain, historyFit]);
+  }
+  useEffect(() => { if (historyMode) fitHistory(); }, [terrain, historyFit]);
 
   const fit = () => {
-    if (historyMode) { fitFullTraverse(); return; }
+    if (historyMode) { fitHistory(); return; }
     if (view3d) { terrain3D.current?.fit(); return; }
     mapRef.current?.getView().fit(layers.current.extent, { padding: [60, 70, 110, 70], duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450 });
   };
@@ -1664,7 +1342,7 @@ export default function MapView(props) {
       view.setResolution(12 / M_PER_DEG);
     }
   };
-  useEffect(() => { if (actionsRef) actionsRef.current = { fit, zoom, focus, fitFullTraverse }; }, [view3d, terrain, historyMode, drives, fullTraverse]);
+  useEffect(() => { if (actionsRef) actionsRef.current = { fit, zoom, focus }; }, [view3d, terrain, historyMode, drives]);
 
   useEffect(() => {
     if (historyMode || !response || !mapRef.current) return;
@@ -1691,7 +1369,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
     const l = layers.current, src = l.spacecraftLayer.getSource();
     src.clear();
-    l.spacecraftLayer.setVisible(Boolean(showOrbiters));
+    l.spacecraftLayer.setVisible(showOrbiters);
     if (!showOrbiters || !spacecraftPositions.length) return;
     spacecraftPositions.forEach(ship => {
       if (!Number.isFinite(ship.lon) || !Number.isFinite(ship.lat)) return;
@@ -1706,7 +1384,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
     const l = layers.current, src = l.groundTracksLayer.getSource();
     src.clear();
-    l.groundTracksLayer.setVisible(Boolean(showGroundTracks));
+    l.groundTracksLayer.setVisible(showGroundTracks);
     if (!showGroundTracks || !groundTracks.length) return;
     groundTracks.forEach(gt => {
       if (!gt.points || gt.points.length < 2) return;
@@ -1735,7 +1413,7 @@ export default function MapView(props) {
     if (!mapRef.current) return;
     const l = layers.current, src = l.footprintsLayer.getSource();
     src.clear();
-    l.footprintsLayer.setVisible(Boolean(showFootprints));
+    l.footprintsLayer.setVisible(showFootprints);
     if (!showFootprints || !orbitalObservations.length) return;
     orbitalObservations.forEach(obs => {
       const coords = obs.footprint_geojson?.geometry?.coordinates?.[0];
@@ -1848,7 +1526,7 @@ export default function MapView(props) {
   const rightInset = !historyMode ? (rightExpanded ? 452 : 392) : 76;
   const corridorCenterStyle = `calc(50% + ${(leftInset - rightInset) / 2}px)`;
   const corridorWidthStyle = `calc(100vw - ${leftInset + rightInset}px)`;
-  const showPlaybackDeck = !historyMode && Boolean(currentPlayback && (isPlaying || playbackProgress > 0));
+  const showPlaybackDeck = !historyMode && Boolean(currentPlayback);
   const inspectBottomOffset = profileExpanded
     ? undefined
     : showPlaybackDeck
@@ -1873,108 +1551,33 @@ export default function MapView(props) {
         <span />Jezero Crater <small>18.41°N · 77.42°E</small>
       </div>
 
-      {/* Consolidated Recorded Traverse & Navigation HUD */}
-      {showHistory && (
-        <div
-          className="recorded-traverse-hud glass"
-          style={{
-            left: corridorCenterStyle,
-            maxWidth: corridorWidthStyle,
-          }}
-          data-testid="traverse-legend-hud"
-        >
-          {/* Go to Location Dropdown Menu */}
-          <div className="goto-menu-wrapper" ref={gotoMenuRef}>
-            <button
-              type="button"
-              className={`goto-btn ${gotoOpen ? 'active' : ''}`}
-              onClick={() => setGotoOpen(v => !v)}
-              aria-expanded={gotoOpen}
-              aria-haspopup="true"
-              title="Go to location on Mars"
-            >
-              <span>📍 Go to: <strong>{PLANETARY_BOOKMARKS.find(b => b.id === activeBookmark)?.label || 'Jezero'}</strong></span>
-              <span className="dropdown-caret">▾</span>
-            </button>
-            {gotoOpen && (
-              <div className="goto-dropdown glass" role="menu">
-                <div className="goto-dropdown-title">Planetary Landmarks</div>
-                {PLANETARY_BOOKMARKS.map(bm => (
-                  <button
-                    key={bm.id}
-                    type="button"
-                    role="menuitem"
-                    className={`goto-dropdown-item ${activeBookmark === bm.id ? 'active' : ''}`}
-                    onClick={() => {
-                      interact();
-                      focus({ lon: bm.lon, lat: bm.lat, resolution: bm.resolution });
-                      onSelectBookmark?.(bm);
-                      setGotoOpen(false);
-                    }}
-                  >
-                    <span className="bm-dot" style={{ background: bm.hasDem ? '#5cffb0' : '#64dfdf' }} />
-                    <div className="goto-item-labels">
-                      <span className="goto-item-name">{bm.label}</span>
-                      <small className="goto-item-sub">{bm.sub}</small>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="hud-divider" />
-
-          {/* Full Recorded Traverse Swatch */}
-          <div className="traverse-legend-item" title="Complete NASA/JPL published drive archive through Sol 2022">
-            <span className="traverse-swatch passive-road" />
-            <span>Full recorded traverse</span>
-          </div>
-
-          {/* 15-Sol Glow Swatch */}
-          <div className="traverse-legend-item" title="Trailing 15-sol elapsed observation window">
-            <span className="traverse-swatch amber-glow" />
-            <span>
-              Highlighted window: <strong>15 sols</strong> (Sol {Math.max(0, (solCut ?? 2022) - 14)}–{solCut ?? 2022})
-            </span>
-          </div>
-
-          {/* Planned Route Swatch (when active) */}
-          {showRoute && response?.routes?.length > 0 && (
-            <div className="traverse-legend-item" title="Active computed navigation plan">
-              <span className="traverse-swatch planned-mint" />
-              <span>Planned route</span>
-            </div>
-          )}
-
-          {/* Rover Marker Info */}
-          <div className="traverse-legend-item">
-            <span className="traverse-marker-dot" />
-            <span>
-              {(solCut ?? 2022) >= (maxSol || 2022)
-                ? `Last recorded position · Sol ${maxSol || 2022}`
-                : `Perseverance · Sol ${solCut}`}
-            </span>
-          </div>
-
-          {/* Empty Window Notice */}
-          {windowStats && windowStats.segments === 0 && (
-            <span className="empty-window-pill">
-              No recorded drives in this window
-            </span>
-          )}
-
-          {/* Fit Full Traverse Action */}
+      {/* Planetary Bookmark Bar */}
+      <div
+        className="planetary-bookmark-bar glass"
+        role="region"
+        aria-label="Planetary region bookmarks"
+        style={{
+          left: corridorCenterStyle,
+          maxWidth: corridorWidthStyle,
+        }}
+      >
+        {PLANETARY_BOOKMARKS.map(bm => (
           <button
+            key={bm.id}
             type="button"
-            className="fit-traverse-btn"
-            onClick={() => { interact(); fitFullTraverse(); }}
-            title="Fit full recorded traverse in view"
+            className={activeBookmark === bm.id ? 'active' : ''}
+            onClick={() => {
+              interact();
+              focus({ lon: bm.lon, lat: bm.lat, resolution: bm.resolution });
+              onSelectBookmark?.(bm);
+            }}
+            title={bm.sub}
           >
-            <Icon name="fit" /> Fit full traverse
+            <span className="bm-dot" style={{ background: bm.hasDem ? '#5cffb0' : '#64dfdf' }} />
+            {bm.label}
           </button>
-        </div>
-      )}
+        ))}
+      </div>
 
       <div className="map-control-stack glass">
         <button aria-label="Zoom in" onClick={() => zoom(1)}><Icon name="plus" /></button>
@@ -2356,25 +1959,6 @@ export default function MapView(props) {
                 {Math.round(currentPlayback.headingDeg)}°
               </span>
             </div>
-          </div>
-        </div>
-      )}
-      {showReachableZone && response?.return_zone && (
-        <div className="return-zone-legend glass" data-testid="return-zone-legend">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-            <span style={{ fontWeight: 600, color: '#5cffb0', fontSize: '11px' }}>Reachable Return-Time Zone</span>
-            <span style={{ fontSize: '10px', color: '#9cb0a5', fontFamily: 'var(--mono)' }}>
-              {((response.return_zone.reachable_fraction || 0) * 100).toFixed(1)}% reachable
-            </span>
-          </div>
-          <div className="legend-gradient-bar" />
-          <div className="legend-labels">
-            <span>0m (Safe Hab)</span>
-            <span>≤ {response.return_zone.threshold_minutes || 30}m threshold</span>
-            <span>&gt; {response.return_zone.threshold_minutes || 30}m (Excess)</span>
-          </div>
-          <div style={{ fontSize: '9.5px', color: '#889b91', marginTop: '2px' }}>
-            Unreachable / NoData: 100% transparent alpha mask
           </div>
         </div>
       )}
