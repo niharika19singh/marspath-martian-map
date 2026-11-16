@@ -2216,10 +2216,20 @@
 }
 
 /* Multi-Resolution Planetary GIS Imagery Harmonization */
+.ol-layer-viking canvas {
+  transition: filter 0.25s ease;
+  filter: grayscale(var(--viking-gray, 100%)) contrast(calc(1 + var(--viking-gray-num, 1) * 0.16)) brightness(calc(1 - var(--viking-gray-num, 1) * 0.04));
+}
+
+.ol-layer-mola canvas {
+  transition: filter 0.25s ease;
+  filter: grayscale(var(--viking-gray, 100%)) contrast(1.10) brightness(0.96);
+}
+
 .ol-layer-ctx canvas,
 .ol-layer-hirise canvas {
   transition: opacity 0.35s ease-in-out;
-  filter: contrast(1.05) brightness(0.97) sepia(0.12) hue-rotate(-12deg);
+  filter: contrast(1.05) brightness(0.97) sepia(0.08) hue-rotate(-10deg);
 }
 
 /* ==========================================================================

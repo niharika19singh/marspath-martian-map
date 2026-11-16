@@ -68,8 +68,11 @@ export function SurfacePovViewer({ inspectCoord, onClose }) {
               className="pov-full-img"
               loading="lazy"
               onError={(e) => {
-                // Fallback to thumbnail or placeholder if external JPL network is throttled
-                e.target.src = activeImage.thumbnail_url;
+                if (activeImage.external_fallback_url && e.target.src !== activeImage.external_fallback_url) {
+                  e.target.src = activeImage.external_fallback_url;
+                } else if (activeImage.thumbnail_url && e.target.src !== activeImage.thumbnail_url) {
+                  e.target.src = activeImage.thumbnail_url;
+                }
               }}
             />
             <div className="pov-img-overlay-info">

@@ -15,6 +15,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'ol/ol.css';
 import './style.css';
+import './visor.css';
 import MapView from './MapView.jsx';
 import Profile from './Profile.jsx';
 import { exportGeoJSON, exportCSV, exportJSON, exportMissionBriefMarkdown, exportMissionConfigJSON, exportPDF } from './export.js';

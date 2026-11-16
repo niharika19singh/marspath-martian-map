@@ -233,6 +233,7 @@ export default function MapView(props) {
 
     // 1. Global Mars Basemap: NASA Mars Trek Viking MDIM 2.1 Color Mosaic (232 m/px)
     const wmtsVikingGlobal = new TileLayer({
+      className: 'ol-layer-viking',
       source: createOpenLayersWMTSSource(vikingCap, recordTileOk('viking'), recordTileErr('viking')),
       zIndex: 0,
       opacity: 1.0,
@@ -241,6 +242,7 @@ export default function MapView(props) {
 
     // 1b. Global Terrain Relief Basemap: USGS MOLA-HRSC Color Hillshade (200 m/px)
     const wmtsMolaTerrain = new TileLayer({
+      className: 'ol-layer-mola',
       source: createOpenLayersWMTSSource(molaCap, recordTileOk('mola'), recordTileErr('mola')),
       zIndex: 1,
       visible: false,
@@ -326,11 +328,11 @@ export default function MapView(props) {
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
     const historyLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
     const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
-    const historyPins = new VectorLayer({ source: new VectorSource(), zIndex: 17 });
-    const scienceTargetsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 19 });
+    const historyPins = new VectorLayer({ source: new VectorSource(), zIndex: 17, declutter: true });
+    const scienceTargetsLayer = new VectorLayer({ source: new VectorSource(), zIndex: 19, declutter: true });
     const routes = new VectorLayer({ source: new VectorSource(), zIndex: 20 });
-    const pins = new VectorLayer({ source: new VectorSource(), zIndex: 22 });
-    const turnaroundLayer = new VectorLayer({ source: new VectorSource(), zIndex: 23 });
+    const pins = new VectorLayer({ source: new VectorSource(), zIndex: 22, declutter: true });
+    const turnaroundLayer = new VectorLayer({ source: new VectorSource(), zIndex: 23, declutter: true });
     const hoverLayer = new VectorLayer({ source: new VectorSource(), zIndex: 24 });
     const roverReplayLayer = new VectorLayer({ source: new VectorSource(), zIndex: 25 });
     const spacecraftLayer = new VectorLayer({ source: new VectorSource(), zIndex: 26 });
@@ -517,6 +519,23 @@ export default function MapView(props) {
         centerLon: c ? c[0] : 77.425,
         centerLat: c ? c[1] : 18.408,
       });
+
+      // Dynamic Planetary Grayscale Harmonization:
+      // When zoomed out at global planet scale (resM >= 7500 m/px), Mars keeps its natural tone.
+      // As the user zooms in (resM <= 2500 m/px), the red basemap smoothly turns into uniform
+      // high-resolution grayscale matching USGS CTX and HiRISE orthomosaics across Mars.
+      if (node.current) {
+        let gray = 1.0;
+        if (resM <= 2500) {
+          gray = 1.0;
+        } else if (resM >= 7500) {
+          gray = 0.0;
+        } else {
+          gray = (7500 - resM) / 5000;
+        }
+        node.current.style.setProperty('--viking-gray', `${Math.round(gray * 100)}%`);
+        node.current.style.setProperty('--viking-gray-num', gray.toFixed(3));
+      }
     };
     map.getView().on('change:resolution', syncViewState);
     map.getView().on('change:center', syncViewState);
@@ -807,7 +826,7 @@ export default function MapView(props) {
             fill: new Fill({ color: '#ffd166' }),
             stroke: new Stroke({ color: '#141008', width: 1.8 }),
           }),
-          text: resM > 400 ? undefined : new Text({
+          text: resM > 90 ? undefined : new Text({
             text: `★ ${tgt.name} (${tgt.science_value_points} pts)`,
             font: '500 10px Inter, sans-serif',
             offsetY: 14,
@@ -840,7 +859,7 @@ export default function MapView(props) {
         new Style({ image: new CircleStyle({ radius: resM > 400 ? 10 : 16, stroke: new Stroke({ color: 'rgba(255,184,103,0.45)', width: 2, lineDash: [4, 4] }) }) }),
         new Style({
           image: new CircleStyle({ radius: resM > 400 ? 5 : 7.5, fill: new Fill({ color: '#ffb867' }), stroke: new Stroke({ color: '#181209', width: 2 }) }),
-          text: resM > 400 ? undefined : new Text({
+          text: resM > 90 ? undefined : new Text({
             text: `Perseverance Replay · ${statusLabel}`,
             font: '600 11px Inter, sans-serif',
             offsetY: -20,

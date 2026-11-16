@@ -13,6 +13,7 @@
  */
 
 import { M_PER_DEG } from './terrain.js';
+import { getAssetUrl } from './integration.js';
 
 // Base habitat coordinates (Octavia E. Butler Base in Jezero Crater)
 export const HABITAT_BASE_COORD = {
@@ -611,6 +612,8 @@ export const AUTHENTIC_NASA_SURFACE_IMAGERY = {
     title: 'Perseverance 360-Degree Panorama at Octavia E. Butler Landing',
     sourceUrl: 'https://photojournal.jpl.nasa.gov/catalog/PIA24424',
     imageUrl: 'https://photojournal.jpl.nasa.gov/jpeg/PIA24424.jpg',
+    localUrl: getAssetUrl('/mission-data/pov/octavia_butler_landing.jpg'),
+    fallbackUrl: 'https://upload.wikimedia.org/wikipedia/commons/3/35/PIA24483-MarsPerseveranceRover-OctaviaEButler-LandingSite-20210305.jpg',
     instrument: 'Mastcam-Z / Navcam',
     sol: 4,
     acquisitionDateUtc: '2021-02-22T19:35:00Z',
@@ -625,6 +628,8 @@ export const AUTHENTIC_NASA_SURFACE_IMAGERY = {
     title: 'SuperCam Remote Micro-Imager View of Kodiak Mesa Topsets & Foresets',
     sourceUrl: 'https://photojournal.jpl.nasa.gov/catalog/PIA24838',
     imageUrl: 'https://photojournal.jpl.nasa.gov/jpeg/PIA24838.jpg',
+    localUrl: getAssetUrl('/mission-data/pov/kodiak_butte.jpg'),
+    fallbackUrl: 'https://upload.wikimedia.org/wikipedia/commons/9/9e/Kodiak_-_SuperCam_-_Sol_63_%2853544000797%29.jpg',
     instrument: 'SuperCam RMI / Mastcam-Z',
     sol: 78,
     acquisitionDateUtc: '2021-05-10T14:12:00Z',
@@ -639,6 +644,8 @@ export const AUTHENTIC_NASA_SURFACE_IMAGERY = {
     title: 'Perseverance View of Hawksbill Gap Delta Scarp & Layered Siltstones',
     sourceUrl: 'https://photojournal.jpl.nasa.gov/catalog/PIA25325',
     imageUrl: 'https://photojournal.jpl.nasa.gov/jpeg/PIA25325.jpg',
+    localUrl: getAssetUrl('/mission-data/pov/hawksbill_gap.jpg'),
+    fallbackUrl: 'https://upload.wikimedia.org/wikipedia/commons/3/3d/PIA25212_Expanse_of_Jezero_Crater%E2%80%99s_river_delta_on_April_11%2C_2022_-_sol_406_-_26676-web.jpg',
     instrument: 'Mastcam-Z Dual Color Camera',
     sol: 482,
     acquisitionDateUtc: '2022-06-29T10:04:00Z',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import './visor.css';
 import Icon from './Icons.jsx';
 import {
   HABITAT_BASE_COORD,
