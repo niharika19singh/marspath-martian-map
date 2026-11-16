@@ -343,10 +343,13 @@ export default function MapView(props) {
     const demBoundaryLayer = new VectorLayer({ source: new VectorSource(), zIndex: 13.5, visible: false });
     const returnZoneLayer = new ImageLayer({ zIndex: 13.8, visible: false, opacity: 0.78 });
     const rescueZoneLayer = new ImageLayer({ zIndex: 13.9, visible: false, opacity: 0.78 });
+    const roverEnvelopeLayer = new ImageLayer({ zIndex: 13.7, visible: false, opacity: 0.72 });
+    const walkbackEnvelopeLayer = new ImageLayer({ zIndex: 13.85, visible: false, opacity: 0.75 });
     const risk = new ImageLayer({ zIndex: 14, visible: false });
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
     const walkBackEnvelopesLayer = new VectorLayer({ source: new VectorSource(), zIndex: 14.7, visible: Boolean(props.showWalkBackEnvelopes ?? true) });
     const planetaryProtectionLayer = new VectorLayer({ source: new VectorSource(), zIndex: 14.9, visible: Boolean(props.showPlanetaryProtection ?? true) });
+    const habitatMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 22.5 });
     const passiveTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
     const highlightedTraverseLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16 });
     const curiosityLayer = new VectorLayer({ source: new VectorSource(), zIndex: 16.5 });
@@ -404,7 +407,6 @@ export default function MapView(props) {
         rescueZoneLayer,
         roverEnvelopeLayer,
         walkbackEnvelopeLayer,
-        planetaryProtectionLayer,
         themisLayer,
         footprintsLayer,
         groundTracksLayer,
@@ -514,6 +516,9 @@ export default function MapView(props) {
       demBoundaryLayer,
       returnZoneLayer,
       rescueZoneLayer,
+      roverEnvelopeLayer,
+      walkbackEnvelopeLayer,
+      habitatMarkerLayer,
       themisLayer,
       footprintsLayer,
       groundTracksLayer,
@@ -970,7 +975,8 @@ export default function MapView(props) {
       src.addFeature(f);
 
       // Highlight route breach if route intersects planetary protection geofence buffer
-      const ppAssessment = r.planetary_protection_assessment || (primary ? response?.planetary_protection : null);
+      const isPrimary = r.score_rank === 1 || r.route_id === response?.routes?.[0]?.route_id;
+      const ppAssessment = r.planetary_protection_assessment || (isPrimary ? response?.planetary_protection : null);
       if (ppAssessment && ppAssessment.intersected_regions && ppAssessment.intersected_regions.length > 0) {
         const breachLine = new Feature({ geometry: line.clone(), routeId: r.route_id });
         breachLine.setStyle(new Style({
