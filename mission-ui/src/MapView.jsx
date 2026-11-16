@@ -323,7 +323,7 @@ export default function MapView(props) {
     const roverEnvelopeLayer = new ImageLayer({ zIndex: 13.7, visible: false, opacity: 0.72 });
     const walkbackEnvelopeLayer = new ImageLayer({ zIndex: 13.85, visible: false, opacity: 0.75 });
     const planetaryProtectionLayer = new VectorLayer({ source: new VectorSource(), zIndex: 18 });
-    const habitatMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 22.5 });
+    const habitatMarkerLayer = new VectorLayer({ source: new VectorSource(), zIndex: 22.5, declutter: true });
     const risk = new ImageLayer({ zIndex: 14, visible: false });
     const data = new ImageLayer({ zIndex: 14.5, visible: false });
     const historyLayer = new VectorLayer({ source: new VectorSource(), zIndex: 15 });
@@ -458,8 +458,8 @@ export default function MapView(props) {
       });
     };
 
-    applyEdgeFeathering(wmtsCtxRegional, ctxExtent, 64);
-    applyEdgeFeathering(wmtsHiriseLocal, hiriseOrthoExtent, 48);
+    applyEdgeFeathering(wmtsCtxRegional, ctxExtent, 18);
+    applyEdgeFeathering(wmtsHiriseLocal, hiriseOrthoExtent, 18);
 
     const element = document.createElement('div');
     element.className = 'route-midpoint glass';
@@ -521,20 +521,11 @@ export default function MapView(props) {
       });
 
       // Dynamic Planetary Grayscale Harmonization:
-      // When zoomed out at global planet scale (resM >= 7500 m/px), Mars keeps its natural tone.
-      // As the user zooms in (resM <= 2500 m/px), the red basemap smoothly turns into uniform
-      // high-resolution grayscale matching USGS CTX and HiRISE orthomosaics across Mars.
+      // Mars is kept in consistent, crisp scientific grayscale across the entire planet,
+      // matching USGS MOLA-HRSC shaded relief, CTX, and HiRISE orthomosaics.
       if (node.current) {
-        let gray = 1.0;
-        if (resM <= 2500) {
-          gray = 1.0;
-        } else if (resM >= 7500) {
-          gray = 0.0;
-        } else {
-          gray = (7500 - resM) / 5000;
-        }
-        node.current.style.setProperty('--viking-gray', `${Math.round(gray * 100)}%`);
-        node.current.style.setProperty('--viking-gray-num', gray.toFixed(3));
+        node.current.style.setProperty('--viking-gray', '100%');
+        node.current.style.setProperty('--viking-gray-num', '1.0');
       }
     };
     map.getView().on('change:resolution', syncViewState);
@@ -702,9 +693,9 @@ export default function MapView(props) {
     l.wmtsVikingGlobal?.setOpacity(effVikingOpacity);
 
     // 1b. Global MOLA-HRSC 200 m Color Hillshade
-    const molaVisible = Boolean(showMolaTerrain || isRelief);
+    const molaVisible = Boolean(showMolaTerrain || isRelief || isAuto);
     l.wmtsMolaTerrain?.setVisible(molaVisible);
-    l.wmtsMolaTerrain?.setOpacity(molaOpacity);
+    l.wmtsMolaTerrain?.setOpacity(molaOpacity ?? 0.82);
 
     // 2. Regional CTX (6 m/px)
     const ctxVisible = Boolean(showCtx && (isAuto || isCtx || isHirise || !isViking));
@@ -822,11 +813,11 @@ export default function MapView(props) {
         const resM = resolution * M_PER_DEG;
         return new Style({
           image: new CircleStyle({
-            radius: resM > 400 ? 3.5 : 5.5,
+            radius: resM > 60 ? 3.5 : 5.5,
             fill: new Fill({ color: '#ffd166' }),
             stroke: new Stroke({ color: '#141008', width: 1.8 }),
           }),
-          text: resM > 90 ? undefined : new Text({
+          text: resM > 25 ? undefined : new Text({
             text: `★ ${tgt.name} (${tgt.science_value_points} pts)`,
             font: '500 10px Inter, sans-serif',
             offsetY: 14,
@@ -941,12 +932,12 @@ export default function MapView(props) {
     layers.current.routes.changed();
     layers.current.pins.changed();
     const route = response?.routes.find(r => r.route_id === selected) || response?.routes[0];
-    if (route && showRoute && !view3d) {
+    if (route && showRoute && !view3d && !historyMode) {
       const line = new LineString(route.geometry.coordinates.map(c => [c[0], c[1]]));
       midLabel.current.getElement().textContent = (route.summary.total_distance_meters / 1000).toFixed(2) + ' km · ' + (Number.isFinite(route.summary.estimated_duration_hours) ? route.summary.estimated_duration_hours.toFixed(1) + ' h' : 'ETA unavailable');
       midLabel.current.setPosition(line.getCoordinateAt(0.5));
     } else midLabel.current?.setPosition(undefined);
-  }, [terrain, response, selected, showRoute, showAlternatives, hoveredRoute, view3d]);
+  }, [terrain, response, selected, showRoute, showAlternatives, hoveredRoute, view3d, historyMode]);
 
   const activeRoute = response?.routes?.find(r => r.route_id === selected) || response?.routes?.[0] || (response?.geometry ? response : null);
 
@@ -989,7 +980,7 @@ export default function MapView(props) {
     if (turnSrc) {
       turnSrc.clear();
       const ta = activeRoute?.turnaround;
-      if (showRoute && ta?.turnaround_coord && Number.isFinite(ta.turnaround_coord[0]) && Number.isFinite(ta.turnaround_coord[1])) {
+      if (!historyMode && showRoute && ta?.turnaround_coord && Number.isFinite(ta.turnaround_coord[0]) && Number.isFinite(ta.turnaround_coord[1])) {
         const tf = new Feature({
           geometry: new Point([ta.turnaround_coord[0], ta.turnaround_coord[1]]),
           turnaround: ta,
@@ -997,22 +988,23 @@ export default function MapView(props) {
         const labelTxt = ta.feasible_before_sunset
           ? `Turnaround · ${ta.turnaround_ltst_hms || ta.turnaround_utc}`
           : `No Daylight Window · ${ta.limiting_constraint || 'dark'}`;
-        tf.setStyle(
-          new Style({
+        tf.setStyle((feature, resolution) => {
+          const resM = resolution * M_PER_DEG;
+          return new Style({
             image: new CircleStyle({
               radius: 9,
               fill: new Fill({ color: ta.feasible_before_sunset ? '#ffb867' : '#ff6b6b' }),
               stroke: new Stroke({ color: '#14110b', width: 2.5 }),
             }),
-            text: new Text({
+            text: resM > 35 ? undefined : new Text({
               text: labelTxt,
               font: '600 11px Inter, sans-serif',
               offsetY: 22,
               fill: new Fill({ color: ta.feasible_before_sunset ? '#ffe3b3' : '#ffb8b8' }),
               stroke: new Stroke({ color: '#090d11', width: 3.5 }),
             }),
-          })
-        );
+          });
+        });
         turnSrc.addFeature(tf);
       }
     }
@@ -1102,23 +1094,26 @@ export default function MapView(props) {
           geometry: new Point([habLon, habLat]),
           name: 'Base Habitat Alpha',
         });
-        habFeature.setStyle(new Style({
-          image: new RegularShape({
-            fill: new Fill({ color: '#00e676' }),
-            stroke: new Stroke({ color: '#090d11', width: 2.5 }),
-            points: 5,
-            radius: 12,
-            radius2: 6,
-            angle: 0,
-          }),
-          text: new Text({
-            text: 'HABITAT BASE',
-            font: '700 11px Inter, sans-serif',
-            offsetY: -18,
-            fill: new Fill({ color: '#86efac' }),
-            stroke: new Stroke({ color: '#090d11', width: 3.5 }),
-          }),
-        }));
+        habFeature.setStyle((feature, resolution) => {
+          const resM = resolution * M_PER_DEG;
+          return new Style({
+            image: new RegularShape({
+              fill: new Fill({ color: '#00e676' }),
+              stroke: new Stroke({ color: '#090d11', width: 2.5 }),
+              points: 5,
+              radius: 12,
+              radius2: 6,
+              angle: 0,
+            }),
+            text: resM > 50 ? undefined : new Text({
+              text: 'HABITAT BASE',
+              font: '700 11px Inter, sans-serif',
+              offsetY: -18,
+              fill: new Fill({ color: '#86efac' }),
+              stroke: new Stroke({ color: '#090d11', width: 3.5 }),
+            }),
+          });
+        });
         habSrc.addFeature(habFeature);
       }
     }
